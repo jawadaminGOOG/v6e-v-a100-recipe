@@ -21,6 +21,11 @@ Before executing any shell commands, you MUST ask the user these clarifying ques
     *   *Option B: Public Dataset* (e.g. `ShareGPT` - script will auto-download).
     *   *Option C: Native vLLM Benchmarks* (will execute vLLM's repository scripts).
 5.  **Model Hugging Face ID** (e.g., `Qwen/Qwen3-1.7B-Base`).
+6.  **Hardware Provisioning Method:**
+    *   *Option A: Existing VM* (Specify host IP/Name).
+    *   *Option B: DWS Reservation* (Specify Reservation ID).
+    *   *Option C: Create DWS Flex Request*.
+7.  **Target Hardware Platform:** TPU (v6e-1t) vs. GPU (A100-80GB-SXM).
 
 ---
 
