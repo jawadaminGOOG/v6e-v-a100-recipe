@@ -1,3 +1,8 @@
+---
+name: model_hardware_benchmarker
+description: Benchmark LLMs on TPU and GPU platforms, apply GKE resource caps, and compare measured vs. theoretical performance.
+---
+
 # Benchmarking Recipe: Model Hardware Benchmarker
 
 This document guides any AI agent (Jetski, Claude Code, Cursor, Copilot) or human engineer through benchmarking an LLM on TPU and GPU platforms, applying GKE resource caps, and comparing measured vs. theoretical performance.
