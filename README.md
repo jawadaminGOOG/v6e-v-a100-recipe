@@ -231,7 +231,7 @@ The tables below show scaling from Concurrency 100 to 250.
 2.  **FP8 Model Verbosity:** The `Qwen3-1.7B-FP8` model consistently hit the `max_tokens=16` limit on both devices, generating 45% more tokens than the base model. This artificially lowered the RPS metrics.
 3.  **Token Throughput (TPS) Comparison:** 
     *   TPU FP8 shows a **7.8%** improvement in total token throughput over BF16.
-    *   GPU FP8 shows a **22.3%** improvement over FP16, despite A100 dequantizing weights to FP16 at runtime.
+    *   GPU FP8 shows a **22.2%** improvement over FP16, despite A100 dequantizing weights to FP16 at runtime.
 
 ---
 
