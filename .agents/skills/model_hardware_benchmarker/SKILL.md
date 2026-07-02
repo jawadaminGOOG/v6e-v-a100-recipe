@@ -72,6 +72,17 @@ At the end of your plan, output this exact prompt:
 
 ---
 
+### Step 7: Peer Review & Deprovisioning Phase
+Before deprovisioning any VM instance or removing Docker containers, you MUST perform a thorough peer review of the run metrics. Follow these steps strictly:
+1.  **Archive Server Logs:** Explicitly dump the served container logs to a file (e.g. `docker logs <container_name> > server_run.log`) and copy them back to the host/local workspace.
+2.  **Confirm Request Success:** Verify that there were no silent errors in the client or server logs (e.g. 404s, connection drops, model mismatches). Ensure `Total Successful Requests` matches the total expected messages.
+3.  **Review Startup Parameters:** Inspect the startup logs to verify GKE emulation limits (CPU, Memory caps) were enforced and correct attention kernels/devices were selected.
+4.  **Confirm Results Retrieval:** Verify all resulting `.xlsx` or `.csv` files are successfully copied locally.
+5.  **Audit VM Health:** Review the CPU/memory footprint of the container and host VM, ensuring no memory leaks or unexpected hardware throttling occurred.
+6.  **Deprovision VM:** Only delete the VM instance after confirming all of the above artifacts are saved and the user is notified.
+
+---
+
 ## Rule: Code Modification & Extensibility
 As an AI agent, you are fully authorized to modify or rewrite the scripts under `scripts/` (e.g., `forecast.py`, `benchmark.py`, `analyze.py`) if:
 *   The user requests a custom metric (like prompt token throughput vs generation token throughput).

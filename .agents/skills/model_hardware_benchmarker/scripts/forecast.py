@@ -22,6 +22,15 @@ HARDWARE_SPECS = {
             "fp16": 3.12e14,
             "fp8": 3.12e14,  # Standard A100 lacks native FP8 cores; computes in FP16
         }
+    },
+    "G4-RTX-PRO-6000": {
+        "name": "NVIDIA RTX PRO 6000 Blackwell (G4)",
+        "hbm_bandwidth_bytes": 1.792e12, # 1.792 TB/s
+        "peak_flops": {
+            "bf16": 4.68e14, # 468 TFLOPs
+            "fp16": 4.68e14,
+            "fp8": 9.36e14,  # 936 TFLOPs
+        }
     }
 }
 
