@@ -1,6 +1,6 @@
-# vLLM Benchmarking Recipes: TPU v6e vs GPU A100
+# vLLM Benchmarking Recipes: TPU v6e vs GPU A100 vs GPU G4 (Blackwell)
 
-This document contains recipes for benchmarking vLLM on Google Cloud TPUs (v6e) and GPUs (A100-80GB), strictly adhering to resource limits and precision configurations.
+This document contains recipes for benchmarking vLLM on Google Cloud TPUs (v6e), GPU A100-80GB, and GPU G4 (RTX PRO 6000 Blackwell), strictly adhering to resource limits and precision configurations.
 
 ---
 
