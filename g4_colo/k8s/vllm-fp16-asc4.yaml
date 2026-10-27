@@ -1,0 +1,41 @@
+# vLLM server constrained to the AWS g7e.2xlarge shape: 8 vCPU / 64 GiB, 1 GPU.
+# Guaranteed QoS + integer CPU => static CPU manager assigns an exclusive cpuset.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm
+  namespace: colo
+  labels: {app: vllm}
+spec:
+  nodeSelector: {role: g4colo}
+  tolerations:
+  - {key: role, operator: Equal, value: g4colo, effect: NoSchedule}
+  - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+  containers:
+  - name: vllm
+    image: vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
+    args:
+    - --model=Qwen/Qwen3-1.7B-Base
+    - --port=8000
+    - --max-model-len=4096
+    - --gpu-memory-utilization=0.9
+    - --enable-prefix-caching
+    - --tensor-parallel-size=1
+    - --api-server-count=4
+    env:
+    - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+    - {name: HF_HOME, value: /hf}
+    ports: [{containerPort: 8000}]
+    resources:
+      requests: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
+      limits: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
+    readinessProbe:
+      httpGet: {path: /health, port: 8000}
+      periodSeconds: 5
+      failureThreshold: 360
+    volumeMounts:
+    - {name: hf, mountPath: /hf}
+    - {name: shm, mountPath: /dev/shm}
+  volumes:
+  - {name: hf, hostPath: {path: /var/lib/g4colo/hf, type: DirectoryOrCreate}}
+  - {name: shm, emptyDir: {medium: Memory, sizeLimit: 8Gi}}

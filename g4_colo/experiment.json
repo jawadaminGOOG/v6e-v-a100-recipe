@@ -1,66 +1,38 @@
 {
   "model": "Qwen/Qwen3-1.7B-Base",
   "levels": [
-    10,
     20,
-    32,
-    36,
     38
   ],
   "level_names": {
-    "10": "25%",
-    "20": "50%",
-    "32": "80%",
-    "36": "90%",
-    "38": "100% (all allocatable whole cores)"
+    "20": "50% (light colo)",
+    "38": "95% of spare = all allocatable whole cores (full colo)"
   },
   "spec_mem_gi": {
-    "10": 29,
     "20": 58,
-    "32": 93,
-    "36": 100,
     "38": 100
   },
-  "open_loop_rate": 540,
+  "open_loop_rate": 625,
   "warmup_s": 60,
   "window_s": 600,
   "tail_s": 30,
   "spec_est_s": 1100,
   "spec_margin_s": 120,
   "cooldown_s": 60,
-  "capacity_rps_closed_c250": 725.8,
-  "aws_shape_control": {
-    "orig_client_c250_rps": {
-      "8vcpu": [
-        728.1,
-        723.8
-      ],
-      "40vcpu": [
-        739.3,
-        737.5
-      ]
-    },
-    "streaming_closed_c250_rps": {
-      "8vcpu": 725.8,
-      "40vcpu": 732.0
-    }
-  },
   "arms": {
-    "A": [
-      10,
+    "default": [
       20,
-      32,
-      36,
       38
-    ],
-    "B": [
-      10,
-      20,
-      32
     ]
   },
-  "arm_desc": {
-    "A": "default kubelet placement (SPEC may share vLLM's L3 domain, CCX0 cores 5-7)",
-    "B": "L3-fenced: idle Guaranteed pod holds CCX0 cores 5-7 (cpus 5-7,29-31); SPEC only on CCX1/CCX2"
-  }
+  "vllm_extra_args": [
+    "--api-server-count=4"
+  ],
+  "capacity_rps_closed": {
+    "c250": 751.5,
+    "c500": 836.3,
+    "c750": 828.6,
+    "c1000": 831.2
+  },
+  "capacity_rps": 832
 }

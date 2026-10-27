@@ -25,6 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RESULTS = ROOT / "results"
+VARIANT = __import__("os").environ.get("COLO_VARIANT", "")   # e.g. "asc4": separate cells dir
 NS = "colo"
 CLIENTS = ["client-0", "client-1"]
 PROCS_PER_CLIENT = 3
@@ -237,8 +238,9 @@ def ensure_fence(arm: str):
 
 # ---------------------------------------------------------------- cells
 def run_cell(kind: str, level: int, rep: int, arm: str = "A") -> dict:
-    cell = f"vllm_solo-r{rep}" if kind == "vllm_solo" else f"{kind}-{arm}-L{level}-r{rep}"
-    outdir = RESULTS / "cells" / cell
+    tag = f"-{arm}" if len(CFG["arms"]) > 1 else ""
+    cell = f"vllm_solo-r{rep}" if kind == "vllm_solo" else f"{kind}{tag}-L{level}-r{rep}"
+    outdir = RESULTS / ("cells" + (f"-{VARIANT}" if VARIANT else "")) / cell
     if (outdir / "DONE").exists():
         log(f"skip {cell} (done)")
         return json.loads((outdir / "DONE").read_text())
@@ -312,7 +314,7 @@ def main():
     c.add_argument("--kind", required=True, choices=["vllm_solo", "colo", "spec_solo"])
     c.add_argument("--level", type=int, default=0)
     c.add_argument("--rep", type=int, default=0)
-    c.add_argument("--arm", default="A", choices=["A", "B"])
+    c.add_argument("--arm", default="A")
     m = sub.add_parser("matrix")
     m.add_argument("--reps", type=int, default=5)
     m.add_argument("--seed", type=int, default=20261027)

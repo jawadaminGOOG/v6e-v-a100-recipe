@@ -1,0 +1,7 @@
+NAME                 READY   STATUS    RESTARTS   AGE    IP           NODE                                                  NOMINATED NODE   READINESS GATES
+client-0             1/1     Running   0          108m   10.76.3.4    gke-g4cluster-jawada-clientpool-jawad-27b9f9d8-36fs   <none>           <none>
+client-1             1/1     Running   0          107m   10.76.2.4    gke-g4cluster-jawada-clientpool-jawad-27b9f9d8-b36k   <none>           <none>
+l3fence              1/1     Running   0          13s    10.76.4.14   gke-g4cluster-jawada-g4pool-jawadamin-8cc9fdcb-x41h   <none>           <none>
+spec-colo-b-l32-r1   1/1     Running   0          3s     10.76.4.15   gke-g4cluster-jawada-g4pool-jawadamin-8cc9fdcb-x41h   <none>           <none>
+telemetry            1/1     Running   0          109m   10.76.4.4    gke-g4cluster-jawada-g4pool-jawadamin-8cc9fdcb-x41h   <none>           <none>
+vllm                 1/1     Running   0          59m    10.76.4.11   gke-g4cluster-jawada-g4pool-jawadamin-8cc9fdcb-x41h   <none>           <none>

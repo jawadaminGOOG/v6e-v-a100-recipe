@@ -1,0 +1,12 @@
+[17:38:51] [1/85]
+[17:38:51] === cell colo-B-L32-r1
+[18:00:55] === done colo-B-L32-r1 in 1324s
+[18:01:55] [2/85]
+[18:01:55] === cell colo-A-L38-r1
+[18:25:26] === done colo-A-L38-r1 in 1411s
+[18:26:26] [3/85]
+[18:26:26] === cell spec_solo-A-L32-r1
+[18:43:36] === done spec_solo-A-L32-r1 in 1030s
+[18:44:36] [4/85]
+[18:44:36] === cell spec_solo-B-L32-r1
+[19:02:53] === done spec_solo-B-L32-r1 in 1096s
