@@ -96,7 +96,7 @@ ax.text(0.5, 0.142, "1 × NVIDIA RTX PRO 6000 Blackwell Server Edition · 96 GB"
 # how it is used
 card(ax, 0.045, 0.035, 0.91, 0.09)
 ax.text(0.07, 0.097, "How this experiment uses it", fontsize=14, weight="bold", color=INK)
-items = [(ACC, "GPU workload", "4 cores (8 vCPU) · 64 GB · GPU 0 = AWS g7e.2xlarge shape"),
+items = [(ACC, "GPU workload", "4 cores (8 vCPU) · 64 GB · GPU 0"),
          (SPEC, "Co-located CPU work", "up to 19 cores (38 vCPU)"),
          (SYS, "System (Kubernetes)", "1 core (2 vCPU)")]
 xs = [0.07, 0.50, 0.75]
