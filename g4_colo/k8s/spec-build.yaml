@@ -1,0 +1,45 @@
+# One-off: install SPEC CPU 2026 v1.0.1 from the ISO and build the 16 benchmarks
+# into a node-local hostPath reused by every SPEC run pod.
+apiVersion: v1
+kind: Pod
+metadata: {name: spec-build, namespace: colo}
+spec:
+  restartPolicy: Never
+  nodeSelector: {role: g4colo}
+  tolerations:
+  - {key: role, operator: Equal, value: g4colo, effect: NoSchedule}
+  - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+  containers:
+  - name: b
+    image: ubuntu:24.04
+    resources:
+      requests: {cpu: "38", memory: 90Gi}
+      limits: {cpu: "38", memory: 90Gi}
+    command: ["bash", "-lc"]
+    args:
+    - |
+      set -euxo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get -qq update && apt-get -qq install -y gcc-14 g++-14 gfortran-14 make libarchive-tools curl ca-certificates python3 >/dev/null
+      for t in gcc g++ gfortran; do ln -sf /usr/bin/$t-14 /usr/local/bin/$t; done
+      cd /work
+      if [ ! -x /work/spec/bin/runcpu ]; then
+        TOKEN=$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+        curl -sfL -H "Authorization: Bearer $TOKEN" -o /work/cpu2026.iso "https://storage.googleapis.com/storage/v1/b/bucket-jawadamin-us-west8-1026/o/spec%2Fcpu2026-1.0.1.iso?alt=media"
+        sha256sum /work/cpu2026.iso | tee /work/iso.sha256
+        mkdir -p /work/iso && bsdtar -xf /work/cpu2026.iso -C /work/iso && rm /work/cpu2026.iso
+        chmod -R u+rwX /work/iso
+        cd /work/iso && echo yes | ./install.sh -d /work/spec -f
+        rm -rf /work/iso
+      fi
+      cp /cfg/g4colo.cfg /work/spec/config/g4colo.cfg
+      cd /work/spec && source shrc
+      runcpu --config=g4colo --action=build --define gcc_dir=/usr/local --define build_ncpus=38 $(cat /cfg/benchmarks.txt) 2>&1 | tail -60
+      ls benchspec/CPU/*/exe/ | head -80
+      echo BUILD_DONE
+    volumeMounts:
+    - {name: work, mountPath: /work}
+    - {name: cfg, mountPath: /cfg}
+  volumes:
+  - {name: work, hostPath: {path: /var/lib/g4colo, type: DirectoryOrCreate}}
+  - {name: cfg, configMap: {name: spec-cfg}}

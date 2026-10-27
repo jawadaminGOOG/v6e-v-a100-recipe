@@ -1,0 +1,30 @@
+# Node telemetry pod: shared CPU pool (Burstable), hostPID, read-only host views.
+# Samples /proc/stat per-CPU, /proc/meminfo, nvidia-smi at 1 s and reads the
+# kubelet CPU manager state so every run records the actual cpusets.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: telemetry
+  namespace: colo
+spec:
+  nodeSelector: {role: g4colo}
+  tolerations:
+  - {key: role, operator: Equal, value: g4colo, effect: NoSchedule}
+  - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+  hostPID: true
+  containers:
+  - name: t
+    image: ubuntu:24.04
+    command: ["sleep", "infinity"]
+    securityContext: {privileged: true}
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 2Gi}
+    env:
+    - {name: LD_LIBRARY_PATH, value: /usr/local/nvidia/lib64}
+    volumeMounts:
+    - {name: host, mountPath: /host, readOnly: true}
+    - {name: nvidia, mountPath: /usr/local/nvidia, readOnly: true}
+  volumes:
+  - {name: host, hostPath: {path: /}}
+  - {name: nvidia, hostPath: {path: /home/kubernetes/bin/nvidia}}

@@ -1,0 +1,24 @@
+# Load-generator pods, one per client node (anti-affinity), never on the G4 node.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: client, namespace: colo}
+spec:
+  serviceName: client
+  replicas: 2
+  selector: {matchLabels: {app: client}}
+  template:
+    metadata: {labels: {app: client}}
+    spec:
+      nodeSelector: {role: client}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {matchLabels: {app: client}}
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: c
+        image: python:3.12-slim
+        command: ["bash", "-c", "pip install -q pandas openpyxl transformers tqdm aiohttp numpy jinja2 && touch /tmp/ready && sleep infinity"]
+        readinessProbe: {exec: {command: [test, -f, /tmp/ready]}, periodSeconds: 5}
+        resources:
+          requests: {cpu: "7", memory: 20Gi}

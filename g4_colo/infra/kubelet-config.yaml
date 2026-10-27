@@ -1,0 +1,5 @@
+kubeletConfig:
+  cpuManagerPolicy: static
+  topologyManager:
+    policy: best-effort
+    scope: container
