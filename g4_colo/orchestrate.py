@@ -246,8 +246,7 @@ def run_cell(kind: str, level: int, rep: int, arm: str = "A") -> dict:
     log(f"=== cell {cell}")
     meta = {"cell": cell, "kind": kind, "arm": arm if kind != "vllm_solo" else "-", "level": level,
             "rep": rep, "t_begin": time.time()}
-    if kind != "vllm_solo":
-        ensure_fence(arm)
+    ensure_fence(arm if kind != "vllm_solo" else "A")   # solo cells: node holds only vLLM
     warm, win, tail = CFG["warmup_s"], CFG["window_s"], CFG["tail_s"]
     spec_name = f"spec-{cell}".lower().replace("_", "-")
 
