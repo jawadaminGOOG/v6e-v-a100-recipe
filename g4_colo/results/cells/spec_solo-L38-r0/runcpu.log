@@ -1,0 +1,402 @@
+SPEC CPU 2026 Benchmark Suites
+Copyright 1995-2026 Standard Performance Evaluation Corporation (SPEC)
+
+runcpu (9ba4d1e3)
+Using 'linux-x86_64' tools
+Reading file manifests... read 64967 entries from 2 files in 0.09s (698525 files/s)
+Loading runcpu modules.................
+Locating benchmarks...found 54 benchmarks in 82 benchsets.
+Reading config file '/work/spec/config/g4colo.cfg'
+2 configurations selected:
+
+ Action    Run Mode   Workload     Report Type      Benchmarks
+--------   --------   --------   ----------------   ---------------------------
+validate   rate       train      SPECrate2026_int   706.stockfish_r,           
+                                                    707.ntest_r, 708.sqlite_r, 
+                                                    710.omnetpp_r,             
+                                                    714.cpython_r, 721.gcc_r,  
+                                                    723.llvm_r,                
+                                                    727.cppcheck_r, 729.abc_r, 
+                                                    734.vpr_r, 735.gem5_r,     
+                                                    750.sealcrypto_r,          
+                                                    753.ns3_r, 777.zstd_r      
+validate   rate       train      SPECrate2026_fp    749.fotonik3d_r, 782.lbm_r 
+-------------------------------------------------------------------------------
+
+Setting up environment for running 706.stockfish_r, 707.ntest_r, 708.sqlite_r, 710.omnetpp_r, 714.cpython_r, 721.gcc_r, 723.llvm_r, 727.cppcheck_r, 729.abc_r, 734.vpr_r, 735.gem5_r, 750.sealcrypto_r, 753.ns3_r, 777.zstd_r...
+Starting runcpu for 706.stockfish_r, 707.ntest_r, 708.sqlite_r, 710.omnetpp_r, 714.cpython_r, 721.gcc_r, 723.llvm_r, 727.cppcheck_r, 729.abc_r, 734.vpr_r, 735.gem5_r, 750.sealcrypto_r, 753.ns3_r, 777.zstd_r...
+Running "specperl /work/spec/bin/sysinfo" to gather system information.
+sysinfo: sysinfo 779ab21020787073335a329f3a45e2cd
+sysinfo: ...getting basic information about kernel, users, and limits
+sysinfo: Getting system information for Linux...
+sysinfo: ...getting CPU info
+sysinfo: ...getting info from numactl
+sysinfo: ...getting memory info
+sysinfo: ...getting power info
+sysinfo: ...getting system tuning info
+sysinfo: ...getting OS info
+sysinfo: ...getting disk info
+sysinfo: ...getting info from /sys/devices/virtual/dmi/id
+sysinfo: ...getting info from dmidecode
+Retrieving flags file (/work/spec/config/flags/gcc.xml)...
+Benchmarks selected: 706.stockfish_r, 707.ntest_r, 708.sqlite_r, 710.omnetpp_r, 714.cpython_r, 721.gcc_r, 723.llvm_r, 727.cppcheck_r, 729.abc_r, 734.vpr_r, 735.gem5_r, 750.sealcrypto_r, 753.ns3_r, 777.zstd_r
+Compiling Binaries
+  Up to date 706.stockfish_r base g4colo
+  Up to date 707.ntest_r base g4colo
+  Up to date 708.sqlite_r base g4colo
+  Up to date 710.omnetpp_r base g4colo
+  Up to date 714.cpython_r base g4colo
+  Up to date 721.gcc_r base g4colo
+  Up to date 723.llvm_r base g4colo
+  Up to date 727.cppcheck_r base g4colo
+  Up to date 729.abc_r base g4colo
+  Up to date 734.vpr_r base g4colo
+  Up to date 735.gem5_r base g4colo
+  Up to date 750.sealcrypto_r base g4colo
+  Up to date 753.ns3_r base g4colo
+  Up to date 777.zstd_r base g4colo
+
+
+Setting Up Run Directories
+  Setting up 706.stockfish_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 707.ntest_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 708.sqlite_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 710.omnetpp_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 714.cpython_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 721.gcc_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 723.llvm_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 727.cppcheck_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 729.abc_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 734.vpr_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 735.gem5_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 750.sealcrypto_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 753.ns3_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 777.zstd_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+Running Benchmarks
+  Running 706.stockfish_r train base g4colo (38 copies) [2026-10-27 16:16:06]
+  Running 707.ntest_r train base g4colo (38 copies) [2026-10-27 16:16:59]
+  Running 708.sqlite_r train base g4colo (38 copies) [2026-10-27 16:17:48]
+  Running 710.omnetpp_r train base g4colo (38 copies) [2026-10-27 16:18:18]
+  Running 714.cpython_r train base g4colo (38 copies) [2026-10-27 16:18:51]
+  Running 721.gcc_r train base g4colo (38 copies) [2026-10-27 16:19:19]
+  Running 723.llvm_r train base g4colo (38 copies) [2026-10-27 16:20:08]
+  Running 727.cppcheck_r train base g4colo (38 copies) [2026-10-27 16:20:52]
+  Running 729.abc_r train base g4colo (38 copies) [2026-10-27 16:22:01]
+  Running 734.vpr_r train base g4colo (38 copies) [2026-10-27 16:22:59]
+  Running 735.gem5_r train base g4colo (38 copies) [2026-10-27 16:24:03]
+  Running 750.sealcrypto_r train base g4colo (38 copies) [2026-10-27 16:24:41]
+  Running 753.ns3_r train base g4colo (38 copies) [2026-10-27 16:25:40]
+  Running 777.zstd_r train base g4colo (38 copies) [2026-10-27 16:26:12]
+Success: 1x706.stockfish_r 1x707.ntest_r 1x708.sqlite_r 1x710.omnetpp_r 1x714.cpython_r 1x721.gcc_r 1x723.llvm_r 1x727.cppcheck_r 1x729.abc_r 1x734.vpr_r 1x735.gem5_r 1x750.sealcrypto_r 1x753.ns3_r 1x777.zstd_r
+Producing Raw Reports
+ label: g4colo
+  workload: train
+   metric: SPECrate2026_int_base
+    format: raw -> /work/spec/result/CPU2026.002.intrate.train.rsf
+Parsing flags for 706.stockfish_r base: done
+Parsing flags for 707.ntest_r base: done
+Parsing flags for 708.sqlite_r base: done
+Parsing flags for 710.omnetpp_r base: done
+Parsing flags for 714.cpython_r base: done
+Parsing flags for 721.gcc_r base: done
+Parsing flags for 723.llvm_r base: done
+Parsing flags for 727.cppcheck_r base: done
+Parsing flags for 729.abc_r base: done
+Parsing flags for 734.vpr_r base: done
+Parsing flags for 735.gem5_r base: done
+Parsing flags for 750.sealcrypto_r base: done
+Parsing flags for 753.ns3_r base: done
+Parsing flags for 777.zstd_r base: done
+Doing flag reduction: done
+    format: CSV -> /work/spec/result/CPU2026.002.intrate.train.csv
+    format: Text -> /work/spec/result/CPU2026.002.intrate.train.txt
+-------------------------------------------------------------------------------
+
+Setting up environment for running 749.fotonik3d_r, 782.lbm_r...
+Starting runcpu for 749.fotonik3d_r, 782.lbm_r...
+Running "specperl /work/spec/bin/sysinfo" to gather system information.
+sysinfo: sysinfo 779ab21020787073335a329f3a45e2cd
+sysinfo: ...getting basic information about kernel, users, and limits
+sysinfo: Getting system information for Linux...
+sysinfo: ...getting CPU info
+sysinfo: ...getting info from numactl
+sysinfo: ...getting memory info
+sysinfo: ...getting power info
+sysinfo: ...getting system tuning info
+sysinfo: ...getting OS info
+sysinfo: ...getting disk info
+sysinfo: ...getting info from /sys/devices/virtual/dmi/id
+sysinfo: ...getting info from dmidecode
+Retrieving flags file (/work/spec/config/flags/gcc.xml)...
+Benchmarks selected: 749.fotonik3d_r, 782.lbm_r
+Compiling Binaries
+  Up to date 749.fotonik3d_r base g4colo
+  Up to date 782.lbm_r base g4colo
+
+
+Setting Up Run Directories
+  Setting up 749.fotonik3d_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+  Setting up 782.lbm_r train base g4colo (38 copies): run_base_train_g4colo.0000-0037
+Running Benchmarks
+  Running 749.fotonik3d_r train base g4colo (38 copies) [2026-10-27 16:28:09]
+749.fotonik3d_r: copy 0 non-zero return code (exit code=127, signal=0)
+
+****************************************
+Contents of fotonik3d.err
+****************************************
+../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo: error while loading shared libraries: libgfortran.so.5: cannot open shared object file: No such file or directory
+
+****************************************
+****************************************
+Contents of inputgen.out
+****************************************
+specinvoke v0.90.1 ()
+ Invoked as: /work/spec/bin/specinvoke -d /work/spec/benchspec/CPU/749.fotonik3d_r/run/run_base_train_g4colo.0000 -f inputgen.cmd -e inputgen.err -o inputgen.stdout
+timer ticks over every 1000 ns
+ Environment in effect for these runs:
+ # 1: HOME=/root
+ # 2: KUBERNETES_SERVICE_HOST=34.118.224.1
+ # 3: KUBERNETES_PORT=tcp://34.118.224.1:443
+ # 4: PWD=/work/spec
+ # 5: _=/work/spec/bin/runcpu
+ # 6: SPECPERLLIB=/work/spec/bin/lib:/work/spec/bin
+ # 7: SHLVL=1
+ # 8: KUBERNETES_SERVICE_PORT=443
+ # 9: OLDPWD=/
+ #10: KUBERNETES_PORT_443_TCP_ADDR=34.118.224.1
+ #11: LD_LIBRARY_PATH=/usr/local/lib64/:/usr/local/lib/:/lib64
+ #12: LC_ALL=C
+ #13: SPECDB_PWD=/work/spec
+ #14: KUBERNETES_SERVICE_PORT_HTTPS=443
+ #15: KUBERNETES_PORT_443_TCP_PROTO=tcp
+ #16: SPEC=/work/spec
+ #17: HOSTNAME=spec-spec-solo-l38-r0
+ #18: PATH=/work/spec/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ #19: KUBERNETES_PORT_443_TCP=tcp://34.118.224.1:443
+ #20: LC_LANG=C
+ #21: LIBC_FATAL_STDERR_=1
+ #22: KUBERNETES_PORT_443_TCP_PORT=443
+ #23: OMP_NUM_THREADS=1
+ #24: ACC_NUM_CORES=1
+ #25: OMP_THREAD_LIMIT=1
+running commands in inputgen.cmd 1 times
+runs started at		1793118488, 344084000, Tue Oct 27 16:28:08 2026
+run 1 started at	1793118488, 344100000, Tue Oct 27 16:28:08 2026
+child started: 0,	1793118488, 344104000, pid=6864, '/work/spec/bin/specxz -dc OBJ-values.dat.xz > OBJ-values.dat 2>> OBJ-values.dat.gen.err'
+child finished: 0,	1793118488, 362418000, sec=0, nsec=18314000, max_rss_kib=29700, user_time=0.01, sys_time=0.01, blks_in=0, blks_out=37280, minor_faults=7181, major_faults=0, inv_cs=0, cs=6, pid=6864, rc=0
+run 1 finished at:	1793118488, 362429000, Tue Oct 27 16:28:08 2026
+run 1 elapsed time:	         0, 018329000, 0.018329000
+runs finished at	1793118488, 362441000, Tue Oct 27 16:28:08 2026
+runs elapsed time:	         0, 018357000, 0.018357000
+# specinvoke exit: rc=0
+
+****************************************
+****************************************
+Contents of speccmds.out
+****************************************
+specinvoke v0.90.1 ()
+ Invoked as: /work/spec/bin/specinvoke -d /work/spec/benchspec/CPU/749.fotonik3d_r/run/run_base_train_g4colo.0000 -f speccmds.cmd -q -e speccmds.err -o speccmds.stdout
+timer ticks over every 1000 ns
+ Environment in effect for these runs:
+ # 1: KUBERNETES_PORT=tcp://34.118.224.1:443
+ # 2: _=/work/spec/bin/runcpu
+ # 3: PWD=/work/spec
+ # 4: SPECPERLLIB=/work/spec/bin/lib:/work/spec/bin
+ # 5: HOME=/root
+ # 6: KUBERNETES_SERVICE_HOST=34.118.224.1
+ # 7: KUBERNETES_SERVICE_PORT=443
+ # 8: OLDPWD=/
+ # 9: SHLVL=1
+ #10: LD_LIBRARY_PATH=/usr/local/lib64/:/usr/local/lib/:/lib64
+ #11: SPECDB_PWD=/work/spec
+ #12: LC_ALL=C
+ #13: KUBERNETES_SERVICE_PORT_HTTPS=443
+ #14: KUBERNETES_PORT_443_TCP_PROTO=tcp
+ #15: SPEC=/work/spec
+ #16: KUBERNETES_PORT_443_TCP_ADDR=34.118.224.1
+ #17: LC_LANG=C
+ #18: LIBC_FATAL_STDERR_=1
+ #19: KUBERNETES_PORT_443_TCP_PORT=443
+ #20: HOSTNAME=spec-spec-solo-l38-r0
+ #21: KUBERNETES_PORT_443_TCP=tcp://34.118.224.1:443
+ #22: PATH=/work/spec/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ #23: OMP_NUM_THREADS=1
+ #24: ACC_NUM_CORES=1
+ #25: OMP_THREAD_LIMIT=1
+running commands in speccmds.cmd 1 times
+runs started at		1793118489, 038011000, Tue Oct 27 16:28:09 2026
+run 1 started at	1793118489, 038016000, Tue Oct 27 16:28:09 2026
+child started: 0,	1793118489, 038019000, pid=6878, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 1,	1793118489, 038060000, pid=6879, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 2,	1793118489, 038104000, pid=6880, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 3,	1793118489, 038143000, pid=6881, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 4,	1793118489, 038175000, pid=6882, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 5,	1793118489, 038207000, pid=6883, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 6,	1793118489, 038237000, pid=6884, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 7,	1793118489, 038276000, pid=6885, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 8,	1793118489, 038370000, pid=6886, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 9,	1793118489, 038414000, pid=6887, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 10,	1793118489, 038451000, pid=6889, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 11,	1793118489, 038493000, pid=6890, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 12,	1793118489, 038550000, pid=6893, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 13,	1793118489, 038591000, pid=6896, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 14,	1793118489, 038626000, pid=6899, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 15,	1793118489, 038667000, pid=6900, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 16,	1793118489, 038715000, pid=6902, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 17,	1793118489, 038753000, pid=6903, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 18,	1793118489, 038798000, pid=6904, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 19,	1793118489, 038839000, pid=6915, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 20,	1793118489, 039467000, pid=6916, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 21,	1793118489, 039507000, pid=6917, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 22,	1793118489, 039555000, pid=6918, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 23,	1793118489, 039602000, pid=6919, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 24,	1793118489, 039643000, pid=6921, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 25,	1793118489, 039681000, pid=6922, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 26,	1793118489, 039719000, pid=6923, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 27,	1793118489, 039750000, pid=6925, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 28,	1793118489, 039791000, pid=6927, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 29,	1793118489, 039843000, pid=6929, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 30,	1793118489, 039888000, pid=6930, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 31,	1793118489, 039932000, pid=6931, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 32,	1793118489, 039972000, pid=6933, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 33,	1793118489, 040010000, pid=6935, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 34,	1793118489, 040049000, pid=6937, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 35,	1793118489, 040083000, pid=6939, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 36,	1793118489, 040128000, pid=6942, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child started: 37,	1793118489, 040166000, pid=6944, '../run_base_train_g4colo.0000/fotonik3d_r_base.g4colo > fotonik3d.log 2>> fotonik3d.err'
+child finished: 0,	1793118489, 040216000, sec=0, nsec=2197000, max_rss_kib=1656, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=99, major_faults=0, inv_cs=2, cs=4, pid=6878, rc=32512
+child finished: 1,	1793118489, 040226000, sec=0, nsec=2166000, max_rss_kib=1584, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=0, cs=4, pid=6879, rc=32512
+child finished: 2,	1793118489, 040230000, sec=0, nsec=2126000, max_rss_kib=1248, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=97, major_faults=0, inv_cs=0, cs=4, pid=6880, rc=32512
+child finished: 3,	1793118489, 040233000, sec=0, nsec=2090000, max_rss_kib=1584, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=0, cs=4, pid=6881, rc=32512
+child finished: 4,	1793118489, 040236000, sec=0, nsec=2061000, max_rss_kib=1664, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=99, major_faults=1, inv_cs=1, cs=5, pid=6882, rc=32512
+child finished: 5,	1793118489, 040239000, sec=0, nsec=2032000, max_rss_kib=1664, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=103, major_faults=0, inv_cs=0, cs=4, pid=6883, rc=32512
+child finished: 6,	1793118489, 040242000, sec=0, nsec=2005000, max_rss_kib=1672, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=103, major_faults=0, inv_cs=0, cs=4, pid=6884, rc=32512
+child finished: 7,	1793118489, 040245000, sec=0, nsec=1969000, max_rss_kib=1628, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=0, cs=4, pid=6885, rc=32512
+child finished: 8,	1793118489, 040250000, sec=0, nsec=1880000, max_rss_kib=1624, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=1, cs=4, pid=6886, rc=32512
+child finished: 9,	1793118489, 040254000, sec=0, nsec=1840000, max_rss_kib=1592, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=107, major_faults=0, inv_cs=2, cs=4, pid=6887, rc=32512
+child finished: 10,	1793118489, 040256000, sec=0, nsec=1805000, max_rss_kib=1588, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=106, major_faults=0, inv_cs=1, cs=4, pid=6889, rc=32512
+child finished: 11,	1793118489, 040259000, sec=0, nsec=1766000, max_rss_kib=1640, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=107, major_faults=0, inv_cs=0, cs=4, pid=6890, rc=32512
+child finished: 12,	1793118489, 040263000, sec=0, nsec=1713000, max_rss_kib=1624, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=106, major_faults=0, inv_cs=0, cs=4, pid=6893, rc=32512
+child finished: 13,	1793118489, 040267000, sec=0, nsec=1676000, max_rss_kib=1632, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=2, cs=4, pid=6896, rc=32512
+child finished: 14,	1793118489, 040271000, sec=0, nsec=1645000, max_rss_kib=1664, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=103, major_faults=0, inv_cs=1, cs=4, pid=6899, rc=32512
+child finished: 15,	1793118489, 040274000, sec=0, nsec=1607000, max_rss_kib=1624, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=107, major_faults=0, inv_cs=2, cs=4, pid=6900, rc=32512
+child finished: 16,	1793118489, 040277000, sec=0, nsec=1562000, max_rss_kib=1620, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=1, cs=4, pid=6902, rc=32512
+child finished: 17,	1793118489, 040281000, sec=0, nsec=1528000, max_rss_kib=1624, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=105, major_faults=0, inv_cs=2, cs=4, pid=6903, rc=32512
+child finished: 18,	1793118489, 040284000, sec=0, nsec=1486000, max_rss_kib=1684, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=2, cs=4, pid=6904, rc=32512
+child finished: 19,	1793118489, 040286000, sec=0, nsec=1447000, max_rss_kib=1672, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=0, cs=4, pid=6915, rc=32512
+child finished: 20,	1793118489, 040289000, sec=0, nsec=822000, max_rss_kib=1584, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=0, cs=4, pid=6916, rc=32512
+child finished: 21,	1793118489, 040292000, sec=0, nsec=785000, max_rss_kib=1640, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=1, cs=4, pid=6917, rc=32512
+child finished: 23,	1793118489, 040294000, sec=0, nsec=692000, max_rss_kib=1584, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=1, cs=4, pid=6919, rc=32512
+child finished: 24,	1793118489, 040296000, sec=0, nsec=653000, max_rss_kib=1672, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=103, major_faults=0, inv_cs=0, cs=4, pid=6921, rc=32512
+child finished: 25,	1793118489, 040310000, sec=0, nsec=629000, max_rss_kib=1632, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=106, major_faults=0, inv_cs=1, cs=4, pid=6922, rc=32512
+child finished: 26,	1793118489, 040410000, sec=0, nsec=691000, max_rss_kib=1624, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=107, major_faults=0, inv_cs=0, cs=4, pid=6923, rc=32512
+child finished: 22,	1793118489, 040414000, sec=0, nsec=859000, max_rss_kib=1612, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=108, major_faults=0, inv_cs=0, cs=2, pid=6918, rc=32512
+child finished: 28,	1793118489, 040417000, sec=0, nsec=626000, max_rss_kib=1640, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=106, major_faults=0, inv_cs=1, cs=3, pid=6927, rc=32512
+child finished: 29,	1793118489, 040482000, sec=0, nsec=639000, max_rss_kib=1248, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=98, major_faults=0, inv_cs=0, cs=3, pid=6929, rc=32512
+child finished: 30,	1793118489, 040498000, sec=0, nsec=610000, max_rss_kib=1664, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=0, cs=4, pid=6930, rc=32512
+child finished: 31,	1793118489, 040533000, sec=0, nsec=601000, max_rss_kib=1664, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=0, cs=4, pid=6931, rc=32512
+child finished: 27,	1793118489, 040575000, sec=0, nsec=825000, max_rss_kib=1560, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=108, major_faults=0, inv_cs=1, cs=4, pid=6925, rc=32512
+child finished: 32,	1793118489, 040577000, sec=0, nsec=605000, max_rss_kib=1632, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=105, major_faults=0, inv_cs=0, cs=4, pid=6933, rc=32512
+child finished: 33,	1793118489, 040658000, sec=0, nsec=648000, max_rss_kib=1648, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=0, cs=4, pid=6935, rc=32512
+child finished: 34,	1793118489, 040661000, sec=0, nsec=612000, max_rss_kib=1640, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=105, major_faults=0, inv_cs=0, cs=4, pid=6937, rc=32512
+child finished: 35,	1793118489, 040676000, sec=0, nsec=593000, max_rss_kib=1672, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=102, major_faults=0, inv_cs=1, cs=4, pid=6939, rc=32512
+child finished: 36,	1793118489, 040689000, sec=0, nsec=561000, max_rss_kib=1644, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=104, major_faults=0, inv_cs=0, cs=4, pid=6942, rc=32512
+child finished: 37,	1793118489, 040766000, sec=0, nsec=600000, max_rss_kib=1632, user_time=0.00, sys_time=0.00, blks_in=0, blks_out=8, minor_faults=105, major_faults=0, inv_cs=1, cs=3, pid=6944, rc=32512
+run 1 finished at:	1793118489, 040773000, Tue Oct 27 16:28:09 2026
+run 1 elapsed time:	         0, 002757000, 0.002757000
+runs finished at	1793118489, 040780000, Tue Oct 27 16:28:09 2026
+runs elapsed time:	         0, 002769000, 0.002769000
+error: a total of 38 children finished with errors
+# specinvoke exit: rc=0
+
+****************************************
+749.fotonik3d_r: copy 1 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 2 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 3 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 4 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 5 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 6 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 7 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 8 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 9 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 10 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 11 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 12 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 13 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 14 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 15 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 16 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 17 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 18 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 19 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 20 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 21 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 23 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 24 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 25 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 26 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 22 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 28 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 29 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 30 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 31 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 27 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 32 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 33 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 34 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 35 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 36 non-zero return code (exit code=127, signal=0)
+
+749.fotonik3d_r: copy 37 non-zero return code (exit code=127, signal=0)
+
+  Running 782.lbm_r train base g4colo (38 copies) [2026-10-27 16:28:09]
+Success: 1x782.lbm_r
+Error: 1x749.fotonik3d_r
+Producing Raw Reports
+ label: g4colo
+  workload: train
+   metric: SPECrate2026_fp_base
+    format: raw -> /work/spec/result/CPU2026.002.fprate.train.rsf
+Parsing flags for 749.fotonik3d_r base: done
+Parsing flags for 782.lbm_r base: done
+Doing flag reduction: done
+    format: CSV -> /work/spec/result/CPU2026.002.fprate.train.csv
+    format: Text -> /work/spec/result/CPU2026.002.fprate.train.txt
+The log for this run is in /work/spec/result/CPU2026.002.log
+
+runcpu finished at 2026-10-27 16:30:41; 939 total seconds elapsed

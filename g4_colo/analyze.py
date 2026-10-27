@@ -133,9 +133,9 @@ def main():
     rows, spec_rows = [], []
     for d in sorted(CELLS.iterdir()):
         m = cell_meta(d)
-        if not m:
+        if not m or m["rep"] == 0:   # rep 0 = pilot cells, excluded from statistics
             continue
-        r = {"cell": m["cell"], "kind": m["kind"], "level": m["level"], "rep": m["rep"]}
+        r = {"cell": m["cell"], "kind": m["kind"], "arm": m.get("arm", "A"), "level": m["level"], "rep": m["rep"]}
         if m["kind"] in ("vllm_solo", "colo"):
             v = vllm_cell_metrics(d)
             if v:
@@ -147,7 +147,7 @@ def main():
         if m["kind"] in ("colo", "spec_solo"):
             r["spec_valid"] = spec_valid(d)
             for b, s in spec_cell_runtimes(d).items():
-                spec_rows.append({"cell": m["cell"], "kind": m["kind"], "level": m["level"], "rep": m["rep"],
+                spec_rows.append({"cell": m["cell"], "kind": m["kind"], "arm": r["arm"], "level": m["level"], "rep": m["rep"],
                                   "benchmark": b, "runtime_s": s, "valid": r["spec_valid"]})
         rows.append(r)
     cells = pd.DataFrame(rows)
@@ -166,14 +166,15 @@ def main():
 
     # vLLM impact table
     imp = []
-    for L in CFG["levels"]:
-        c = v[(v.kind == "colo") & (v.level == L)]
+    for arm, levels in CFG["arms"].items():
+      for L in levels:
+        c = v[(v.kind == "colo") & (v.level == L) & (v.arm == arm)]
         if len(c) < 2 or len(solo) < 2:
             continue
         for met in GUARDED + ["itl_p99", "achieved_rps"]:
             a, b = c[met].to_numpy(float), solo[met].to_numpy(float)
             est, lo, hi = boot_ci(a, b)
-            imp.append({"level": L, "metric": met, "solo_mean": b.mean(), "colo_mean": a.mean(),
+            imp.append({"arm": arm, "level": L, "metric": met, "solo_mean": b.mean(), "colo_mean": a.mean(),
                         "delta_pct": est, "ci_lo": lo, "ci_hi": hi, "mde_pct": mde_pct(a, b),
                         "n_solo": len(b), "n_colo": len(a),
                         "ci_includes_0": lo <= 0 <= hi,
@@ -185,24 +186,24 @@ def main():
     simp = []
     if len(spec):
         sv = spec[spec.valid]
-        for L in CFG["levels"]:
-            for bname, g in sv[sv.level == L].groupby("benchmark"):
+        for arm, L in [(a_, L_) for a_, ls in CFG["arms"].items() for L_ in ls]:
+            for bname, g in sv[(sv.level == L) & (sv.arm == arm)].groupby("benchmark"):
                 a = g[g.kind == "colo"].runtime_s.to_numpy(float)
                 b = g[g.kind == "spec_solo"].runtime_s.to_numpy(float)
                 if len(a) < 2 or len(b) < 2:
                     continue
                 est, lo, hi = boot_ci(a, b)
-                simp.append({"level": L, "benchmark": bname, "solo_s": b.mean(), "colo_s": a.mean(),
+                simp.append({"arm": arm, "level": L, "benchmark": bname, "solo_s": b.mean(), "colo_s": a.mean(),
                              "delta_pct": est, "ci_lo": lo, "ci_hi": hi, "n_solo": len(b), "n_colo": len(a)})
     simp = pd.DataFrame(simp)
     simp.to_csv(OUT / "spec_impact.csv", index=False)
 
     # headline
     passing = []
-    for L in CFG["levels"]:
-        s = imp[(imp.level == L) & (imp.metric.isin(GUARDED))] if len(imp) else imp
+    for arm, L in [(a_, L_) for a_, ls in CFG["arms"].items() for L_ in ls]:
+        s = imp[(imp.arm == arm) & (imp.level == L) & (imp.metric.isin(GUARDED))] if len(imp) else imp
         if len(s) == len(GUARDED):
-            passing.append({"level": L, "pass_strict_ci0": bool(s.ci_includes_0.all()),
+            passing.append({"arm": arm, "level": L, "spare_frac": L / 40, "pass_strict_ci0": bool(s.ci_includes_0.all()),
                             "pass_no_degradation": bool((~s.degraded).all()),
                             "worst_upper_ci_pct": float(np.where(s.metric == "output_tok_s", -s.ci_lo, s.ci_hi).max())})
     passing = pd.DataFrame(passing)

@@ -85,6 +85,7 @@ spec:
       set -uo pipefail
       cat /sys/fs/cgroup/cpuset.cpus.effective > /tmp/cpuset
       echo CPUSET $(cat /tmp/cpuset)
+      cp /work/lib/* /usr/local/lib/ && ldconfig   # libgfortran5 runtime for the Fortran benchmark
       cd /work/spec && source shrc
       echo SPEC_START $(date +%s.%N)
       runcpu --config=g4colo --action=run --size=train --copies={copies} --iterations=1 \\
@@ -194,21 +195,65 @@ def load_wait(cell: str, outdir: Path, timeout_s: int):
         sh(f"kubectl -n {NS} exec {c} -- bash -c 'cat /tmp/out/{cell}.p*.log' >> {outdir / 'client_logs.txt'}", check=False)
 
 
+# ---------------------------------------------------------------- L3 fence (arm B)
+FENCE_CPUS = "5-7,29-31"   # the 3 cores of vLLM's L3 domain (CCX0) not owned by vLLM/system
+
+
+def fence_manifest() -> str:
+    return f"""
+apiVersion: v1
+kind: Pod
+metadata: {{name: l3fence, namespace: {NS}, labels: {{app: l3fence}}}}
+spec:
+  nodeSelector: {{role: g4colo}}
+  tolerations:
+  - {{key: role, operator: Equal, value: g4colo, effect: NoSchedule}}
+  - {{key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}}
+  containers:
+  - name: idle
+    image: ubuntu:24.04
+    command: ["sleep", "infinity"]
+    resources:
+      requests: {{cpu: "6", memory: 256Mi}}
+      limits: {{cpu: "6", memory: 256Mi}}
+"""
+
+
+def ensure_fence(arm: str):
+    """Arm B: an idle Guaranteed pod holds the rest of vLLM's L3 domain so no SPEC
+    copy shares vLLM's L3. Arm A (default placement): no fence."""
+    present = k("get pod l3fence --ignore-not-found -o name", check=False)
+    if arm == "B":
+        if not present:
+            sh(f"kubectl apply -f - <<'EOF'\n{fence_manifest()}\nEOF")
+            k("wait --for=condition=Ready pod/l3fence --timeout=180s")
+        st = json.loads(k("exec telemetry -- cat /host/var/lib/kubelet/cpu_manager_state"))
+        got = [v.get("idle") for v in st.get("entries", {}).values() if "idle" in v]
+        if got != [FENCE_CPUS]:
+            raise RuntimeError(f"fence cpuset {got} != {FENCE_CPUS}")
+    elif present:
+        k("delete pod l3fence --wait=true")
+
+
 # ---------------------------------------------------------------- cells
-def run_cell(kind: str, level: int, rep: int) -> dict:
-    cell = f"{kind}{'' if kind == 'vllm_solo' else '-L' + str(level)}-r{rep}"
+def run_cell(kind: str, level: int, rep: int, arm: str = "A") -> dict:
+    cell = f"vllm_solo-r{rep}" if kind == "vllm_solo" else f"{kind}-{arm}-L{level}-r{rep}"
     outdir = RESULTS / "cells" / cell
     if (outdir / "DONE").exists():
         log(f"skip {cell} (done)")
         return json.loads((outdir / "DONE").read_text())
     outdir.mkdir(parents=True, exist_ok=True)
     log(f"=== cell {cell}")
-    meta = {"cell": cell, "kind": kind, "level": level, "rep": rep, "t_begin": time.time()}
+    meta = {"cell": cell, "kind": kind, "arm": arm if kind != "vllm_solo" else "-", "level": level,
+            "rep": rep, "t_begin": time.time()}
+    if kind != "vllm_solo":
+        ensure_fence(arm)
     warm, win, tail = CFG["warmup_s"], CFG["window_s"], CFG["tail_s"]
     spec_name = f"spec-{cell}".lower().replace("_", "-")
 
     if kind == "vllm_solo":
-        dur = warm + win + tail
+        # same load duration as a colo cell, so queue-buildup exposure is identical
+        dur = CFG["spec_est_s"] + CFG["spec_margin_s"]
         telemetry_start(cell, int(dur + 40))
         vllm_metrics(outdir, "pre")
         start_at = time.time() + 15
@@ -220,7 +265,7 @@ def run_cell(kind: str, level: int, rep: int) -> dict:
         # SPEC first, then vLLM load for the whole SPEC run (+ margin): SPEC is
         # always co-located with load, and the vLLM analysis window
         # [warm, warm+win] is guaranteed to lie inside SPEC activity.
-        spec_dur = CFG["spec_est_s"].get(str(level), 3600)
+        spec_dur = CFG["spec_est_s"]
         dur = spec_dur + CFG["spec_margin_s"]
         telemetry_start(cell, int(dur + 120))
         vllm_metrics(outdir, "pre")
@@ -233,7 +278,7 @@ def run_cell(kind: str, level: int, rep: int) -> dict:
         vllm_metrics(outdir, "post")
         meta["spec_rc"] = [l for l in spec_logs.splitlines() if l.startswith("SPEC_END")]
     elif kind == "spec_solo":
-        spec_dur = CFG["spec_est_s"].get(str(level), 3600)
+        spec_dur = CFG["spec_est_s"]
         telemetry_start(cell, int(spec_dur + CFG["spec_margin_s"] + 120))
         spec_start(spec_name, level)
         cpu_state(outdir, "during")
@@ -247,16 +292,17 @@ def run_cell(kind: str, level: int, rep: int) -> dict:
     return meta
 
 
-def schedule(reps: int, seed: int) -> list[tuple[str, int, int]]:
+def schedule(reps: int, seed: int) -> list[tuple[str, int, int, str]]:
     """Interleaved blocks: each block contains every cell once, randomized order."""
     rng = random.Random(seed)
-    levels = CFG["levels"]
-    cells = [("vllm_solo", 0)] + [("colo", L) for L in levels] + [("spec_solo", L) for L in levels]
+    cells = [("vllm_solo", 0, "-")]
+    for arm, levels in CFG["arms"].items():
+        cells += [("colo", L, arm) for L in levels] + [("spec_solo", L, arm) for L in levels]
     out = []
     for r in range(1, reps + 1):
         blk = cells[:]
         rng.shuffle(blk)
-        out += [(kd, L, r) for kd, L in blk]
+        out += [(kd, L, r, arm) for kd, L, arm in blk]
     return out
 
 
@@ -267,21 +313,22 @@ def main():
     c.add_argument("--kind", required=True, choices=["vllm_solo", "colo", "spec_solo"])
     c.add_argument("--level", type=int, default=0)
     c.add_argument("--rep", type=int, default=0)
+    c.add_argument("--arm", default="A", choices=["A", "B"])
     m = sub.add_parser("matrix")
     m.add_argument("--reps", type=int, default=5)
     m.add_argument("--seed", type=int, default=20261027)
     a = ap.parse_args()
     RESULTS.mkdir(exist_ok=True)
     if a.cmd == "cell":
-        run_cell(a.kind, a.level, a.rep)
+        run_cell(a.kind, a.level, a.rep, a.arm)
     else:
         sched = schedule(a.reps, a.seed)
         (RESULTS / "schedule.json").write_text(json.dumps(sched, indent=1))
-        for i, (kd, L, r) in enumerate(sched):
+        for i, (kd, L, r, arm) in enumerate(sched):
             log(f"[{i + 1}/{len(sched)}]")
             for attempt in range(2):
                 try:
-                    run_cell(kd, L, r)
+                    run_cell(kd, L, r, arm)
                     break
                 except Exception as e:  # noqa: BLE001
                     log(f"cell failed (attempt {attempt + 1}): {e}")

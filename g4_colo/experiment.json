@@ -25,8 +25,42 @@
   "warmup_s": 60,
   "window_s": 600,
   "tail_s": 30,
-  "spec_est_s": {},
-  "spec_margin_s": 180,
-  "cooldown_s": 20,
-  "capacity_rps_closed_c250": 725.8
+  "spec_est_s": 1100,
+  "spec_margin_s": 120,
+  "cooldown_s": 60,
+  "capacity_rps_closed_c250": 725.8,
+  "aws_shape_control": {
+    "orig_client_c250_rps": {
+      "8vcpu": [
+        728.1,
+        723.8
+      ],
+      "40vcpu": [
+        739.3,
+        737.5
+      ]
+    },
+    "streaming_closed_c250_rps": {
+      "8vcpu": 725.8,
+      "40vcpu": 732.0
+    }
+  },
+  "arms": {
+    "A": [
+      10,
+      20,
+      32,
+      36,
+      38
+    ],
+    "B": [
+      10,
+      20,
+      32
+    ]
+  },
+  "arm_desc": {
+    "A": "default kubelet placement (SPEC may share vLLM's L3 domain, CCX0 cores 5-7)",
+    "B": "L3-fenced: idle Guaranteed pod holds CCX0 cores 5-7 (cpus 5-7,29-31); SPEC only on CCX1/CCX2"
+  }
 }
