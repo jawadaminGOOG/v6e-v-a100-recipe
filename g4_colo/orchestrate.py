@@ -42,6 +42,20 @@ def k(args: str, **kw) -> str:
     return sh(f"kubectl -n {NS} {args}", **kw)
 
 
+def launch(args: str):
+    """Fire-and-forget `kubectl exec` of a detached remote command.
+
+    The remote command is setsid+nohup with all fds redirected, so the remote
+    process survives the exec session; the local kubectl is reaped after 5 s.
+    """
+    p = subprocess.Popen(f"kubectl -n {NS} {args}", shell=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        p.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        p.kill()
+
+
 def log(msg: str):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
@@ -131,7 +145,7 @@ def cpu_state(outdir: Path, tag: str):
 
 
 def telemetry_start(cell: str, dur: int):
-    k(f"exec telemetry -- bash -c 'mkdir -p /tmp/tel && nohup python3 /tmp/sampler.py /tmp/tel/{cell}.csv {dur} >/dev/null 2>&1 &'")
+    launch(f"exec telemetry -- bash -c 'mkdir -p /tmp/tel && setsid nohup python3 /tmp/sampler.py /tmp/tel/{cell}.csv {dur} </dev/null >/dev/null 2>&1 &'")
 
 
 def telemetry_fetch(cell: str, outdir: Path):
@@ -155,12 +169,12 @@ def load_start(cell: str, duration: float, start_at: float):
         for p in range(PROCS_PER_CLIENT):
             label = f"{cell}.p{j}"
             seed = 1000 + j * 7919 + int(start_at) % 100000
-            cmd = (f"cd /tmp && nohup python colo_bench.py --input-file /tmp/synthetic_yelp.xlsx "
+            cmd = (f"cd /tmp && setsid nohup python colo_bench.py --input-file /tmp/synthetic_yelp.xlsx "
                    f"--output-dir /tmp/out/{cell} --url http://{ip}:8000/v1/completions "
                    f"--tokenizer {CFG['model']} --label {label} --mode open --rate {r:.4f} "
                    f"--duration {duration:.0f} --seed {seed} --start-at {start_at:.3f} "
-                   f"--request-timeout 300 > /tmp/out/{label}.log 2>&1 &")
-            k(f"exec {c} -- bash -c 'mkdir -p /tmp/out/{cell} && {cmd}'")
+                   f"--request-timeout 300 </dev/null > /tmp/out/{label}.log 2>&1 &")
+            launch(f"exec {c} -- bash -c 'mkdir -p /tmp/out/{cell} && {cmd}'")
             j += 1
 
 
@@ -206,7 +220,7 @@ def run_cell(kind: str, level: int, rep: int) -> dict:
         # SPEC first, then vLLM load for the whole SPEC run (+ margin): SPEC is
         # always co-located with load, and the vLLM analysis window
         # [warm, warm+win] is guaranteed to lie inside SPEC activity.
-        spec_dur = CFG["spec_est_s"][str(level)]
+        spec_dur = CFG["spec_est_s"].get(str(level), 3600)
         dur = spec_dur + CFG["spec_margin_s"]
         telemetry_start(cell, int(dur + 120))
         vllm_metrics(outdir, "pre")
@@ -219,7 +233,7 @@ def run_cell(kind: str, level: int, rep: int) -> dict:
         vllm_metrics(outdir, "post")
         meta["spec_rc"] = [l for l in spec_logs.splitlines() if l.startswith("SPEC_END")]
     elif kind == "spec_solo":
-        spec_dur = CFG["spec_est_s"][str(level)]
+        spec_dur = CFG["spec_est_s"].get(str(level), 3600)
         telemetry_start(cell, int(spec_dur + CFG["spec_margin_s"] + 120))
         spec_start(spec_name, level)
         cpu_state(outdir, "during")

@@ -1,13 +1,32 @@
 {
   "model": "Qwen/Qwen3-1.7B-Base",
-  "levels": [10, 20, 32, 36, 38],
-  "level_names": {"10": "25%", "20": "50%", "32": "80%", "36": "90%", "38": "100% (all allocatable whole cores)"},
-  "spec_mem_gi": {"10": 29, "20": 58, "32": 93, "36": 100, "38": 100},
-  "open_loop_rate": null,
+  "levels": [
+    10,
+    20,
+    32,
+    36,
+    38
+  ],
+  "level_names": {
+    "10": "25%",
+    "20": "50%",
+    "32": "80%",
+    "36": "90%",
+    "38": "100% (all allocatable whole cores)"
+  },
+  "spec_mem_gi": {
+    "10": 29,
+    "20": 58,
+    "32": 93,
+    "36": 100,
+    "38": 100
+  },
+  "open_loop_rate": 540,
   "warmup_s": 60,
   "window_s": 600,
   "tail_s": 30,
   "spec_est_s": {},
   "spec_margin_s": 180,
-  "cooldown_s": 20
+  "cooldown_s": 20,
+  "capacity_rps_closed_c250": 725.8
 }
