@@ -1,0 +1,36 @@
+CPUSET 5-14,29-38
+SPEC_START 1793132182.324358956
+SPEC_END 1793133188.026249950 rc=0
+Running "specperl /work/spec/bin/sysinfo" to gather system information.
+Running Benchmarks
+  Running 706.stockfish_r train base g4colo (20 copies) [2026-10-27 20:17:27]
+  Running 707.ntest_r train base g4colo (20 copies) [2026-10-27 20:18:18]
+  Running 708.sqlite_r train base g4colo (20 copies) [2026-10-27 20:19:05]
+  Running 710.omnetpp_r train base g4colo (20 copies) [2026-10-27 20:19:34]
+  Running 714.cpython_r train base g4colo (20 copies) [2026-10-27 20:20:05]
+  Running 721.gcc_r train base g4colo (20 copies) [2026-10-27 20:20:32]
+  Running 723.llvm_r train base g4colo (20 copies) [2026-10-27 20:21:19]
+  Running 727.cppcheck_r train base g4colo (20 copies) [2026-10-27 20:22:02]
+  Running 729.abc_r train base g4colo (20 copies) [2026-10-27 20:23:09]
+  Running 734.vpr_r train base g4colo (20 copies) [2026-10-27 20:24:04]
+  Running 735.gem5_r train base g4colo (20 copies) [2026-10-27 20:25:02]
+  Running 750.sealcrypto_r train base g4colo (20 copies) [2026-10-27 20:25:40]
+  Running 753.ns3_r train base g4colo (20 copies) [2026-10-27 20:26:39]
+  Running 777.zstd_r train base g4colo (20 copies) [2026-10-27 20:27:11]
+Success: 1x706.stockfish_r 1x707.ntest_r 1x708.sqlite_r 1x710.omnetpp_r 1x714.cpython_r 1x721.gcc_r 1x723.llvm_r 1x727.cppcheck_r 1x729.abc_r 1x734.vpr_r 1x735.gem5_r 1x750.sealcrypto_r 1x753.ns3_r 1x777.zstd_r
+    format: CSV -> /work/spec/result/CPU2026.012.intrate.train.csv
+    format: Text -> /work/spec/result/CPU2026.012.intrate.train.txt
+Running "specperl /work/spec/bin/sysinfo" to gather system information.
+Running Benchmarks
+  Running 749.fotonik3d_r train base g4colo (20 copies) [2026-10-27 20:29:02]
+  Running 782.lbm_r train base g4colo (20 copies) [2026-10-27 20:30:55]
+Success: 1x749.fotonik3d_r 1x782.lbm_r
+    format: CSV -> /work/spec/result/CPU2026.012.fprate.train.csv
+    format: Text -> /work/spec/result/CPU2026.012.fprate.train.txt
+CPU2026.012.fprate.train.csv
+CPU2026.012.fprate.train.txt
+CPU2026.012.intrate.train.csv
+CPU2026.012.intrate.train.txt
+cpuset
+runcpu.log
+SPEC_DONE

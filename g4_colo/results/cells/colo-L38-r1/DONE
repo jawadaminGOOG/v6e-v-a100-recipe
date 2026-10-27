@@ -1,0 +1,12 @@
+{
+  "cell": "colo-L38-r1",
+  "kind": "colo",
+  "arm": "default",
+  "level": 38,
+  "rep": 1,
+  "t_begin": 1793130788.1630235,
+  "spec_rc": [
+    "SPEC_END 1793131881.737800025 rc=0"
+  ],
+  "t_end": 1793132114.4743743
+}

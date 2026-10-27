@@ -203,7 +203,13 @@ def main():
     for arm, L in [(a_, L_) for a_, ls in CFG["arms"].items() for L_ in ls]:
         s = imp[(imp.arm == arm) & (imp.level == L) & (imp.metric.isin(GUARDED))] if len(imp) else imp
         if len(s) == len(GUARDED):
-            passing.append({"arm": arm, "level": L, "spare_frac": L / 40, "pass_strict_ci0": bool(s.ci_includes_0.all()),
+            lat = s[s.metric != "output_tok_s"]; thr = s[s.metric == "output_tok_s"]
+            colo_fail = int(v[(v.kind == "colo") & (v.level == L)].n_failed.sum())
+            passing.append({"arm": arm, "level": L, "spare_frac": L / 40,
+                            "pass_tolerance": bool((lat.ci_hi <= CFG["latency_tolerance_pct"]).all()
+                                                   and (thr.ci_lo >= -CFG["throughput_tolerance_pct"]).all()
+                                                   and colo_fail == 0),
+                            "pass_strict_ci0": bool(s.ci_includes_0.all()),
                             "pass_no_degradation": bool((~s.degraded).all()),
                             "worst_upper_ci_pct": float(np.where(s.metric == "output_tok_s", -s.ci_lo, s.ci_hi).max())})
     passing = pd.DataFrame(passing)

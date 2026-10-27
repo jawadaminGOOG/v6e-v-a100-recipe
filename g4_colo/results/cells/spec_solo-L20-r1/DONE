@@ -1,0 +1,12 @@
+{
+  "cell": "spec_solo-L20-r1",
+  "kind": "spec_solo",
+  "arm": "default",
+  "level": 20,
+  "rep": 1,
+  "t_begin": 1793132174.4753497,
+  "spec_rc": [
+    "SPEC_END 1793133188.026249950 rc=0"
+  ],
+  "t_end": 1793133205.3716483
+}

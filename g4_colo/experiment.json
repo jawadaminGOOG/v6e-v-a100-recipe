@@ -34,5 +34,12 @@
     "c750": 828.6,
     "c1000": 831.2
   },
-  "capacity_rps": 832
+  "capacity_rps": 832,
+  "pass_bar": {
+    "decided_at": "2026-10-27T21:08Z (after 1 solo + 1 colo rep; before the remaining 23 cells)",
+    "primary": "PASS if, for every latency metric (TTFT p50/p99, ITL p50, E2E p50/p99), the upper bound of the 95% bootstrap CI of (colo/solo - 1) is <= +10%, AND output tok/s lower CI bound >= -2%, AND 0 failed requests in every colo rep",
+    "also_reported": "strict bar: 95% CI includes 0 for every metric"
+  },
+  "latency_tolerance_pct": 10,
+  "throughput_tolerance_pct": 2
 }

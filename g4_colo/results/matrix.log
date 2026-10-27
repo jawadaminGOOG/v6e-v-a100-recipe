@@ -1,0 +1,14 @@
+[19:33:41] [1/25]
+[19:33:41] === cell spec_solo-L38-r1
+[19:52:08] === done spec_solo-L38-r1 in 1106s
+[19:53:08] [2/25]
+[19:53:08] === cell colo-L38-r1
+[20:15:14] === done colo-L38-r1 in 1326s
+[20:16:14] [3/25]
+[20:16:14] === cell spec_solo-L20-r1
+[20:33:25] === done spec_solo-L20-r1 in 1031s
+[20:34:25] [4/25]
+[20:34:25] === cell vllm_solo-r1
+[20:56:21] === done vllm_solo-r1 in 1316s
+[20:57:21] [5/25]
+[20:57:21] === cell colo-L20-r1

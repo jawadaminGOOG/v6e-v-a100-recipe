@@ -88,7 +88,7 @@ def spec_forest():
 
 def util_heatmap():
     cells = ROOT / "results" / "cells"
-    for name in ["vllm_solo-r1", "colo-L36-r1", "colo-L38-r1"]:
+    for name in ["vllm_solo-r1", "colo-L20-r1", "colo-L38-r1"]:
         f = cells / name / "telemetry.csv"
         if not f.exists():
             continue
