@@ -5,8 +5,8 @@
     38
   ],
   "level_names": {
-    "20": "50% (light colo)",
-    "38": "95% of spare = all allocatable whole cores (full colo)"
+    "20": "50% (20 vCPU)",
+    "38": "95% (38 vCPU, max allocatable; core 0 reserved by GKE)"
   },
   "spec_mem_gi": {
     "20": 58,

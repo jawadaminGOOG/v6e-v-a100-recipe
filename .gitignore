@@ -1,2 +1,3 @@
 cx_artifacts/
 g4_colo/results/cells/*/*.requests.csv.gz
+g4_colo/.venv/
