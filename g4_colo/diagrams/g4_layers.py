@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Layer diagram of the g4-standard-48 node as used in the g4-colo experiment.
-
-Topology facts are from `lscpu -e` and the kubelet CPU-manager state recorded in
-every cell (results/cells/*/cpu_manager_state.*.json). Regenerate with:
+"""g4-standard-48 node diagram (style follows the g4-standard-384 figure in
+"The Idle Half of a GPU Pod"). Topology from `lscpu -e`; core ownership from the
+kubelet CPU-manager state recorded in every run. Regenerate:
     python3 diagrams/g4_layers.py
 """
 from pathlib import Path
@@ -11,111 +10,105 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.patches import FancyBboxPatch, Rectangle  # noqa: E402
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noqa: E402
 
 OUT = Path(__file__).resolve().parent
-C = {"sys": "#9aa0a6", "vllm": "#1a73e8", "spec": "#e8710a", "box": "#f8f9fa", "edge": "#dadce0",
-     "text": "#202124", "sub": "#5f6368", "warn_bg": "#fce8e6", "warn": "#c5221f"}
+BG = "#f6f5f2"
+CARD = "#ffffff"
+EDGE = "#e3e1dc"
+TILE = "#efeeeb"
+INK = "#1f1f1f"
+SUB = "#6b6b6b"
+ACC = "#d4572a"        # accent orange-red (reference highlight)
+ACC_BG = "#fbe9e1"
+SPEC = "#9a9a96"       # co-located CPU work: mid grey
+SYS = "#d3d2ce"        # system: light grey
+plt.rcParams["font.family"] = "DejaVu Sans"
 
 
-def rbox(ax, x, y, w, h, fc=C["box"], ec=C["edge"], lw=1.2, r=0.012):
+def card(ax, x, y, w, h, fc=CARD, ec=EDGE, lw=1.4, r=0.012):
     ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle=f"round,pad=0,rounding_size={r}", fc=fc, ec=ec, lw=lw))
 
 
 def owner(core):
-    if core == 0:
-        return "sys"
-    if 1 <= core <= 4:
-        return "vllm"
-    return "spec"
+    return "sys" if core == 0 else ("gpu" if core <= 4 else "cpu")
 
 
-fig = plt.figure(figsize=(16, 11.5))
+fig = plt.figure(figsize=(15, 11.2), facecolor=BG)
 ax = fig.add_axes([0, 0, 1, 1])
+ax.set_facecolor(BG)
 ax.set_xlim(0, 1)
 ax.set_ylim(0, 1)
 ax.axis("off")
 
-ax.text(0.04, 0.955, "Google Cloud g4-standard-48: how the g4-colo experiment uses it", fontsize=22, weight="bold", color=C["text"])
-ax.text(0.04, 0.925, "One VM · 1 socket / 1 NUMA node · 24 physical cores · 48 logical CPUs (SMT sibling = CPU + 24) · 180 GiB · 1 GPU",
-        fontsize=12.5, color=C["sub"])
+ax.text(0.045, 0.935, "Google Cloud g4-standard-48", fontsize=30, weight="bold", color=INK)
+ax.text(0.045, 0.898, "One VM · 1 socket · 24 physical cores · 48 logical CPUs · 1 GPU", fontsize=15, color=SUB)
 
-# Callout: cache boundary
-rbox(ax, 0.62, 0.80, 0.34, 0.105, fc=C["warn_bg"], ec=C["warn"], lw=1.5)
-ax.text(0.635, 0.880, "THE SHARED L3 BOUNDARY", fontsize=11.5, weight="bold", color=C["warn"])
-ax.text(0.635, 0.812, "vLLM's 4 cores share L3 domain 0 with SPEC cores 5-7.\nExclusive cores are not exclusive cache. With one\nvLLM frontend this caused a latency collapse; with 4\nfrontends it costs a few ms (see results).",
-        fontsize=10.5, color=C["text"], va="bottom")
+# callout
+card(ax, 0.60, 0.835, 0.355, 0.125, fc=ACC_BG, ec=ACC_BG)
+ax.add_patch(Rectangle((0.60, 0.835), 0.006, 0.125, fc=ACC, ec=ACC))
+ax.text(0.625, 0.927, "THE CACHE BOUNDARY", fontsize=13, weight="bold", color=ACC)
+ax.text(0.625, 0.848, "The GPU workload and the co-located CPU\nwork run on different physical cores, but\nshare this one last-level cache.",
+        fontsize=13, color=INK, va="bottom", linespacing=1.45)
 
-# Socket
-rbox(ax, 0.04, 0.44, 0.92, 0.35, fc="white")
-ax.text(0.06, 0.758, "AMD EPYC 9B45 (Turin) · 24 physical cores · 48 threads · 3 L3 domains of 8 cores (16 CPUs), 32 MB each",
-        fontsize=13, weight="bold", color=C["text"])
+# socket card
+card(ax, 0.045, 0.385, 0.91, 0.425)
+ax.text(0.07, 0.77, "AMD EPYC 9B45", fontsize=19, weight="bold", color=INK)
+ax.text(0.07, 0.737, "24 physical cores · 48 threads · 3 LLC domains of 16 CPUs (32 MB each)", fontsize=13.5, color=SUB)
 
-lx0, lw_, gap = 0.06, 0.285, 0.0175
+tw, tg, tx0, ty, th = 0.27, 0.0225, 0.07, 0.535, 0.17
 for d in range(3):
-    x = lx0 + d * (lw_ + gap)
+    x = tx0 + d * (tw + tg)
     hl = d == 0
-    rbox(ax, x, 0.555, lw_, 0.175, fc="#fff4ec" if hl else C["box"], ec=C["warn"] if hl else C["edge"], lw=2 if hl else 1.2)
-    ax.text(x + lw_ / 2, 0.705, f"L3 domain {d}  ·  cores {d*8}-{d*8+7}", ha="center", fontsize=12, weight="bold",
-            color=C["warn"] if hl else C["text"])
+    card(ax, x, ty, tw, th, fc=CARD if hl else TILE, ec=ACC if hl else TILE, lw=2.4 if hl else 1)
+    ax.text(x + tw / 2, ty + th - 0.04, f"LLC {d}", ha="center", fontsize=17, weight="bold", color=ACC if hl else INK)
+    ax.text(x + tw / 2, ty + th - 0.067, f"cores {8*d}–{8*d+7}", ha="center", fontsize=11, color=SUB)
+    sw = (tw - 0.03) / 8
     for i in range(8):
-        core = d * 8 + i
-        cx = x + 0.012 + i * (lw_ - 0.024) / 8
-        cw = (lw_ - 0.024) / 8 - 0.005
+        core = 8 * d + i
         o = owner(core)
-        ax.add_patch(Rectangle((cx, 0.585), cw, 0.09, fc=C[o], ec="white", lw=1))
-        ax.text(cx + cw / 2, 0.645, f"c{core}", ha="center", fontsize=9.5, color="white", weight="bold")
-        ax.text(cx + cw / 2, 0.600, f"{core}\n{core+24}", ha="center", fontsize=7.5, color="white", linespacing=1.0)
-        if 5 <= core <= 14:  # 50% level footprint
-            ax.add_patch(Rectangle((cx, 0.570), cw, 0.008, fc="#5f6368", ec="none"))
-ax.text(0.06, 0.538, "▬ grey underline = cores used at the 50% level (20 vCPU, CPUs 5-14 + 29-38). The 95% level uses all orange cores (38 vCPU, CPUs 5-23 + 29-47).",
-        fontsize=9.5, color=C["sub"])
+        col = {"gpu": ACC, "cpu": SPEC, "sys": SYS}[o]
+        ax.add_patch(FancyBboxPatch((x + 0.015 + i * sw + 0.002, ty + 0.025), sw - 0.004, 0.05,
+                                    boxstyle="round,pad=0,rounding_size=0.004", fc=col, ec="none"))
 
-# Memory
-rbox(ax, 0.06, 0.45, 0.88, 0.048, fc=C["box"])
-tot = 180.0
-segs = [("vLLM 64 GiB (cgroup limit)", 64, C["vllm"]), ("SPEC ≤100 GiB (95%) / 58 GiB (50%)", 100, C["spec"]),
-        ("GKE ~16 GiB", 16, C["sys"])]
-x = 0.07
-for lbl, g, col in segs:
-    w = 0.86 * g / tot
-    ax.add_patch(Rectangle((x, 0.457), w, 0.033, fc=col, ec="white"))
-    ax.text(x + w / 2, 0.4735, lbl, ha="center", va="center", fontsize=9.5, color="white", weight="bold")
-    x += w
-ax.text(0.06, 0.508, "180 GiB DRAM · memory bandwidth shared by all cores (cannot be partitioned in the VM)", ha="left", fontsize=10, color=C["sub"], weight="bold")
+# arrow from callout to LLC 0
+yr = 0.721  # route between the socket subtitle and the LLC tiles
+ax.plot([0.78, 0.78, tx0 + tw / 2], [0.835, yr, yr], color=ACC, lw=1.6, solid_joinstyle="round")
+ax.add_patch(FancyArrowPatch((tx0 + tw / 2, yr), (tx0 + tw / 2, ty + th + 0.002), arrowstyle="-|>", mutation_scale=16,
+                             color=ACC, lw=1.6))
+
+# memory bar
+card(ax, 0.07, 0.41, 0.86, 0.085, fc=TILE, ec=TILE)
+ax.text(0.5, 0.462, "180 GB · NUMA node 0", ha="center", fontsize=16, weight="bold", color=INK)
+ax.text(0.5, 0.428, "CPUs 0–47 · memory bandwidth shared by every core", ha="center", fontsize=12, color=SUB)
 
 # PCIe + GPU
-ax.plot([0.5, 0.5], [0.44, 0.425], color=C["edge"], lw=2)
-rbox(ax, 0.42, 0.385, 0.16, 0.04, fc="white")
-ax.text(0.5, 0.405, "PCIe", ha="center", va="center", fontsize=12, weight="bold")
-ax.plot([0.5, 0.5], [0.385, 0.355], color=C["edge"], lw=2)
-rbox(ax, 0.36, 0.285, 0.28, 0.07, fc="#e8f0fe", ec=C["vllm"], lw=1.6)
-ax.text(0.5, 0.330, "NVIDIA RTX PRO 6000 Blackwell · 96 GB", ha="center", fontsize=12.5, weight="bold", color=C["text"])
-ax.text(0.5, 0.302, "dedicated to vLLM (Qwen3-1.7B, FP16)", ha="center", fontsize=10.5, color=C["vllm"])
+card(ax, 0.045, 0.165, 0.91, 0.2, fc="#efeeea", ec="#efeeea")
+ax.plot([0.5, 0.5], [0.385, 0.315], color="#bdbbb5", lw=1.4)
+card(ax, 0.40, 0.27, 0.20, 0.045)
+ax.text(0.5, 0.2925, "PCIe switch", ha="center", va="center", fontsize=15, weight="bold", color=INK)
+ax.plot([0.5, 0.5], [0.27, 0.245], color="#bdbbb5", lw=1.4)
+card(ax, 0.41, 0.18, 0.18, 0.065, ec=ACC, lw=2)
+ax.text(0.5, 0.222, "GPU 0", ha="center", fontsize=16, weight="bold", color=INK)
+ax.text(0.5, 0.193, "96 GB", ha="center", fontsize=13, color=SUB)
+ax.text(0.5, 0.142, "1 × NVIDIA RTX PRO 6000 Blackwell Server Edition · 96 GB", ha="center", fontsize=13, color=SUB)
 
-# Kubernetes layer
-ax.text(0.04, 0.245, "Kubernetes layer (GKE, kubelet static CPU manager: Guaranteed QoS + integer CPUs → exclusive cpuset)", fontsize=13, weight="bold", color=C["text"])
-pods = [
-    (0.04, C["vllm"], "vllm pod", "8 vCPU / 64 GiB / 1 GPU = AWS g7e.2xlarge shape\ncpuset 1-4,25-28 · --api-server-count=4\nvLLM v0.32.0 (image pinned by digest)"),
-    (0.35, C["spec"], "spec pod (the reclaimed workload)", "SPEC CPU 2026 rate, 16 benchmarks, train\n50%: 20 copies on 20 vCPU · 95%: 38 copies on 38 vCPU\ncpuset 5-14,29-38 or 5-23,29-47"),
-    (0.66, C["sys"], "shared pool (core 0)", "kubelet, kube-proxy, logging, GPU device plugin,\nnetworking, 1 s telemetry sampler\nCPUs 0,24 (GKE never hands these out exclusively)"),
-]
-for x, col, title, body in pods:
-    rbox(ax, x, 0.105, 0.30, 0.125, fc="white", ec=col, lw=2)
-    ax.add_patch(Rectangle((x, 0.205), 0.30, 0.025, fc=col, ec=col))
-    ax.text(x + 0.01, 0.2175, title, fontsize=11.5, weight="bold", color="white", va="center")
-    ax.text(x + 0.01, 0.195, body, fontsize=10, color=C["text"], va="top", linespacing=1.35)
+# how it is used
+card(ax, 0.045, 0.035, 0.91, 0.09)
+ax.text(0.07, 0.097, "How this experiment uses it", fontsize=14, weight="bold", color=INK)
+items = [(ACC, "GPU workload", "4 cores (8 vCPU) · 64 GB · GPU 0 = AWS g7e.2xlarge shape"),
+         (SPEC, "Co-located CPU work", "up to 19 cores (38 vCPU)"),
+         (SYS, "System (Kubernetes)", "1 core (2 vCPU)")]
+xs = [0.07, 0.50, 0.75]
+for (col, t, b), x in zip(items, xs):
+    ax.add_patch(FancyBboxPatch((x, 0.050), 0.016, 0.024, boxstyle="round,pad=0,rounding_size=0.003", fc=col, ec="none"))
+    ax.text(x + 0.024, 0.0675, t, fontsize=12.5, weight="bold", color=INK, va="center")
+    ax.text(x + 0.024, 0.0485, b, fontsize=11, color=SUB, va="center")
 
-# Load generator
-rbox(ax, 0.04, 0.025, 0.92, 0.06, fc=C["box"])
-ax.text(0.055, 0.055, "Load: 2 client pods on separate e2-standard-8 nodes → open-loop Poisson 625 req/s (75% of measured 832 RPS capacity), streaming,\ncustomer prompts (synthetic_yelp, ~600 in / ~11 out tokens). Baseline = vLLM solo cells from the same interleaved run.",
-        fontsize=10.5, color=C["text"], va="center")
+ax.add_patch(Rectangle((0.045, 0.008), 0.011, 0.014, fc=SYS, ec="none"))
+ax.text(0.062, 0.015, "one physical core (2 SMT threads) · 3 LLC domains × 16 CPUs = 48 logical CPUs · 1 NUMA node · 180 GB total memory",
+        fontsize=12, color=SUB, va="center")
 
-# Legend
-for i, (k, lbl) in enumerate([("vllm", "vLLM (GPU workload)"), ("spec", "SPEC (co-located CPU workload)"), ("sys", "GKE system")]):
-    ax.add_patch(Rectangle((0.04 + i * 0.2, 0.892), 0.014, 0.014, fc=C[k]))
-    ax.text(0.058 + i * 0.2, 0.899, lbl, fontsize=10.5, va="center", color=C["text"])
-
-fig.savefig(OUT / "g4_layers.png", dpi=140)
-fig.savefig(OUT / "g4_layers.svg")
+fig.savefig(OUT / "g4_layers.png", dpi=140, facecolor=BG)
+fig.savefig(OUT / "g4_layers.svg", facecolor=BG)
 print(OUT / "g4_layers.png")
