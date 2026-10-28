@@ -1,0 +1,12 @@
+{
+  "cell": "spec_solo-L38-r5",
+  "kind": "spec_solo",
+  "arm": "default",
+  "level": 38,
+  "rep": 5,
+  "t_begin": 1793158008.0928452,
+  "spec_rc": [
+    "SPEC_END 1793159086.103085179 rc=0"
+  ],
+  "t_end": 1793159099.5851576
+}

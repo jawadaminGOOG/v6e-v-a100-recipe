@@ -92,3 +92,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def render_readme():
+    """Insert the generated results section into README.template.md -> ../g4-colo-readme.md."""
+    sec = (A / "report_section.md").read_text()
+    tpl = (ROOT / "README.template.md").read_text()
+    (ROOT.parent / "g4-colo-readme.md").write_text(tpl.replace("RESULTS_SECTION", sec))
+
+
+render_readme()

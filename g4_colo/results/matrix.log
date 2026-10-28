@@ -54,3 +54,22 @@
 [02:02:13] === done colo-L38-r4 in 1324s
 [02:03:13] [19/25]
 [02:03:13] === cell spec_solo-L38-r4
+[02:21:24] === done spec_solo-L38-r4 in 1091s
+[02:22:24] [20/25]
+[02:22:24] === cell spec_solo-L20-r4
+[02:39:33] === done spec_solo-L20-r4 in 1030s
+[02:40:33] [21/25]
+[02:40:33] === cell colo-L38-r5
+[03:02:39] === done colo-L38-r5 in 1326s
+[03:03:39] [22/25]
+[03:03:39] === cell colo-L20-r5
+[03:25:48] === done colo-L20-r5 in 1329s
+[03:26:48] [23/25]
+[03:26:48] === cell spec_solo-L38-r5
+[03:44:59] === done spec_solo-L38-r5 in 1091s
+[03:45:59] [24/25]
+[03:45:59] === cell spec_solo-L20-r5
+[04:03:09] === done spec_solo-L20-r5 in 1030s
+[04:04:09] [25/25]
+[04:04:09] === cell vllm_solo-r5
+[04:26:05] === done vllm_solo-r5 in 1316s

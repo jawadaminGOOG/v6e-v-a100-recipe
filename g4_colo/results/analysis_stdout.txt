@@ -1,0 +1,53 @@
+       arm  level  spare_frac  pass_tolerance  pass_strict_ci0  pass_no_degradation  worst_upper_ci_pct
+0  default     20        0.50            True            False                False            5.224707
+1  default     38        0.95            True            False                False            7.660288
+        arm  level        metric  solo_mean  colo_mean  delta_pct  ci_lo  ci_hi  mde_pct  n_solo  n_colo  ci_includes_0  degraded
+0   default     20      ttft_p50      0.036      0.037      4.249  3.821  4.682    0.690       5       5          False      True
+1   default     20      ttft_p99      0.055      0.057      3.669  2.019  5.225    2.515       5       5          False      True
+2   default     20       itl_p50      0.012      0.012      0.633  0.151  1.135    0.788       5       5          False      True
+3   default     20       e2e_p50      0.154      0.157      1.431  0.927  1.960    0.827       5       5          False      True
+4   default     20       e2e_p99      0.220      0.224      1.763 -0.185  3.625    3.026       5       5           True     False
+5   default     20  output_tok_s   6913.905   6909.598     -0.062 -0.244  0.110    0.283       5       5           True     False
+6   default     20       itl_p99      0.017      0.017      0.794 -1.175  2.694    3.124       5       5           True     False
+7   default     20  achieved_rps    625.172    624.784     -0.062 -0.245  0.108    0.284       5       5           True     False
+8   default     38      ttft_p50      0.036      0.038      5.284  5.043  5.490    0.348       5       5          False      True
+9   default     38      ttft_p99      0.055      0.059      6.207  4.641  7.660    2.296       5       5          False      True
+10  default     38       itl_p50      0.012      0.012      1.474  1.237  1.711    0.379       5       5          False      True
+11  default     38       e2e_p50      0.154      0.158      2.290  2.035  2.538    0.396       5       5          False      True
+12  default     38       e2e_p99      0.220      0.229      3.882  2.227  5.458    2.504       5       5          False      True
+13  default     38  output_tok_s   6913.905   6914.838      0.013 -0.098  0.116    0.172       5       5           True     False
+14  default     38       itl_p99      0.017      0.017      2.676  0.925  4.328    2.660       5       5          False      True
+15  default     38  achieved_rps    625.172    625.263      0.015 -0.098  0.121    0.174       5       5           True     False
+        arm  level         benchmark   solo_s   colo_s  delta_pct  ci_lo  ci_hi  n_solo  n_colo
+0   default     20   706.stockfish_r   50.044   49.657     -0.772 -3.248  0.802       5       5
+1   default     20       707.ntest_r   46.625   48.504      4.029  3.712  4.330       5       5
+2   default     20      708.sqlite_r   28.005   28.111      0.381  0.034  0.726       5       5
+3   default     20     710.omnetpp_r   25.106   25.142      0.146 -0.534  0.826       5       5
+4   default     20     714.cpython_r   25.751   25.778      0.103 -0.926  1.178       5       5
+5   default     20         721.gcc_r   39.046   39.847      2.051  1.728  2.368       5       5
+6   default     20        723.llvm_r   40.043   40.437      0.985  0.322  1.496       5       5
+7   default     20    727.cppcheck_r   64.939   65.105      0.256 -0.527  1.377       5       5
+8   default     20         729.abc_r   51.566   51.923      0.692  0.016  1.331       5       5
+9   default     20         734.vpr_r   50.588   50.699      0.219 -0.943  1.351       5       5
+10  default     20        735.gem5_r   36.527   36.705      0.486  0.149  0.790       5       5
+11  default     20   749.fotonik3d_r  111.725  110.239     -1.330 -2.661  0.117       5       5
+12  default     20  750.sealcrypto_r   56.980   53.779     -5.619 -6.490 -4.690       5       5
+13  default     20         753.ns3_r   32.134   31.726     -1.269 -4.733  2.159       5       5
+14  default     20        777.zstd_r   97.473   97.882      0.419 -0.051  0.932       5       5
+15  default     20         782.lbm_r  129.829  127.896     -1.488 -3.279  0.341       5       5
+16  default     38   706.stockfish_r   52.369   51.302     -2.036 -3.720 -0.873       5       5
+17  default     38       707.ntest_r   47.961   49.190      2.564  2.164  2.967       5       5
+18  default     38      708.sqlite_r   28.796   28.999      0.706  0.541  0.856       5       5
+19  default     38     710.omnetpp_r   25.883   26.032      0.573 -0.099  1.444       5       5
+20  default     38     714.cpython_r   26.229   26.113     -0.444 -1.031  0.087       5       5
+21  default     38         721.gcc_r   40.308   41.030      1.791  1.598  1.981       5       5
+22  default     38        723.llvm_r   41.219   41.605      0.937  0.623  1.289       5       5
+23  default     38    727.cppcheck_r   67.275   67.600      0.482 -0.005  0.960       5       5
+24  default     38         729.abc_r   53.593   54.013      0.785  0.519  1.079       5       5
+25  default     38         734.vpr_r   54.260   54.542      0.520 -0.628  1.649       5       5
+26  default     38        735.gem5_r   37.337   37.454      0.312 -0.216  0.761       5       5
+27  default     38   749.fotonik3d_r  128.120  132.939      3.761  2.397  5.120       5       5
+28  default     38  750.sealcrypto_r   57.144   55.995     -2.010 -4.118  0.449       5       5
+29  default     38         753.ns3_r   32.013   32.102      0.280 -0.843  1.171       5       5
+30  default     38        777.zstd_r  103.246  103.887      0.620  0.274  0.997       5       5
+31  default     38         782.lbm_r  150.137  150.222      0.057 -0.842  0.940       5       5

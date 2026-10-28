@@ -1,0 +1,156 @@
+SPEC CPU 2026 Benchmark Suites
+Copyright 1995-2026 Standard Performance Evaluation Corporation (SPEC)
+
+runcpu (9ba4d1e3)
+Using 'linux-x86_64' tools
+Reading file manifests... read 64967 entries from 2 files in 0.09s (688333 files/s)
+Loading runcpu modules.................
+Locating benchmarks...found 54 benchmarks in 82 benchsets.
+Reading config file '/work/spec/config/g4colo.cfg'
+2 configurations selected:
+
+ Action    Run Mode   Workload     Report Type      Benchmarks
+--------   --------   --------   ----------------   ---------------------------
+validate   rate       train      SPECrate2026_int   706.stockfish_r,           
+                                                    707.ntest_r, 708.sqlite_r, 
+                                                    710.omnetpp_r,             
+                                                    714.cpython_r, 721.gcc_r,  
+                                                    723.llvm_r,                
+                                                    727.cppcheck_r, 729.abc_r, 
+                                                    734.vpr_r, 735.gem5_r,     
+                                                    750.sealcrypto_r,          
+                                                    753.ns3_r, 777.zstd_r      
+validate   rate       train      SPECrate2026_fp    749.fotonik3d_r, 782.lbm_r 
+-------------------------------------------------------------------------------
+
+Setting up environment for running 706.stockfish_r, 707.ntest_r, 708.sqlite_r, 710.omnetpp_r, 714.cpython_r, 721.gcc_r, 723.llvm_r, 727.cppcheck_r, 729.abc_r, 734.vpr_r, 735.gem5_r, 750.sealcrypto_r, 753.ns3_r, 777.zstd_r...
+Starting runcpu for 706.stockfish_r, 707.ntest_r, 708.sqlite_r, 710.omnetpp_r, 714.cpython_r, 721.gcc_r, 723.llvm_r, 727.cppcheck_r, 729.abc_r, 734.vpr_r, 735.gem5_r, 750.sealcrypto_r, 753.ns3_r, 777.zstd_r...
+Running "specperl /work/spec/bin/sysinfo" to gather system information.
+sysinfo: sysinfo 779ab21020787073335a329f3a45e2cd
+sysinfo: ...getting basic information about kernel, users, and limits
+sysinfo: Getting system information for Linux...
+sysinfo: ...getting CPU info
+sysinfo: ...getting info from numactl
+sysinfo: ...getting memory info
+sysinfo: ...getting power info
+sysinfo: ...getting system tuning info
+sysinfo: ...getting OS info
+sysinfo: ...getting disk info
+sysinfo: ...getting info from /sys/devices/virtual/dmi/id
+sysinfo: ...getting info from dmidecode
+Retrieving flags file (/work/spec/config/flags/gcc.xml)...
+Benchmarks selected: 706.stockfish_r, 707.ntest_r, 708.sqlite_r, 710.omnetpp_r, 714.cpython_r, 721.gcc_r, 723.llvm_r, 727.cppcheck_r, 729.abc_r, 734.vpr_r, 735.gem5_r, 750.sealcrypto_r, 753.ns3_r, 777.zstd_r
+Compiling Binaries
+  Up to date 706.stockfish_r base g4colo
+  Up to date 707.ntest_r base g4colo
+  Up to date 708.sqlite_r base g4colo
+  Up to date 710.omnetpp_r base g4colo
+  Up to date 714.cpython_r base g4colo
+  Up to date 721.gcc_r base g4colo
+  Up to date 723.llvm_r base g4colo
+  Up to date 727.cppcheck_r base g4colo
+  Up to date 729.abc_r base g4colo
+  Up to date 734.vpr_r base g4colo
+  Up to date 735.gem5_r base g4colo
+  Up to date 750.sealcrypto_r base g4colo
+  Up to date 753.ns3_r base g4colo
+  Up to date 777.zstd_r base g4colo
+
+
+Setting Up Run Directories
+  Setting up 706.stockfish_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 707.ntest_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 708.sqlite_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 710.omnetpp_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 714.cpython_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 721.gcc_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 723.llvm_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 727.cppcheck_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 729.abc_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 734.vpr_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 735.gem5_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 750.sealcrypto_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 753.ns3_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 777.zstd_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+Running Benchmarks
+  Running 706.stockfish_r train base g4colo (20 copies) [2026-10-28 02:23:37]
+  Running 707.ntest_r train base g4colo (20 copies) [2026-10-28 02:24:27]
+  Running 708.sqlite_r train base g4colo (20 copies) [2026-10-28 02:25:14]
+  Running 710.omnetpp_r train base g4colo (20 copies) [2026-10-28 02:25:43]
+  Running 714.cpython_r train base g4colo (20 copies) [2026-10-28 02:26:14]
+  Running 721.gcc_r train base g4colo (20 copies) [2026-10-28 02:26:42]
+  Running 723.llvm_r train base g4colo (20 copies) [2026-10-28 02:27:29]
+  Running 727.cppcheck_r train base g4colo (20 copies) [2026-10-28 02:28:11]
+  Running 729.abc_r train base g4colo (20 copies) [2026-10-28 02:29:18]
+  Running 734.vpr_r train base g4colo (20 copies) [2026-10-28 02:30:14]
+  Running 735.gem5_r train base g4colo (20 copies) [2026-10-28 02:31:12]
+  Running 750.sealcrypto_r train base g4colo (20 copies) [2026-10-28 02:31:49]
+  Running 753.ns3_r train base g4colo (20 copies) [2026-10-28 02:32:49]
+  Running 777.zstd_r train base g4colo (20 copies) [2026-10-28 02:33:21]
+Success: 1x706.stockfish_r 1x707.ntest_r 1x708.sqlite_r 1x710.omnetpp_r 1x714.cpython_r 1x721.gcc_r 1x723.llvm_r 1x727.cppcheck_r 1x729.abc_r 1x734.vpr_r 1x735.gem5_r 1x750.sealcrypto_r 1x753.ns3_r 1x777.zstd_r
+Producing Raw Reports
+ label: g4colo
+  workload: train
+   metric: SPECrate2026_int_base
+    format: raw -> /work/spec/result/CPU2026.025.intrate.train.rsf
+Parsing flags for 706.stockfish_r base: done
+Parsing flags for 707.ntest_r base: done
+Parsing flags for 708.sqlite_r base: done
+Parsing flags for 710.omnetpp_r base: done
+Parsing flags for 714.cpython_r base: done
+Parsing flags for 721.gcc_r base: done
+Parsing flags for 723.llvm_r base: done
+Parsing flags for 727.cppcheck_r base: done
+Parsing flags for 729.abc_r base: done
+Parsing flags for 734.vpr_r base: done
+Parsing flags for 735.gem5_r base: done
+Parsing flags for 750.sealcrypto_r base: done
+Parsing flags for 753.ns3_r base: done
+Parsing flags for 777.zstd_r base: done
+Doing flag reduction: done
+    format: CSV -> /work/spec/result/CPU2026.025.intrate.train.csv
+    format: Text -> /work/spec/result/CPU2026.025.intrate.train.txt
+-------------------------------------------------------------------------------
+
+Setting up environment for running 749.fotonik3d_r, 782.lbm_r...
+Starting runcpu for 749.fotonik3d_r, 782.lbm_r...
+Running "specperl /work/spec/bin/sysinfo" to gather system information.
+sysinfo: sysinfo 779ab21020787073335a329f3a45e2cd
+sysinfo: ...getting basic information about kernel, users, and limits
+sysinfo: Getting system information for Linux...
+sysinfo: ...getting CPU info
+sysinfo: ...getting info from numactl
+sysinfo: ...getting memory info
+sysinfo: ...getting power info
+sysinfo: ...getting system tuning info
+sysinfo: ...getting OS info
+sysinfo: ...getting disk info
+sysinfo: ...getting info from /sys/devices/virtual/dmi/id
+sysinfo: ...getting info from dmidecode
+Retrieving flags file (/work/spec/config/flags/gcc.xml)...
+Benchmarks selected: 749.fotonik3d_r, 782.lbm_r
+Compiling Binaries
+  Up to date 749.fotonik3d_r base g4colo
+  Up to date 782.lbm_r base g4colo
+
+
+Setting Up Run Directories
+  Setting up 749.fotonik3d_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+  Setting up 782.lbm_r train base g4colo (20 copies): run_base_train_g4colo.0000-0019
+Running Benchmarks
+  Running 749.fotonik3d_r train base g4colo (20 copies) [2026-10-28 02:35:12]
+  Running 782.lbm_r train base g4colo (20 copies) [2026-10-28 02:37:05]
+Success: 1x749.fotonik3d_r 1x782.lbm_r
+Producing Raw Reports
+ label: g4colo
+  workload: train
+   metric: SPECrate2026_fp_base
+    format: raw -> /work/spec/result/CPU2026.025.fprate.train.rsf
+Parsing flags for 749.fotonik3d_r base: done
+Parsing flags for 782.lbm_r base: done
+Doing flag reduction: done
+    format: CSV -> /work/spec/result/CPU2026.025.fprate.train.csv
+    format: Text -> /work/spec/result/CPU2026.025.fprate.train.txt
+The log for this run is in /work/spec/result/CPU2026.025.log
+
+runcpu finished at 2026-10-28 02:39:20; 1008 total seconds elapsed

@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 A = ROOT / "results" / "analysis"
 P = ROOT / "results" / "plots"
 CFG = json.loads((ROOT / "experiment.json").read_text())
-LN = {int(k): v for k, v in CFG["level_names"].items()}
+LN = {int(k): v.split(" (")[0] for k, v in CFG["level_names"].items()}
 NICE = {"ttft_p50": "TTFT p50", "ttft_p99": "TTFT p99", "itl_p50": "ITL p50", "itl_p99": "ITL p99",
         "e2e_p50": "E2E p50", "e2e_p99": "E2E p99", "output_tok_s": "Output tok/s", "achieved_rps": "RPS"}
 

@@ -293,3 +293,9 @@ The tables below show scaling from Concurrency 100 to 250.
     *   **Recommendation:** Keep block size at **256** (or at least 128) on TPUs. The minor cache hit rate gains from smaller block sizes are heavily outweighed by the hardware execution inefficiency.
 
 
+
+---
+
+## G4 co-location study
+
+See [g4-colo-readme.md](g4-colo-readme.md): GPU workload limited to 8 vCPU / 64 GiB on a `g4-standard-48` while SPEC CPU 2026 runs on the remaining cores.
