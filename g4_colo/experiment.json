@@ -41,5 +41,7 @@
     "also_reported": "strict bar: 95% CI includes 0 for every metric"
   },
   "latency_tolerance_pct": 10,
-  "throughput_tolerance_pct": 2
+  "throughput_tolerance_pct": 2,
+  "cap_concurrency": 500,
+  "cap_rps_est": 900
 }

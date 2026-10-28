@@ -161,7 +161,9 @@ def vllm_metrics(outdir: Path, tag: str):
 
 
 # ---------------------------------------------------------------- load
-def load_start(cell: str, duration: float, start_at: float):
+def load_start(cell: str, duration: float, start_at: float, closed: bool = False):
+    """Open loop at CFG open_loop_rate, or (closed=True) saturating closed loop at
+    CFG cap_concurrency in-flight requests with enough messages to outlast SPEC."""
     ip = k("get pod vllm -o jsonpath={.status.podIP}")
     total_rate = CFG["open_loop_rate"]
     nproc = len(CLIENTS) * PROCS_PER_CLIENT
@@ -171,10 +173,16 @@ def load_start(cell: str, duration: float, start_at: float):
         for p in range(PROCS_PER_CLIENT):
             label = f"{cell}.p{j}"
             seed = 1000 + j * 7919 + int(start_at) % 100000
+            if closed:
+                nproc_c = CFG["cap_concurrency"] // nproc + (1 if j < CFG["cap_concurrency"] % nproc else 0)
+                mode = (f"--mode closed --concurrency {nproc_c} "
+                        f"--num-messages {int(CFG['cap_rps_est'] * duration / nproc)} ")
+            else:
+                mode = f"--mode open --rate {r:.4f} --duration {duration:.0f} "
             cmd = (f"cd /tmp && setsid nohup python colo_bench.py --input-file /tmp/synthetic_yelp.xlsx "
                    f"--output-dir /tmp/out/{cell} --url http://{ip}:8000/v1/completions "
-                   f"--tokenizer {CFG['model']} --label {label} --mode open --rate {r:.4f} "
-                   f"--duration {duration:.0f} --seed {seed} --start-at {start_at:.3f} "
+                   f"--tokenizer {CFG['model']} --label {label} {mode}"
+                   f"--seed {seed} --start-at {start_at:.3f} "
                    f"--request-timeout 300 </dev/null > /tmp/out/{label}.log 2>&1 &")
             launch(f"exec {c} -- bash -c 'mkdir -p /tmp/out/{cell} && {cmd}'")
             j += 1
@@ -278,6 +286,19 @@ def run_cell(kind: str, level: int, rep: int, arm: str = "A") -> dict:
         load_wait(cell, outdir, int(dur + 900))
         vllm_metrics(outdir, "post")
         meta["spec_rc"] = [l for l in spec_logs.splitlines() if l.startswith("SPEC_END")]
+    elif kind == "cap":
+        # saturating closed-loop load for the whole SPEC run (level 0 = no SPEC)
+        dur = CFG["spec_est_s"] + CFG["spec_margin_s"]
+        telemetry_start(cell, int(dur * 1.5 + 120))
+        if level:
+            spec_start(spec_name, level)
+        cpu_state(outdir, "during")
+        start_at = time.time() + 15
+        load_start(cell, dur, start_at, closed=True)
+        if level:
+            spec_logs = spec_wait(spec_name, outdir)
+            meta["spec_rc"] = [l for l in spec_logs.splitlines() if l.startswith("SPEC_END")]
+        load_wait(cell, outdir, int(dur * 2 + 900))
     elif kind == "spec_solo":
         spec_dur = CFG["spec_est_s"]
         telemetry_start(cell, int(spec_dur + CFG["spec_margin_s"] + 120))
@@ -311,20 +332,29 @@ def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("cell")
-    c.add_argument("--kind", required=True, choices=["vllm_solo", "colo", "spec_solo"])
+    c.add_argument("--kind", required=True, choices=["vllm_solo", "colo", "spec_solo", "cap"])
     c.add_argument("--level", type=int, default=0)
     c.add_argument("--rep", type=int, default=0)
     c.add_argument("--arm", default="A")
     m = sub.add_parser("matrix")
     m.add_argument("--reps", type=int, default=5)
     m.add_argument("--seed", type=int, default=20261027)
+    m.add_argument("--cap", action="store_true", help="capacity sanity matrix: cap at solo/20/38, interleaved")
     a = ap.parse_args()
     RESULTS.mkdir(exist_ok=True)
     if a.cmd == "cell":
         run_cell(a.kind, a.level, a.rep, a.arm)
     else:
-        sched = schedule(a.reps, a.seed)
-        (RESULTS / "schedule.json").write_text(json.dumps(sched, indent=1))
+        if a.cap:
+            rng = random.Random(a.seed + 1)
+            sched = []
+            for r in range(1, a.reps + 1):
+                blk = [("cap", 0, "default"), ("cap", 20, "default"), ("cap", 38, "default")]
+                rng.shuffle(blk)
+                sched += [(kd, L, r, arm) for kd, L, arm in blk]
+        else:
+            sched = schedule(a.reps, a.seed)
+        (RESULTS / f"schedule{'-' + VARIANT if VARIANT else ''}.json").write_text(json.dumps(sched, indent=1))
         for i, (kd, L, r, arm) in enumerate(sched):
             log(f"[{i + 1}/{len(sched)}]")
             for attempt in range(2):
