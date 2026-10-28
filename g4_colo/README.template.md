@@ -1,4 +1,4 @@
-# g4-standard-48 co-location: GPU workload on an 8-vCPU slice, CPU work on the rest
+# Using the idle CPU on a g4-standard-48: GPU inference and CPU work on one node
 
 **Question.** A `g4-standard-48` has 48 vCPU and 180 GB of memory next to one RTX PRO 6000 GPU. With the GPU
 workload held to 8 vCPU / 64 GiB, what happens to it when the remaining vCPU run CPU work, and what happens to that
@@ -27,7 +27,7 @@ of [*The Idle Half of a GPU Pod*](https://medium.com/google-cloud/the-idle-half-
 
 ## 1. Setup
 
-![g4-standard-48 layout](g4_colo/diagrams/g4_layers.png)
+![g4-standard-48 layout](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/diagrams/g4_layers.png)
 
 | Item | Value |
 |---|---|
@@ -75,7 +75,7 @@ met these checks; none were discarded.
 
 ## 3. Results
 
-![Change vs solo](g4_colo/results/plots/vllm_delta_summary.png)
+![Change vs solo](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/vllm_delta_summary.png)
 
 *Change vs solo for each metric, with the memory-bandwidth-heavy class shown per benchmark (`749.fotonik3d_r`,
 `782.lbm_r`). Error bars are 95% CIs.*
@@ -84,23 +84,23 @@ RESULTS_SECTION
 
 ### Latency distributions
 
-![CDF compute](g4_colo/results/plots/latency_cdf_compute.png)
+![CDF compute](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/latency_cdf_compute.png)
 
-![CDF bandwidth](g4_colo/results/plots/latency_cdf_bandwidth.png)
+![CDF bandwidth](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/latency_cdf_bandwidth.png)
 
 *Cumulative distributions of all requests pooled across the 5 runs. Top row: every request. Bottom row: the slowest
 10%. With compute-type co-located work, the distributions shift right by a few milliseconds. With
 memory-bandwidth-heavy work, most requests shift moderately and the slowest fifth stretch out, which drives the p99
 change.*
 
-![SPEC impact](g4_colo/results/plots/spec_impact_forest.png)
+![SPEC impact](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/spec_impact_forest.png)
 
-![Per-CPU busy, colo 95%](g4_colo/results/plots/cpu_heatmap_colo-L38-r1.png)
+![Per-CPU busy, colo 95%](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/cpu_heatmap_colo-L38-r1.png)
 
 *Per-CPU utilisation in a 95% run. Rows 1-4 and 25-28 are vLLM; the solid yellow blocks are SPEC benchmarks, with the
 last two being `fotonik3d` and `lbm`. Gaps between blocks are SPEC setting up the next benchmark.*
 
-![Per-CPU busy, solo](g4_colo/results/plots/cpu_heatmap_vllm_solo-r1.png)
+![Per-CPU busy, solo](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/cpu_heatmap_vllm_solo-r1.png)
 
 *The same node with only the GPU workload running.*
 
