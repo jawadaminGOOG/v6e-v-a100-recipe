@@ -1,0 +1,468 @@
+##################################################################################################################################
+#   INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN                                                      #
+#                                                                                                                                #
+# There is no set of valid runs with the same number of copies for base                                                          #
+# 'reportable' flag not set during run                                                                                           #
+# 709.cactus_r (base) did not have enough runs!                                                                                  #
+# 722.palm_r (base) did not have enough runs!                                                                                    #
+# 731.astcenc_r (base) did not have enough runs!                                                                                 #
+# 736.ocio_r (base) did not have enough runs!                                                                                    #
+# 737.gmsh_r (base) did not have enough runs!                                                                                    #
+# 748.flightdm_r (base) did not have enough runs!                                                                                #
+# 749.fotonik3d_r (base) did not have enough runs!                                                                               #
+# 765.roms_r (base) did not have enough runs!                                                                                    #
+# 766.femflow_r (base) did not have enough runs!                                                                                 #
+# 767.nest_r (base) did not have enough runs!                                                                                    #
+# 772.marian_r (base) did not have enough runs!                                                                                  #
+# 782.lbm_r (base) did not have enough runs!                                                                                     #
+# Input set must be 'refrate' for a valid run (set to 'train' for this run)                                                      #
+#                                                                                                                                #
+#   INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN                                                      #
+##################################################################################################################################
+                                            SPEC CPU(R)2026 Floating Point Rate Result
+                                                         Google Cloud --
+                                                 Test Sponsor: g4-colo experiment
+
+                           CPU2026 License: nnn                                     Test date: Oct-2026
+                           Test sponsor: g4-colo experiment             Hardware availability: --      
+                           Tested by:    g4-colo experiment             Software availability: --      
+
+                         Estimated                        Estimated
+                  Base     Base        Base        Peak     Peak        Peak
+Benchmarks        Copies  Run Time     Rate        Copies  Run Time     Rate 
+---------------- -------  ---------  ---------    -------  ---------  ---------
+709.cactus_r                                   NR
+722.palm_r                                     NR
+731.astcenc_r                                  NR
+736.ocio_r                                     NR
+737.gmsh_r                                     NR
+748.flightdm_r                                 NR
+749.fotonik3d_r       20        109         --  S
+765.roms_r                                     NR
+766.femflow_r                                  NR
+767.nest_r                                     NR
+772.marian_r                                   NR
+782.lbm_r             20        129         --  S
+==================================================================================
+709.cactus_r                                   NR
+722.palm_r                                     NR
+731.astcenc_r                                  NR
+736.ocio_r                                     NR
+737.gmsh_r                                     NR
+748.flightdm_r                                 NR
+749.fotonik3d_r                                NR
+765.roms_r                                     NR
+766.femflow_r                                  NR
+767.nest_r                                     NR
+772.marian_r                                   NR
+782.lbm_r                                      NR
+ Est. SPECrate(R)2026_fp_base             0.00
+ Est. SPECrate(R)2026_fp_peak                                           Not Run
+
+
+                                                             HARDWARE
+                                                             --------
+            CPU Name: --
+             Max MHz: --
+             Nominal: --
+             Enabled: -1 cores, -1 chips, -1 threads/core
+           Orderable: --
+            Cache L1: --
+                  L2: --
+                  L3: --
+               Other: --
+              Memory: --
+             Storage: --
+             Cooling: --
+               Other: --
+
+
+                                                             SOFTWARE
+                                                             --------
+                  OS: --
+            Compiler: C/C++/Fortran: GCC 14 (Ubuntu 24.04)
+   Compiler Category: --
+            Firmware: --
+         File System: --
+        System State: --
+       Base Pointers: 64-bit
+       Peak Pointers: Not Applicable
+               Other: --
+    Power Management: --
+
+
+                                                   Environment Variables Notes
+                                                   ---------------------------
+    Environment variables set by runcpu before the start of the run:
+    LD_LIBRARY_PATH = "/usr/local/lib64/:/usr/local/lib/:/lib64"
+    
+
+                                                          Platform Notes
+                                                          --------------
+    
+     Sysinfo program /work/spec/bin/sysinfo
+     Rev: 779ab21020787073335a329f3a45e2cd
+     running on spec-colo-l20-r2 Tue Oct 27 22:37:33 2026
+    
+     SUT (System Under Test) info as seen by some common utilities.
+    
+     ------------------------------------------------------------
+     Table of contents
+     ------------------------------------------------------------
+      1. uname -srvm
+      2. w
+      3. ulimit -a
+      4. sysinfo process ancestry
+      5. /proc/cpuinfo
+      6. lscpu
+      7. numactl warning
+      8. /proc/meminfo
+      9. Linux kernel boot-time arguments, from /proc/cmdline
+     10. sysctl
+     11. /sys/kernel/mm/transparent_hugepage
+     12. /sys/kernel/mm/transparent_hugepage/khugepaged
+     13. OS release
+     14. Disk information
+     15. /sys/devices/virtual/dmi/id
+     16. dmidecode warning
+     17. BIOS
+     ------------------------------------------------------------
+    
+     ------------------------------------------------------------
+     1. uname -srvm
+       Linux 6.12.105+ #1 SMP Sat Sep 19 07:57:03 UTC 2026 x86_64
+    
+     ------------------------------------------------------------
+     2. w
+        22:37:33 up  6:49,  0 user,  load average: 18.42, 20.32, 16.89
+       USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU  WHAT
+    
+     ------------------------------------------------------------
+     3. ulimit -a
+       time(seconds)        unlimited
+       file(blocks)         unlimited
+       data(kbytes)         unlimited
+       stack(kbytes)        8192
+       coredump(blocks)     unlimited
+       memory(kbytes)       unlimited
+       locked memory(kbytes) 8192
+       process              unlimited
+       nofiles              1048576
+       vmemory(kbytes)      unlimited
+       locks                unlimited
+       rtprio               0
+    
+     ------------------------------------------------------------
+     4. sysinfo process ancestry
+      runcpu --config=g4colo --action=run --size=train --copies=20 --iterations=1    --noreportable --deletework
+        --define gcc_dir=/usr/local --output_format=txt,csv    714.cpython_r 721.gcc_r 723.llvm_r 727.cppcheck_r
+        729.abc_r 734.vpr_r 735.gem5_r 708.sqlite_r 753.ns3_r 710.omnetpp_r 750.sealcrypto_r 706.stockfish_r
+        707.ntest_r 777.zstd_r 749.fotonik3d_r 782.lbm_r > /tmp/runcpu.log 2>&1 rc=$? echo SPEC_END $(date +%s.%N)
+        rc=$rc grep -E "Running|Success|Error|Run Complete|format: CSV|format: Text" /tmp/runcpu.log | tail -60
+        mkdir -p /work/results/spec-colo-l20-r2 cp /tmp/runcpu.log /tmp/cpuset /work/results/spec-colo-l20-r2/ for
+        f in $(grep -oE "$SPEC/result/CPU2026\.[0-9]+\.[a-z]+\.(train|refrate|test)\.(csv|txt)" /tmp/runcpu.log |
+        sort -u); do cp $f /work/results/spec-colo-l20-r2/; done ls /work/results/spec-colo-l20-r2 echo SPEC_DONE
+      runcpu --config=g4colo --action=run --size=train --copies=20 --iterations=1 --noreportable --deletework
+        --define gcc_dir=/usr/local --output_format=txt,csv 714.cpython_r 721.gcc_r 723.llvm_r 727.cppcheck_r
+        729.abc_r 734.vpr_r 735.gem5_r 708.sqlite_r 753.ns3_r 710.omnetpp_r 750.sealcrypto_r 706.stockfish_r
+        707.ntest_r 777.zstd_r 749.fotonik3d_r 782.lbm_r
+      runcpu --configfile g4colo --action run --size train --copies 20 --iterations 1 --noreportable --deletework
+        --define gcc_dir=/usr/local --output_format txt,csv --noreportable --nopower --runmode rate --tune base
+        --size train 749.fotonik3d_r 782.lbm_r --nopreenv --note-preenv --logfile
+        $SPEC/tmp/CPU2026.016/templogs/preenv.fprate.016.1.log --lognum 016.1 --from_runcpu 2
+      specperl $SPEC/bin/sysinfo
+     $SPEC = /work/spec
+    
+     ------------------------------------------------------------
+     5. /proc/cpuinfo
+         model name      : AMD EPYC 9B45
+         vendor_id       : AuthenticAMD
+         cpu family      : 26
+         model           : 2
+         stepping        : 1
+         microcode       : 0xffffffff
+         bugs            : sysret_ss_attrs spectre_v1 spectre_v2 spec_store_bypass srso
+         TLB size        : 192 4K pages
+         cpu cores       : 24
+         siblings        : 48
+         1 physical ids (chips)
+         48 processors (hardware threads)
+         physical id 0: core ids 0-23
+         physical id 0: apicids 0-47
+       Caution: /proc/cpuinfo data regarding chips, cores, and threads is not necessarily reliable, especially for
+       virtualized systems.  Use the above data carefully.
+    
+     ------------------------------------------------------------
+     6. lscpu
+    
+     From lscpu from util-linux 2.39.3:
+       Architecture:                            x86_64
+       CPU op-mode(s):                          32-bit, 64-bit
+       Address sizes:                           52 bits physical, 57 bits virtual
+       Byte Order:                              Little Endian
+       CPU(s):                                  48
+       On-line CPU(s) list:                     0-47
+       Vendor ID:                               AuthenticAMD
+       Model name:                              AMD EPYC 9B45
+       CPU family:                              26
+       Model:                                   2
+       Thread(s) per core:                      2
+       Core(s) per socket:                      24
+       Socket(s):                               1
+       Stepping:                                1
+       BogoMIPS:                                5400.00
+       Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat
+                                                pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt
+                                                pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology nonstop_tsc
+                                                cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq monitor
+                                                ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave
+                                                avx f16c rdrand hypervisor lahf_lm cmp_legacy cr8_legacy abm sse4a
+                                                misalignsse 3dnowprefetch osvw topoext mwaitx ssbd ibrs ibpb stibp
+                                                ibrs_enhanced vmmcall fsgsbase tsc_adjust bmi1 avx2 smep bmi2
+                                                invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt
+                                                clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1
+                                                xsaves avx_vnni avx512_bf16 clzero xsaveerptr wbnoinvd arat
+                                                avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq
+                                                avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid movdiri movdir64b
+                                                avx512_vp2intersect flush_l1d
+       Hypervisor vendor:                       KVM
+       Virtualization type:                     full
+       L1d cache:                               1.1 MiB (24 instances)
+       L1i cache:                               768 KiB (24 instances)
+       L2 cache:                                24 MiB (24 instances)
+       L3 cache:                                96 MiB (3 instances)
+       NUMA node(s):                            1
+       NUMA node0 CPU(s):                       0-47
+       Vulnerability Gather data sampling:      Not affected
+       Vulnerability Indirect target selection: Not affected
+       Vulnerability Itlb multihit:             Not affected
+       Vulnerability L1tf:                      Not affected
+       Vulnerability Mds:                       Not affected
+       Vulnerability Meltdown:                  Not affected
+       Vulnerability Mmio stale data:           Not affected
+       Vulnerability Reg file data sampling:    Not affected
+       Vulnerability Retbleed:                  Not affected
+       Vulnerability Spec rstack overflow:      Mitigation; IBPB on VMEXIT only
+       Vulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl
+       Vulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer
+                                                sanitization
+       Vulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; STIBP
+                                                always-on; PBRSB-eIBRS Not affected; BHI Not affected
+       Vulnerability Srbds:                     Not affected
+       Vulnerability Tsa:                       Not affected
+       Vulnerability Tsx async abort:           Not affected
+       Vulnerability Vmscape:                   Not affected
+    
+     From lscpu --cache:
+          NAME ONE-SIZE ALL-SIZE WAYS TYPE        LEVEL  SETS PHY-LINE COHERENCY-SIZE
+          L1d       48K     1.1M   12 Data            1    64        1             64
+          L1i       32K     768K    8 Instruction     1    64        1             64
+          L2         1M      24M   16 Unified         2  1024        1             64
+          L3        32M      96M   16 Unified         3 32768        1             64
+    
+     ------------------------------------------------------------
+     7. numactl warning
+    
+     Unable to get information from 'numactl --hardware'.  Please consider installing numactl.
+    
+     ------------------------------------------------------------
+     8. /proc/meminfo
+        MemTotal:       185473284 kB
+    
+     'who -r' did not return a run level
+    
+     Could not find systemctl
+    
+     ------------------------------------------------------------
+     9. Linux kernel boot-time arguments, from /proc/cmdline
+       BOOT_IMAGE=/syslinux/vmlinuz.A
+       init=/usr/lib/systemd/systemd
+       rootwait
+       ro
+       noresume
+       loglevel=7
+       console=tty1
+       console=ttyS0,115200
+       security=apparmor
+       virtio_net.napi_tx=1
+       nmi_watchdog=0
+       csm.disabled=0
+       csm.pipe.enabled=1
+       csm.config.enabled=1
+       ,firmware
+       firmware_class.path=/home/kubernetes/bin/nvidia/firmware
+       module.sig_enforce=0
+       dm_verity.error_behavior=3
+       dm_verity.max_bios=-1
+       dm_verity.dev_wait=1
+       i915.modeset=1
+       cros_efi
+       loadpin.enforce=0
+       loadpin.enabled=0
+       lsm.module_locking=0
+       modules-load=vfio-pci
+       root=/dev/dm-0
+       "dm-mod.create=vroot,,,ro,0
+       4077568
+       verity
+       0
+       PARTUUID=36020A56-4DB3-2C48-9CB7-45A0F880056F
+       PARTUUID=36020A56-4DB3-2C48-9CB7-45A0F880056F
+       4096
+       4096
+       509696
+       509696
+       sha256
+       20a7966fced92f0df469c2b661390a02bd0a99ed27f7fd9bf2298ca62875005d
+       b325b11800f535371fce84cff54c93f52464333dfc62fae884a0c212b141b7f6"
+    
+     ------------------------------------------------------------
+     10. sysctl
+       kernel.randomize_va_space           2
+       vm.compaction_proactiveness        20
+       vm.dirty_background_bytes           0
+       vm.dirty_background_ratio          10
+       vm.dirty_bytes                      0
+       vm.dirty_expire_centisecs        3000
+       vm.dirty_ratio                     20
+       vm.dirty_writeback_centisecs      500
+       vm.dirtytime_expire_seconds     43200
+       vm.extfrag_threshold              500
+       vm.min_unmapped_ratio               1
+       vm.nr_hugepages                     0
+       vm.nr_hugepages_mempolicy           0
+       vm.nr_overcommit_hugepages          0
+       vm.swappiness                      60
+       vm.watermark_boost_factor       15000
+       vm.watermark_scale_factor          10
+       vm.zone_reclaim_mode                0
+    
+     ------------------------------------------------------------
+     11. /sys/kernel/mm/transparent_hugepage
+       defrag          always defer defer+madvise [madvise] never
+       enabled         always [madvise] never
+       hpage_pmd_size  2097152
+       shmem_enabled   always within_size advise [never] deny force
+    
+     ------------------------------------------------------------
+     12. /sys/kernel/mm/transparent_hugepage/khugepaged
+       alloc_sleep_millisecs   60000
+       defrag                      1
+       max_ptes_none             511
+       max_ptes_shared           256
+       max_ptes_swap              64
+       pages_to_scan            4096
+       scan_sleep_millisecs    10000
+    
+     ------------------------------------------------------------
+     13. OS release
+       From /etc/*-release /etc/*-version
+       os-release Ubuntu 24.04.5 LTS
+    
+     ------------------------------------------------------------
+     14. Disk information
+     SPEC is set to: /work/spec
+       Filesystem     Type  Size  Used Avail Use% Mounted on
+       /dev/nvme0n1p1 ext4  144G   80G   65G  56% /work
+    
+     ------------------------------------------------------------
+     15. /sys/devices/virtual/dmi/id
+         Vendor:         Google
+         Product:        Google Compute Engine
+         Serial:         GoogleCloud-183F52C969D33BFFF6BA7D7BCD86C834
+    
+     ------------------------------------------------------------
+     16. dmidecode warning
+       Could not find dmidecode
+    
+    
+     ------------------------------------------------------------
+     17. BIOS
+     (This section combines info from /sys/devices and dmidecode.)
+        BIOS Vendor:       Google
+        BIOS Version:      Google
+        BIOS Date:         08/14/2026
+
+                                                      Compiler Version Notes
+                                                      ----------------------
+    ==============================================================================
+    C       | 782.lbm_r(base)
+    ------------------------------------------------------------------------------
+    gcc (Ubuntu 14.2.0-4ubuntu2~24.04.1) 14.2.0
+    Copyright (C) 2024 Free Software Foundation, Inc.
+    This is free software; see the source for copying conditions.  There is NO
+    warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+    ------------------------------------------------------------------------------
+    
+    ==============================================================================
+    Fortran | 749.fotonik3d_r(base)
+    ------------------------------------------------------------------------------
+    GNU Fortran (Ubuntu 14.2.0-4ubuntu2~24.04.1) 14.2.0
+    Copyright (C) 2024 Free Software Foundation, Inc.
+    This is free software; see the source for copying conditions.  There is NO
+    warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+    ------------------------------------------------------------------------------
+
+                                                     Base Runtime Environment
+                                                     ------------------------
+Fortran benchmarks:
+
+ 749.fotonik3d_r: No flags used
+
+
+                                                     Base Compiler Invocation
+                                                     ------------------------
+C benchmarks: 
+     gcc
+
+Fortran benchmarks:
+
+ 749.fotonik3d_r: gfortran
+
+
+                                                     Base Optimization Flags
+                                                     -----------------------
+C benchmarks: 
+     -m64 -std=c18 -g -O3 -march=x86-64-v3
+
+Fortran benchmarks:
+
+ 749.fotonik3d_r: -m64 -std=f2018 -g -O3 -march=x86-64-v3 -fallow-argument-mismatch
+
+
+                                                         Base Other Flags
+                                                         ----------------
+Fortran benchmarks:
+
+ 749.fotonik3d_r: No flags used
+
+
+  SPEC CPU and SPECrate are registered trademarks of the Standard Performance Evaluation Corporation.  All other brand and
+    product names appearing in this result are trademarks or registered trademarks of their respective holders.
+##################################################################################################################################
+#   INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN                                                      #
+#                                                                                                                                #
+# There is no set of valid runs with the same number of copies for base                                                          #
+# 'reportable' flag not set during run                                                                                           #
+# 709.cactus_r (base) did not have enough runs!                                                                                  #
+# 722.palm_r (base) did not have enough runs!                                                                                    #
+# 731.astcenc_r (base) did not have enough runs!                                                                                 #
+# 736.ocio_r (base) did not have enough runs!                                                                                    #
+# 737.gmsh_r (base) did not have enough runs!                                                                                    #
+# 748.flightdm_r (base) did not have enough runs!                                                                                #
+# 749.fotonik3d_r (base) did not have enough runs!                                                                               #
+# 765.roms_r (base) did not have enough runs!                                                                                    #
+# 766.femflow_r (base) did not have enough runs!                                                                                 #
+# 767.nest_r (base) did not have enough runs!                                                                                    #
+# 772.marian_r (base) did not have enough runs!                                                                                  #
+# 782.lbm_r (base) did not have enough runs!                                                                                     #
+# Input set must be 'refrate' for a valid run (set to 'train' for this run)                                                      #
+#                                                                                                                                #
+#   INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN -- INVALID RUN                                                      #
+##################################################################################################################################
+----------------------------------------------------------------------------------------------------------------------------------
+For questions about this result, please contact the tester.
+For other inquiries, please contact info@spec.org.
+Copyright 2026 Standard Performance Evaluation Corporation
+Tested with SPEC CPU(R)2026 v1.0.1 on 2026-10-27 22:37:33+0000.
+Report generated on 2026-10-27 22:41:36 by CPU2026 text formatter (aa18784a).

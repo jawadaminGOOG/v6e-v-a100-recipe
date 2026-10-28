@@ -1,0 +1,12 @@
+{
+  "cell": "colo-L20-r2",
+  "kind": "colo",
+  "arm": "default",
+  "level": 20,
+  "rep": 2,
+  "t_begin": 1793139882.7164087,
+  "spec_rc": [
+    "SPEC_END 1793140896.824407897 rc=0"
+  ],
+  "t_end": 1793141210.8048794
+}

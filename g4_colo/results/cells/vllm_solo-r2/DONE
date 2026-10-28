@@ -1,0 +1,9 @@
+{
+  "cell": "vllm_solo-r2",
+  "kind": "vllm_solo",
+  "arm": "-",
+  "level": 0,
+  "rep": 2,
+  "t_begin": 1793137410.82891,
+  "t_end": 1793138731.3370645
+}

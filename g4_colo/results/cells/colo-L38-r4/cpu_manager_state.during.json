@@ -1,0 +1,1 @@
+{"policyName":"static","defaultCpuSet":"0,24","entries":{"699bac59-9c2a-4534-8797-173b4c3104ea":{"spec":"5-23,29-47"},"cfa3c36a-a2c3-4e9e-a330-4df92eb59246":{"vllm":"1-4,25-28"}},"checksum":2261851643}
