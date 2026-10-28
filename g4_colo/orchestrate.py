@@ -165,6 +165,8 @@ def load_start(cell: str, duration: float, start_at: float, closed: bool = False
     """Open loop at CFG open_loop_rate, or (closed=True) saturating closed loop at
     CFG cap_concurrency in-flight requests with enough messages to outlast SPEC."""
     ip = k("get pod vllm -o jsonpath={.status.podIP}")
+    for c in CLIENTS:  # never reuse output left by an earlier run with the same cell name
+        k(f"exec {c} -- bash -c 'rm -rf /tmp/out/{cell} /tmp/out/{cell}.p*'", check=False)
     total_rate = CFG["open_loop_rate"]
     nproc = len(CLIENTS) * PROCS_PER_CLIENT
     r = total_rate / nproc

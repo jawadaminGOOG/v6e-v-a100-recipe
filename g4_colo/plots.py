@@ -147,9 +147,63 @@ def util_bars():
     fig.savefig(P / "node_cpu_util_by_level.png", dpi=150)
 
 
+
+def capacity_chart():
+    """Max throughput (closed loop, 500 in flight) by SPEC benchmark running alongside."""
+    f = ROOT / "results" / "sanity" / "capacity_summary.csv"
+    if not f.exists():
+        return
+    c = pd.read_csv(f)
+    phases = ["integer", "fotonik3d", "lbm"]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = np.arange(len(phases))
+    w = 0.26
+    solo = c[c.level == 38].set_index("phase").reindex(phases).solo_rps
+    ax.bar(x - w, solo, w, color="#1f1f1f", label="solo")
+    for k, (L, col, nm) in enumerate([(20, "#e8a27f", "colo 50%"), (38, "#d4572a", "colo 95%")]):
+        d = c[c.level == L].set_index("phase").reindex(phases)
+        ax.bar(x + k * w, d.colo_rps, w, color=col, label=nm)
+        for xi, v, dp in zip(x + k * w, d.colo_rps, d.delta_pct):
+            ax.text(xi, v + 6, f"{dp:+.1f}%", ha="center", fontsize=9)
+    ax.set_xticks(x)
+    ax.set_xticklabels(["14 integer benchmarks", "749.fotonik3d_r", "782.lbm_r"])
+    ax.set_ylabel("completed requests / s")
+    ax.set_ylim(600, 860)
+    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.1))
+    ax.grid(axis="y", alpha=.3)
+    ax.set_title("GPU workload maximum throughput (500 requests in flight), by SPEC benchmark running alongside")
+    fig.tight_layout()
+    fig.savefig(P / "capacity_by_benchmark.png", dpi=140)
+    plt.close(fig)
+
+
+def golden_chart():
+    """Closed-loop capacity: GPU workload limited to 8 vCPU vs no CPU limit (all 48 vCPU)."""
+    f = ROOT / "results" / "sanity" / "golden_capacity.csv"
+    if not f.exists():
+        return
+    g = pd.read_csv(f)
+    g["cfg"] = g.label.str.startswith("g48").map({True: "all 48 vCPU", False: "8 vCPU / 64 GiB"})
+    fig, ax = plt.subplots(figsize=(7.5, 4.2))
+    for cfg, col in [("8 vCPU / 64 GiB", "#d4572a"), ("all 48 vCPU", "#1f1f1f")]:
+        d = g[g.cfg == cfg].sort_values("concurrency")
+        ax.plot(d.concurrency, d.rps, "o-", color=col, lw=2.2, label=cfg)
+        for xc, v in zip(d.concurrency, d.rps):
+            ax.text(xc, v + 4, f"{v:.0f}", ha="center", fontsize=9, color=col)
+    ax.set_xlabel("requests in flight")
+    ax.set_ylabel("completed requests / s")
+    ax.set_xticks(sorted(g.concurrency.unique()))
+    ax.set_ylim(0, 950)
+    ax.legend(frameon=False, loc="lower right")
+    ax.grid(alpha=.3)
+    ax.set_title("GPU workload capacity, no co-location: 8-vCPU limit vs all 48 vCPU\n(one probe per point)", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(P / "golden_capacity.png", dpi=140)
+    plt.close(fig)
+
 if __name__ == "__main__":
     P.mkdir(parents=True, exist_ok=True)
-    for fn in (latency_cdfs, delta_summary, spec_forest, util_heatmap, util_bars):
+    for fn in (latency_cdfs, delta_summary, spec_forest, util_heatmap, util_bars, capacity_chart, golden_chart):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

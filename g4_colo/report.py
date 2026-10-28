@@ -68,11 +68,47 @@ def main():
         out.append(f"| {k} | {r.cpu_busy_pct:.1f}% | {r.mem_used_gib:.1f} GiB | {r.gpu_util:.0f}% | {r.steal_pct_max:.2f}% |")
     out.append("\nMeasured at 1 s over the first 10 minutes of load (compute-type phase).\n")
     sec = "\n".join(out) + "\n"
+    san = sanity_section()
     (A / "report_section.md").write_text(sec)
     tpl = (ROOT / "README.template.md").read_text()
-    (ROOT.parent / "g4-colo-readme.md").write_text(tpl.replace("RESULTS_SECTION", sec))
+    (ROOT.parent / "g4-colo-readme.md").write_text(tpl.replace("RESULTS_SECTION", sec).replace("SANITY_SECTION", san))
     print(sec)
 
+
+
+def sanity_section():
+    S = ROOT / "results" / "sanity"
+    o = []
+    c = pd.read_csv(S / "capacity_summary.csv")
+    o.append("### Maximum throughput while co-located\n")
+    o.append("Saturating load (500 requests in flight) for the whole SPEC run; completed requests/s, mean of 2 runs, "
+             "change vs solo with 95% CI.\n")
+    o.append("| SPEC running alongside | Solo | Colo 50% (20 vCPU) | Colo 95% (38 vCPU) |")
+    o.append("|---|---|---|---|")
+    for ph, nm in [("integer", "Compute-type (14 integer benchmarks)"), ("fotonik3d+lbm", "Memory-bandwidth-heavy (fotonik3d, lbm)")]:
+        a, b = c[(c.phase == ph) & (c.level == 20)].iloc[0], c[(c.phase == ph) & (c.level == 38)].iloc[0]
+        o.append(f"| {nm} | {b.solo_rps:.0f} req/s | {a.colo_rps:.0f} ({a.delta_pct:+.1f}% [{a.lo:+.1f}, {a.hi:+.1f}]) | "
+                 f"{b.colo_rps:.0f} ({b.delta_pct:+.1f}% [{b.lo:+.1f}, {b.hi:+.1f}]) |")
+    runs = pd.read_csv(S / "capacity_runs.csv")
+    o.append(f"\nFailed requests: {int(runs.groupby('cell').failed.first().sum())}.\n")
+    g = pd.read_csv(S / "golden_capacity.csv")
+    gl = pd.read_csv(S / "golden_latency.csv").set_index("metric")
+    o.append("### GPU workload with all 48 vCPU (no co-location)\n")
+    o.append("vLLM with no CPU or memory limit, so it can use every core on the node, compared with the 8 vCPU / 64 GiB slice.\n")
+    o.append("| | 8 vCPU / 64 GiB | All 48 vCPU |")
+    o.append("|---|---|---|")
+    for conc in sorted(g.concurrency.unique()):
+        r8 = g[(g.concurrency == conc) & g.label.str.startswith("g8")].rps.iloc[0]
+        r48 = g[(g.concurrency == conc) & g.label.str.startswith("g48")].rps.iloc[0]
+        o.append(f"| Capacity at {conc} requests in flight (1 probe each) | {r8:.0f} req/s | {r48:.0f} req/s |")
+    for m in ["ttft_p50", "ttft_p99", "itl_p50", "e2e_p50", "e2e_p99"]:
+        r = gl.loc[m]
+        o.append(f"| {NICE[m]} at 625 req/s | {r.cap8_mean * 1e3:.1f} ms ({r.cap8_vs_all48_pct:+.1f}% [{r.lo:+.1f}, {r.hi:+.1f}]) | {r.all48_mean * 1e3:.1f} ms |")
+    r = gl.loc["output_tok_s"]
+    o.append(f"| Output tokens/s at 625 req/s | {r.cap8_mean:,.0f} | {r.all48_mean:,.0f} |")
+    o.append(f"\nFixed-rate rows: {int(r.n_8)} runs at 8 vCPU (the solo runs of the main matrix) vs {int(r.n_48)} runs with all 48 vCPU "
+             "(run afterwards on the same node); percentage = 8 vCPU vs all 48 vCPU.\n")
+    return "\n".join(o) + "\n"
 
 if __name__ == "__main__":
     main()

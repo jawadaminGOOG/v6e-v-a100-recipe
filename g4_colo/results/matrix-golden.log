@@ -1,0 +1,4 @@
+[21:42:40] === cell vllm_solo-r1
+[22:04:40] === done vllm_solo-r1 in 1320s
+[22:05:40] === cell vllm_solo-r2
+[22:27:41] === done vllm_solo-r2 in 1321s

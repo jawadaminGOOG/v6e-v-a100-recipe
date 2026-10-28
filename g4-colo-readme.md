@@ -17,6 +17,10 @@ CPU work?
   utilisation stays at 98%.
 - Co-located SPEC benchmarks run within ±1% of their solo runtime for 11 of 16 benchmarks at 38 vCPU. The largest
   change is +3.8% (`749.fotonik3d_r`).
+- At saturating load, maximum throughput is unchanged alongside compute-type work (0.0% at 20 and 38 vCPU) and
+  4-5% lower alongside memory-bandwidth-heavy work (−3.8% at 20 vCPU, −4.5% at 38 vCPU).
+- Without co-location, giving the GPU workload all 48 vCPU instead of 8 changes capacity by about 2% and TTFT p50 by
+  about 3%.
 - CPU steal is 0.00% in every run.
 
 This branch extends the G4 benchmark in [g4-readme.md](g4-readme.md) using the same workload, and follows the method
@@ -145,6 +149,41 @@ Measured at 1 s over the first 10 minutes of load (compute-type phase).
 
 
 
+### Maximum throughput while co-located
+
+Saturating load (500 requests in flight) for the whole SPEC run; completed requests/s, mean of 2 runs, change vs solo with 95% CI.
+
+| SPEC running alongside | Solo | Colo 50% (20 vCPU) | Colo 95% (38 vCPU) |
+|---|---|---|---|
+| Compute-type (14 integer benchmarks) | 805 req/s | 805 (+0.0% [-0.1, +0.1]) | 805 (+0.0% [-0.1, +0.2]) |
+| Memory-bandwidth-heavy (fotonik3d, lbm) | 806 req/s | 776 (-3.8% [-4.4, -3.2]) | 770 (-4.5% [-6.2, -2.9]) |
+
+Failed requests: 0.
+
+### GPU workload with all 48 vCPU (no co-location)
+
+vLLM with no CPU or memory limit, so it can use every core on the node, compared with the 8 vCPU / 64 GiB slice.
+
+| | 8 vCPU / 64 GiB | All 48 vCPU |
+|---|---|---|
+| Capacity at 250 requests in flight (1 probe each) | 757 req/s | 766 req/s |
+| Capacity at 500 requests in flight (1 probe each) | 821 req/s | 860 req/s |
+| Capacity at 750 requests in flight (1 probe each) | 840 req/s | 833 req/s |
+| TTFT p50 at 625 req/s | 35.7 ms (+2.7% [+1.6, +3.8]) | 34.8 ms |
+| TTFT p99 at 625 req/s | 55.4 ms (+3.0% [+0.1, +5.9]) | 53.8 ms |
+| Inter-token latency p50 at 625 req/s | 11.8 ms (+0.2% [-0.6, +0.9]) | 11.8 ms |
+| End-to-end p50 at 625 req/s | 154.5 ms (+0.7% [-0.1, +1.5]) | 153.4 ms |
+| End-to-end p99 at 625 req/s | 220.2 ms (+1.1% [-1.3, +3.5]) | 217.8 ms |
+| Output tokens/s at 625 req/s | 6,914 | 6,908 |
+
+Fixed-rate rows: 5 runs at 8 vCPU (the solo runs of the main matrix) vs 2 runs with all 48 vCPU (run afterwards on the same node); percentage = 8 vCPU vs all 48 vCPU.
+
+
+
+![Capacity by benchmark](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/capacity_by_benchmark.png)
+
+![8 vCPU vs 48 vCPU](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/golden_capacity.png)
+
 ### Latency distributions
 
 ![CDF compute](https://raw.githubusercontent.com/jawadaminGOOG/v6e-v-a100-recipe/g4-colo/g4_colo/results/plots/latency_cdf_compute.png)
@@ -218,7 +257,8 @@ cd g4_colo
 # infra: GKE node pool with infra/kubelet-config.yaml, namespace colo, k8s/telemetry.yaml, k8s/client.yaml,
 #        k8s/spec-build.yaml (builds SPEC from the ISO), k8s/vllm-fp16-asc4.yaml
 python3 orchestrate.py matrix --reps 5          # 25 interleaved runs, ~9 h
-python3 analyze.py && python3 phases.py && python3 quantiles.py && python3 plots.py && python3 report.py
+COLO_VARIANT=sanity python3 orchestrate.py matrix --cap --reps 2   # saturating-load runs, ~2.5 h
+python3 analyze.py && python3 phases.py && python3 quantiles.py && python3 sanity.py && python3 plots.py && python3 report.py
 python3 diagrams/g4_layers.py
 ```
 
@@ -227,6 +267,7 @@ python3 diagrams/g4_layers.py
 | `experiment.json` | every run parameter: rate, levels, windows, capacity probe |
 | `results/cells/<run>/` | per run: client summaries, per-second request aggregates, telemetry, cpusets, SPEC result files and logs |
 | `results/analysis/` | `vllm_phase_runs.csv` (one row per run and class), `vllm_phase_impact.csv`, `phase_summary.csv`, `latency_quantiles.csv`, `spec_impact.csv`, `cells.csv` |
+| `results/sanity/` | saturating-load and all-48-vCPU results (`capacity_summary.csv`, `golden_capacity.csv`, `golden_latency.csv`) |
 | `results/plots/` | all figures |
 
 Per-request client logs (about 600 MB) are not in git; `phases.py` and `quantiles.py` need them and they are
