@@ -19,8 +19,8 @@ CPU work?
   change is +3.8% (`749.fotonik3d_r`).
 - At saturating load, maximum throughput is unchanged alongside compute-type work (0.0% at 20 and 38 vCPU) and
   4-5% lower alongside memory-bandwidth-heavy work (−3.8% at 20 vCPU, −4.5% at 38 vCPU).
-- Without co-location, giving the GPU workload all 48 vCPU instead of 8 changes capacity by about 2% and TTFT p50 by
-  about 3%.
+- Without co-location, giving the GPU workload all 48 vCPU instead of 8 shows no consistent capacity difference
+  (single probes, within ±5%) and about 3% lower TTFT p50 (2 runs on a later day, not interleaved).
 - CPU steal is 0.00% in every run.
 
 This branch extends the G4 benchmark in [g4-readme.md](g4-readme.md) using the same workload, and follows the method
@@ -41,7 +41,7 @@ of [*The Idle Half of a GPU Pod*](https://medium.com/google-cloud/the-idle-half-
 | CPU workload | SPEC CPU 2026 v1.0.1 rate, train size, the 16 benchmarks used in the article (GCC 14, `-O3 -march=x86-64-v3`) |
 | Co-location levels | **50%**: 20 copies on 20 vCPU (CPUs `5-14,29-38`) · **95%**: 38 copies on 38 vCPU (CPUs `5-23,29-47`) |
 | System | core 0 (CPUs `0,24`) stays in Kubernetes' shared pool for kubelet and daemons; 38 of 40 spare vCPU is the most a workload can claim |
-| Load | same prompts as [g4-readme.md](g4-readme.md) (~600-token prompts, ~11 output tokens), streamed, sent at a fixed **625 requests/s** = 75% of the measured 832 RPS capacity |
+| Load | same prompts as [g4-readme.md](g4-readme.md) (~600-token prompts, ~11 output tokens), streamed, sent at a fixed **625 requests/s**: 75% of the 832 RPS peak from short capacity probes, about 78% of the 801-805 RPS sustained over a full run |
 
 ## 2. Method
 
@@ -152,11 +152,13 @@ RPS. With it, the busiest vLLM CPU stays around 40-55% at 95% co-location. The s
 
 1. One model, one load point (75% of capacity), one machine shape, steady state. Bursts and autoscaling were not
    tested.
-2. SPEC at train size uses little memory (about 18 GiB at 95%), so this measures co-located CPU work. Memory
+2. The all-48-vCPU vLLM pod has no CPU limit and shares CPUs with the kubelet and the telemetry sampler; its runs
+   were made on a later day with a new pod, not interleaved with the 8-vCPU runs.
+3. SPEC at train size uses little memory (about 18 GiB at 95%), so this measures co-located CPU work. Memory
    capacity is hard-limited per pod by cgroups; memory bandwidth, the shared part, is exercised by `fotonik3d` and `lbm`.
-3. SPEC CPU 2026 results are estimates (train size, not SPEC-reviewed).
-4. With `--api-server-count > 1`, vLLM disables its server-side stats logger, so latency is measured at the client.
-5. Co-location shares microarchitecture (L3, branch predictors). Co-locate code you trust on both sides.
+4. SPEC CPU 2026 results are estimates (train size, not SPEC-reviewed).
+5. With `--api-server-count > 1`, vLLM disables its server-side stats logger, so latency is measured at the client.
+6. Co-location shares microarchitecture (L3, branch predictors). Co-locate code you trust on both sides.
 
 ## 7. Reproduce
 

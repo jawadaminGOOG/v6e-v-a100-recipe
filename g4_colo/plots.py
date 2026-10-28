@@ -189,7 +189,7 @@ def golden_chart():
         d = g[g.cfg == cfg].sort_values("concurrency")
         ax.plot(d.concurrency, d.rps, "o-", color=col, lw=2.2, label=cfg)
         for xc, v in zip(d.concurrency, d.rps):
-            ax.text(xc, v + 4, f"{v:.0f}", ha="center", fontsize=9, color=col)
+            ax.text(xc, v + (25 if col == "#1f1f1f" else -55), f"{v:.0f}", ha="center", fontsize=9, color=col)
     ax.set_xlabel("requests in flight")
     ax.set_ylabel("completed requests / s")
     ax.set_xticks(sorted(g.concurrency.unique()))

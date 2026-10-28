@@ -1,5 +1,5 @@
-# vLLM server constrained to the AWS g7e.2xlarge shape: 8 vCPU / 64 GiB, 1 GPU.
-# Guaranteed QoS + integer CPU => static CPU manager assigns an exclusive cpuset.
+# vLLM server without CPU or memory limits (Burstable QoS): runs on the shared CPU pool, i.e. all 48 vCPU.
+# Used only for the all-48-vCPU comparison.
 apiVersion: v1
 kind: Pod
 metadata:

@@ -100,14 +100,14 @@ def sanity_section():
     for conc in sorted(g.concurrency.unique()):
         r8 = g[(g.concurrency == conc) & g.label.str.startswith("g8")].rps.iloc[0]
         r48 = g[(g.concurrency == conc) & g.label.str.startswith("g48")].rps.iloc[0]
-        o.append(f"| Capacity at {conc} requests in flight (1 probe each) | {r8:.0f} req/s | {r48:.0f} req/s |")
+        o.append(f"| Capacity at {conc} requests in flight (1 short probe each) | {r8:.0f} req/s | {r48:.0f} req/s |")
     for m in ["ttft_p50", "ttft_p99", "itl_p50", "e2e_p50", "e2e_p99"]:
         r = gl.loc[m]
         o.append(f"| {NICE[m]} at 625 req/s | {r.cap8_mean * 1e3:.1f} ms ({r.cap8_vs_all48_pct:+.1f}% [{r.lo:+.1f}, {r.hi:+.1f}]) | {r.all48_mean * 1e3:.1f} ms |")
     r = gl.loc["output_tok_s"]
     o.append(f"| Output tokens/s at 625 req/s | {r.cap8_mean:,.0f} | {r.all48_mean:,.0f} |")
     o.append(f"\nFixed-rate rows: {int(r.n_8)} runs at 8 vCPU (the solo runs of the main matrix) vs {int(r.n_48)} runs with all 48 vCPU "
-             "(run afterwards on the same node); percentage = 8 vCPU vs all 48 vCPU.\n")
+             "(run on a later day with a new pod, not interleaved); percentage = 8 vCPU vs all 48 vCPU; the n = 2 intervals are rough.\n")
     return "\n".join(o) + "\n"
 
 if __name__ == "__main__":
