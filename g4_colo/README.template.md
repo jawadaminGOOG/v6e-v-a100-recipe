@@ -77,6 +77,9 @@ met these checks; none were discarded.
 
 ![Change vs solo](g4_colo/results/plots/vllm_delta_summary.png)
 
+*Change vs solo for each metric, with the memory-bandwidth-heavy class shown per benchmark (`749.fotonik3d_r`,
+`782.lbm_r`). Error bars are 95% CIs.*
+
 RESULTS_SECTION
 
 ### Latency distributions
@@ -107,11 +110,11 @@ last two being `fotonik3d` and `lbm`. Gaps between blocks are SPEC setting up th
    (cores 0-7) also holds SPEC cores 5-7, and memory bandwidth is shared by every core.
 2. **Compute-type work stays mostly inside each core's caches**, so the GPU workload sees a few milliseconds more TTFT
    (35.6 → 37.7 ms at 38 vCPU) and almost no change in token generation.
-3. **Memory-bandwidth-heavy work saturates the shared memory path.** vLLM's CPU-side request handling waits longer
-   for memory, which shows most in the tail: TTFT p99 goes from 55 to 97 ms at 20 vCPU and to 115 ms at 38 vCPU.
+3. **Memory-bandwidth-heavy work competes for the shared memory path.** vLLM's CPU-side request handling slows,
+   which shows most in the tail: TTFT p99 goes from 55 to 97 ms at 20 vCPU and to 115 ms at 38 vCPU.
    Throughput is unchanged and no request fails.
-4. **Within each class, more co-located vCPU means a larger effect**, and the gap between classes is far larger than
-   the gap between 20 and 38 vCPU.
+4. **Within each class, tail latency grows with more co-located vCPU**, and the gap between classes is far larger
+   than the gap between 20 and 38 vCPU.
 
 ## 4. Pricing input
 
@@ -162,7 +165,6 @@ python3 diagrams/g4_layers.py
 | `results/cells/<run>/` | per run: client summaries, per-second request aggregates, telemetry, cpusets, SPEC result files and logs |
 | `results/analysis/` | `vllm_phase_runs.csv` (one row per run and class), `vllm_phase_impact.csv`, `phase_summary.csv`, `latency_quantiles.csv`, `spec_impact.csv`, `cells.csv` |
 | `results/plots/` | all figures |
-| `PEER_REVIEW.md` | independent review of this analysis |
 
 Per-request client logs (about 600 MB) are not in git; `phases.py` and `quantiles.py` need them and they are
 available on request. All tables and figures can be regenerated from the committed `results/analysis/` files.

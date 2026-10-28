@@ -59,31 +59,32 @@ def latency_cdfs():
 
 def delta_summary():
     """% change vs solo for every metric, across co-location level x workload class, with 95% CI (wider of bootstrap/Welch)."""
-    imp = pd.read_csv(A / "vllm_phase_impact.csv")
+    imp = pd.read_csv(A / "vllm_phase_impact_split.csv")
     mets = ["ttft_p50", "ttft_p99", "itl_p50", "e2e_p50", "e2e_p99", "output_tok_s"]
-    combos = [(20, "compute"), (38, "compute"), (20, "bandwidth"), (38, "bandwidth")]
-    lab = {(20, "compute"): "50% · compute-type", (38, "compute"): "95% · compute-type",
-           (20, "bandwidth"): "50% · bandwidth-heavy", (38, "bandwidth"): "95% · bandwidth-heavy"}
-    cols = {(20, "compute"): "#c9c7c1", (38, "compute"): "#8f8d87", (20, "bandwidth"): "#e8a27f", (38, "bandwidth"): "#d4572a"}
-    fig, ax = plt.subplots(figsize=(14, 5.8))
-    w = 0.2
+    combos = [(L, p) for p in ["compute", "fotonik3d", "lbm"] for L in (20, 38)]
+    names = {"compute": "integer", "fotonik3d": "fotonik3d", "lbm": "lbm"}
+    lab = {(L, p): f"{'50%' if L == 20 else '95%'} · {names[p]}" for L, p in combos}
+    cols = {(20, "compute"): "#c9c7c1", (38, "compute"): "#8f8d87", (20, "fotonik3d"): "#e8a27f",
+            (38, "fotonik3d"): "#d4572a", (20, "lbm"): "#a9c4e8", (38, "lbm"): "#4a78b8"}
+    fig, ax = plt.subplots(figsize=(15, 6))
+    w = 0.135
     x = np.arange(len(mets))
     for k, cmb in enumerate(combos):
         d = imp[(imp.level == cmb[0]) & (imp.phase == cmb[1])].set_index("metric").reindex(mets)
         lo = np.minimum(d.boot_lo, d.welch_lo)
         hi = np.maximum(d.boot_hi, d.welch_hi)
-        ax.bar(x + (k - 1.5) * w, d.delta_pct, w, color=cols[cmb], label=lab[cmb],
+        ax.bar(x + (k - 2.5) * w, d.delta_pct, w, color=cols[cmb], label=lab[cmb],
                yerr=[d.delta_pct - lo, hi - d.delta_pct], capsize=3, ecolor="#444")
-        for xi, v in zip(x + (k - 1.5) * w, d.delta_pct):
-            ax.text(xi, v + (3 if v >= 0 else -6), f"{v:+.0f}%" if abs(v) >= 1 else f"{v:+.1f}%", ha="center", fontsize=8.5)
+        for xi, v, h in zip(x + (k - 2.5) * w, d.delta_pct, hi):
+            ax.text(xi, (h + 1.5) if v >= 0 else -6.5, f"{v:+.0f}" if abs(v) >= 1 else f"{v:+.1f}", ha="center", fontsize=7.5)
     ax.axhline(0, color="k", lw=.8)
     ax.set_xticks(x)
     ax.set_xticklabels([NICE[m] for m in mets])
     ax.set_ylabel("change vs GPU workload alone (%)")
-    ax.set_ylim(-8, 125)
-    ax.legend(ncol=4, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.08))
+    ax.set_ylim(-8, 145)
+    ax.legend(ncol=6, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.08))
     ax.grid(axis="y", alpha=.3)
-    ax.set_title("GPU workload change vs solo, by co-location level and co-located workload type (mean of 5 runs, 95% CI)")
+    ax.set_title("GPU workload change vs solo (%), by co-location level and the SPEC benchmarks running alongside (mean of 5 runs, 95% CI)")
     fig.tight_layout()
     fig.savefig(P / "vllm_delta_summary.png", dpi=140)
     plt.close(fig)

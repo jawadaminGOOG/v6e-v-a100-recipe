@@ -48,13 +48,16 @@ def load_requests(d: Path):
     return df, min(s["base_unix"] for s in sums)
 
 
-def spec_phases(d: Path) -> dict:
+def spec_phases(d: Path, split: bool = False) -> dict:
     """Unix times of first integer benchmark start, FP start, SPEC end, from SPEC's own logs."""
     log = (d / "runcpu.log").read_text()
     starts = {m.group(1): datetime.strptime(m.group(2), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
               for m in re.finditer(r"Running (\d{3}\.\w+) train base \S+ \(\d+ copies\) \[([\d\- :]+)\]", log)}
     end = float(re.search(r"SPEC_END (\S+)", (d / "spec_pod.log").read_text()).group(1))
     t_int = min(v for k, v in starts.items() if k != FP_FIRST and k != "782.lbm_r")
+    if split:  # per floating-point benchmark, used only by the delta summary chart
+        return {"compute": (t_int, starts[FP_FIRST]), "fotonik3d": (starts[FP_FIRST], starts["782.lbm_r"]),
+                "lbm": (starts["782.lbm_r"], end)}
     return {"compute": (t_int, starts[FP_FIRST]), "bandwidth": (starts[FP_FIRST], end)}
 
 
@@ -79,7 +82,8 @@ def intervals(a: np.ndarray, b: np.ndarray, n=20000):
     return est, float(np.percentile(bs, 2.5)), float(np.percentile(bs, 97.5)), est - half, est + half
 
 
-def main():
+def main(split: bool = False):
+    sfx = "_split" if split else ""
     OUT.mkdir(parents=True, exist_ok=True)
     runs = {}
     for d in sorted(CELLS.iterdir()):
@@ -93,7 +97,7 @@ def main():
         if m["kind"] != "colo":
             continue
         df, base = load_requests(d)
-        ph = spec_phases(d)
+        ph = spec_phases(d, split)
         for p, (t0, t1) in ph.items():
             offsets.setdefault((m["level"], p), []).append((t0 - base, t1 - base))
             rows.append({"cell": cell, "kind": "colo", "level": m["level"], "rep": m["rep"], "phase": p,
@@ -107,7 +111,7 @@ def main():
             rows.append({"cell": cell, "kind": "solo", "level": L, "rep": m["rep"], "phase": p,
                          "start_off": o0, "end_off": o1, **metrics(df, base + o0, base + o1)})
     per_run = pd.DataFrame(rows)
-    per_run.to_csv(OUT / "vllm_phase_runs.csv", index=False)
+    per_run.to_csv(OUT / f"vllm_phase_runs{sfx}.csv", index=False)
 
     imp, verdict = [], []
     for (L, p), g in per_run.groupby(["level", "phase"]):
@@ -127,11 +131,12 @@ def main():
         verdict.append({"level": L, "phase": p, "spare_vcpu": L, "worst_latency_upper_pct": max(lat_hi),
                         "throughput_lower_pct": thr_lo, "colo_failed_requests": fails,
                         "phase_seconds": float(c.end_off.mean() - c.start_off.mean())})
-    pd.DataFrame(imp).to_csv(OUT / "vllm_phase_impact.csv", index=False)
+    pd.DataFrame(imp).to_csv(OUT / f"vllm_phase_impact{sfx}.csv", index=False)
     v = pd.DataFrame(verdict)
-    v.to_csv(OUT / "phase_summary.csv", index=False)
+    v.to_csv(OUT / f"phase_summary{sfx}.csv", index=False)
     print(v.round(2).to_string())
 
 
 if __name__ == "__main__":
     main()
+    main(split=True)

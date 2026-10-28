@@ -1,3 +1,4 @@
 cx_artifacts/
 g4_colo/results/**/*.requests.csv.gz
 g4_colo/.venv/
+__pycache__/
