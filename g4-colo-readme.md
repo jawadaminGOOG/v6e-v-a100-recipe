@@ -56,7 +56,7 @@ SPEC's per-benchmark runtime.
 percentile-bootstrap CI.
 
 **Pass bar.** This was fixed after the first solo and colo reps and before the other 23 runs
-(commit `019937a`). A level passes if every latency metric's 95% CI upper bound is ≤ +10%, output tokens/s has a CI
+(commit `49d0e8a`, 2026-10-27 21:08 UTC). A level passes if every latency metric's 95% CI upper bound is ≤ +10%, output tokens/s has a CI
 lower bound of ≥ −2%, and every colo run has 0 failed requests. The strict article-style test ("CI includes 0") is
 reported too.
 
