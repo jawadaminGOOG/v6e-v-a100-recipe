@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""Analysis for g4-colo: turns results/cells/* into tables, plots and the headline ratio.
+"""Per-run summary for g4-colo: run validity, SPEC per-benchmark runtimes and
+SPEC colo-vs-solo impact, and node telemetry. GPU-workload impact by co-located
+workload class is computed in phases.py.
 
-Statistics
-  * Unit of replication = one cell (rep). Each metric is reduced to one number
-    per cell (e.g. TTFT p50 over all requests in the analysis window).
-  * Effect = mean(colo reps) / mean(solo reps) - 1, in %.
-  * 95% CI = percentile bootstrap (20k resamples, reps resampled with
-    replacement independently within each group).
-  * PASS for a level = every guarded vLLM metric's CI includes 0 (the
-    article's bar), i.e. no statistically detectable degradation.
-  * Minimum detectable effect (MDE, 80% power, alpha .05, two-sided)
-    reported per metric so "no effect" is read against resolution.
+Writes results/analysis/{cells,validity_vllm,spec_runtimes,spec_impact}.csv.
+SPEC impact: one runtime per benchmark per run; effect = mean(colo)/mean(solo) - 1
+with a 95% percentile-bootstrap CI (5 runs per group).
 """
 from __future__ import annotations
 
@@ -164,24 +159,6 @@ def main():
     v = v[v.valid]
     solo = v[v.kind == "vllm_solo"]
 
-    # vLLM impact table
-    imp = []
-    for arm, levels in CFG["arms"].items():
-      for L in levels:
-        c = v[(v.kind == "colo") & (v.level == L) & (v.arm == arm)]
-        if len(c) < 2 or len(solo) < 2:
-            continue
-        for met in GUARDED + ["itl_p99", "achieved_rps"]:
-            a, b = c[met].to_numpy(float), solo[met].to_numpy(float)
-            est, lo, hi = boot_ci(a, b)
-            imp.append({"arm": arm, "level": L, "metric": met, "solo_mean": b.mean(), "colo_mean": a.mean(),
-                        "delta_pct": est, "ci_lo": lo, "ci_hi": hi, "mde_pct": mde_pct(a, b),
-                        "n_solo": len(b), "n_colo": len(a),
-                        "ci_includes_0": lo <= 0 <= hi,
-                        "degraded": (lo > 0) if LOWER_IS_BETTER[met] else (hi < 0)})
-    imp = pd.DataFrame(imp)
-    imp.to_csv(OUT / "vllm_impact.csv", index=False)
-
     # SPEC impact
     simp = []
     if len(spec):
@@ -198,24 +175,6 @@ def main():
     simp = pd.DataFrame(simp)
     simp.to_csv(OUT / "spec_impact.csv", index=False)
 
-    # headline
-    passing = []
-    for arm, L in [(a_, L_) for a_, ls in CFG["arms"].items() for L_ in ls]:
-        s = imp[(imp.arm == arm) & (imp.level == L) & (imp.metric.isin(GUARDED))] if len(imp) else imp
-        if len(s) == len(GUARDED):
-            lat = s[s.metric != "output_tok_s"]; thr = s[s.metric == "output_tok_s"]
-            colo_fail = int(v[(v.kind == "colo") & (v.level == L)].n_failed.sum())
-            passing.append({"arm": arm, "level": L, "spare_frac": L / 40,
-                            "pass_tolerance": bool((lat.ci_hi <= CFG["latency_tolerance_pct"]).all()
-                                                   and (thr.ci_lo >= -CFG["throughput_tolerance_pct"]).all()
-                                                   and colo_fail == 0),
-                            "pass_strict_ci0": bool(s.ci_includes_0.all()),
-                            "pass_no_degradation": bool((~s.degraded).all()),
-                            "worst_upper_ci_pct": float(np.where(s.metric == "output_tok_s", -s.ci_lo, s.ci_hi).max())})
-    passing = pd.DataFrame(passing)
-    passing.to_csv(OUT / "level_pass.csv", index=False)
-    print(passing.to_string() if len(passing) else "no levels yet")
-    print(imp.round(3).to_string() if len(imp) else "")
     print(simp.round(3).to_string() if len(simp) else "")
 
 

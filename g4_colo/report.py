@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Builds the results section of g4-colo-readme.md from results/analysis/*.csv.
+"""Builds the results section of g4-colo-readme.md from results/analysis/*.csv and renders the README.
 
-Everything numeric in the README results section is generated here from the raw
-cell data, so re-running analyze.py + plots.py + report.py reproduces it.
+Every number in the results section is generated here from the per-run data, so
+analyze.py + phases.py + quantiles.py + plots.py + report.py reproduce it.
 """
 import json
 from pathlib import Path
@@ -12,93 +12,67 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 A = ROOT / "results" / "analysis"
 CFG = json.loads((ROOT / "experiment.json").read_text())
-LN = {int(k): v.split(" (")[0] for k, v in CFG["level_names"].items()}  # short labels: "50%", "95%"
-NICE = {"ttft_p50": "TTFT p50", "ttft_p99": "TTFT p99", "itl_p50": "ITL p50", "itl_p99": "ITL p99",
-        "e2e_p50": "E2E latency p50", "e2e_p99": "E2E latency p99", "output_tok_s": "Output tokens/s",
-        "achieved_rps": "Requests/s"}
-UNIT = {"output_tok_s": ("", 1, "{:,.0f}"), "achieved_rps": ("", 1, "{:,.1f}")}
+LVL = {20: "50% (20 vCPU)", 38: "95% (38 vCPU)"}
+NICE = {"ttft_p50": "TTFT p50", "ttft_p99": "TTFT p99", "itl_p50": "Inter-token latency p50",
+        "e2e_p50": "End-to-end p50", "e2e_p99": "End-to-end p99", "output_tok_s": "Output tokens/s"}
+CLASS = {"compute": "Compute-type co-located work (14 integer SPEC CPU 2026 benchmarks)",
+         "bandwidth": "Memory-bandwidth-heavy co-located work (749.fotonik3d_r, 782.lbm_r)"}
 
 
-def fmt(m, v):
-    if m in UNIT:
-        return UNIT[m][2].format(v)
-    return f"{v * 1e3:.1f} ms"
+def val(m, v):
+    return f"{v:,.0f}" if m == "output_tok_s" else f"{v * 1e3:.1f} ms"
 
 
 def main():
-    imp = pd.read_csv(A / "vllm_impact.csv")
-    lp = pd.read_csv(A / "level_pass.csv")
+    imp = pd.read_csv(A / "vllm_phase_impact.csv")
+    ph = pd.read_csv(A / "phase_summary.csv")
     sp = pd.read_csv(A / "spec_impact.csv")
     cells = pd.read_csv(A / "cells.csv")
     out = []
-
-    levels = sorted(imp.level.unique())
-    out.append("### GPU workload: co-located vs solo\n")
-    hdr = "| Metric | Solo | " + " | ".join(f"Colo {LN[L]}" for L in levels) + " |"
-    out.append(hdr)
-    out.append("|" + "---|" * (2 + len(levels)))
-    for m in ["ttft_p50", "ttft_p99", "itl_p50", "e2e_p50", "e2e_p99", "output_tok_s"]:
-        s = imp[imp.metric == m]
-        row = f"| {NICE[m]} | {fmt(m, s.solo_mean.iloc[0])} |"
-        for L in levels:
-            r = s[s.level == L].iloc[0]
-            row += f" {fmt(m, r.colo_mean)} ({r.delta_pct:+.1f}% [{r.ci_lo:+.1f}, {r.ci_hi:+.1f}]) |"
-        out.append(row)
-    nf = cells[cells.kind.isin(["vllm_solo", "colo"])].groupby("kind").n_failed.sum()
-    n_s = int(imp.n_solo.iloc[0]); n_c = int(imp.n_colo.min())
-    out.append(f"\nMean of {n_s} solo / {n_c} colo reps; brackets = 95% bootstrap CI of the change vs solo. Failed requests: "
-               f"solo {int(nf.get('vllm_solo', 0))}, colo {int(nf.get('colo', 0))}.\n")
-
-    out.append("### Verdict per colo level\n")
-    out.append("| Colo level | Spare vCPU used | Pass (≤ +10% latency, ≥ −2% throughput, 0 failures) | Strict (CI includes 0) |")
-    out.append("|---|---|---|---|")
-    for _, r in lp.iterrows():
-        out.append(f"| {LN[int(r.level)]} | {int(r.level)} of 40 | {'✅ PASS' if r.pass_tolerance else '❌ FAIL'} | "
-                   f"{'yes' if r.pass_strict_ci0 else 'no'} |")
-    best = lp[lp.pass_tolerance]
-    head = int(best.level.max()) if len(best) else None
-    out.append("")
-    if head:
-        out.append(f"**Headline colo ratio: {head}/40 = {head / 40:.0%} of the spare vCPU.**\n")
+    for phase in ["compute", "bandwidth"]:
+        secs = ph[ph.phase == phase].phase_seconds.mean()
+        out.append(f"### GPU workload alongside {CLASS[phase][0].lower() + CLASS[phase][1:]}\n")
+        out.append(f"About {secs / 60:.0f} minutes of each run. Mean of 5 runs; brackets are the 95% CI of the change vs solo.\n")
+        out.append("| Metric | Solo | " + " | ".join(f"Colo {LVL[L]}" for L in (20, 38)) + " |")
+        out.append("|---|---|---|---|")
+        for m in ["ttft_p50", "ttft_p99", "itl_p50", "e2e_p50", "e2e_p99", "output_tok_s"]:
+            s = imp[(imp.phase == phase) & (imp.metric == m)]
+            row = f"| {NICE[m]} | {val(m, s[s.level == 38].solo_mean.iloc[0])} |"
+            for L in (20, 38):
+                r = s[s.level == L].iloc[0]
+                lo, hi = min(r.boot_lo, r.welch_lo), max(r.boot_hi, r.welch_hi)
+                row += f" {val(m, r.colo_mean)} ({r.delta_pct:+.1f}% [{lo:+.1f}, {hi:+.1f}]) |"
+            out.append(row)
+        f = ph[ph.phase == phase].colo_failed_requests.sum()
+        out.append(f"\nFailed requests while co-located: {int(f)}.\n")
 
     out.append("### CPU workload: SPEC CPU 2026 rate runtime, co-located vs solo\n")
-    out.append("| Benchmark | " + " | ".join(f"{LN[L]}: solo s → colo s (Δ, 95% CI)" for L in sorted(sp.level.unique())) + " |")
-    out.append("|" + "---|" * (1 + sp.level.nunique()))
+    out.append("| Benchmark | 50%: solo → colo (Δ, 95% CI) | 95%: solo → colo (Δ, 95% CI) |")
+    out.append("|---|---|---|")
     for b in sorted(sp.benchmark.unique()):
         row = f"| {b} |"
-        for L in sorted(sp.level.unique()):
-            r = sp[(sp.benchmark == b) & (sp.level == L)]
-            if len(r):
-                r = r.iloc[0]
-                row += f" {r.solo_s:.1f} → {r.colo_s:.1f} ({r.delta_pct:+.2f}% [{r.ci_lo:+.2f}, {r.ci_hi:+.2f}]) |"
-            else:
-                row += " n/a |"
+        for L in (20, 38):
+            r = sp[(sp.benchmark == b) & (sp.level == L)].iloc[0]
+            row += f" {r.solo_s:.1f} s → {r.colo_s:.1f} s ({r.delta_pct:+.2f}% [{r.ci_lo:+.2f}, {r.ci_hi:+.2f}]) |"
         out.append(row)
-    out.append("\nEstimated SPEC CPU 2026 results (train size, not SPEC-reviewed). Positive Δ = slower when co-located.\n")
+    out.append("\nEstimated results (train size, not SPEC-reviewed). Positive Δ = slower when co-located with the GPU workload.\n")
 
     u = cells[cells.kind.isin(["vllm_solo", "colo"])].copy()
-    u["lvl"] = u.apply(lambda r: "solo" if r.kind == "vllm_solo" else LN[int(r.level)], axis=1)
-    g = u.groupby("lvl")[["cpu_busy_pct", "mem_used_gib", "gpu_util", "steal_pct_max"]].mean()
+    u["s"] = u.apply(lambda r: "GPU workload only" if r.kind == "vllm_solo" else f"Co-located {LVL[int(r.level)]}", axis=1)
+    g = u.groupby("s")[["cpu_busy_pct", "mem_used_gib", "gpu_util", "steal_pct_max"]].mean()
     out.append("### What the node looks like\n")
-    out.append("| Scenario | Node CPU busy (48 vCPU) | Memory used | GPU util | Max CPU steal |")
+    out.append("| Scenario | Node CPU busy (48 vCPU) | Memory used | GPU utilisation | Max CPU steal |")
     out.append("|---|---|---|---|---|")
-    for k in ["solo"] + [LN[L] for L in levels]:
-        if k in g.index:
-            r = g.loc[k]
-            out.append(f"| {k} | {r.cpu_busy_pct:.1f}% | {r.mem_used_gib:.1f} GiB | {r.gpu_util:.0f}% | {r.steal_pct_max:.2f}% |")
-    (A / "report_section.md").write_text("\n".join(out) + "\n")
-    print("\n".join(out))
+    for k in ["GPU workload only", f"Co-located {LVL[20]}", f"Co-located {LVL[38]}"]:
+        r = g.loc[k]
+        out.append(f"| {k} | {r.cpu_busy_pct:.1f}% | {r.mem_used_gib:.1f} GiB | {r.gpu_util:.0f}% | {r.steal_pct_max:.2f}% |")
+    out.append("\nMeasured at 1 s over the first 10 minutes of load (compute-type phase).\n")
+    sec = "\n".join(out) + "\n"
+    (A / "report_section.md").write_text(sec)
+    tpl = (ROOT / "README.template.md").read_text()
+    (ROOT.parent / "g4-colo-readme.md").write_text(tpl.replace("RESULTS_SECTION", sec))
+    print(sec)
 
 
 if __name__ == "__main__":
     main()
-
-
-def render_readme():
-    """Insert the generated results section into README.template.md -> ../g4-colo-readme.md."""
-    sec = (A / "report_section.md").read_text()
-    tpl = (ROOT / "README.template.md").read_text()
-    (ROOT.parent / "g4-colo-readme.md").write_text(tpl.replace("RESULTS_SECTION", sec))
-
-
-render_readme()

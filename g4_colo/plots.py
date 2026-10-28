@@ -21,46 +21,72 @@ NICE = {"ttft_p50": "TTFT p50", "ttft_p99": "TTFT p99", "itl_p50": "ITL p50", "i
         "e2e_p50": "E2E p50", "e2e_p99": "E2E p99", "output_tok_s": "Output tok/s", "achieved_rps": "RPS"}
 
 
-def vllm_forest():
-    imp = pd.read_csv(A / "vllm_impact.csv")
+COL = {"solo": "#1f1f1f", "colo 50%": "#e8a27f", "colo 95%": "#d4572a"}
+CLASS = {"compute": "compute-type co-located work (14 integer SPEC benchmarks)",
+         "bandwidth": "memory-bandwidth-heavy co-located work (749.fotonik3d_r, 782.lbm_r)"}
+QN = {"ttft": "Time to first token (ms)", "itl_mean": "Inter-token latency (ms)", "e2e": "End-to-end latency (ms)"}
+
+
+def latency_cdfs():
+    """Cumulative distributions: full range (top) and the tail above p90 (bottom), one figure per workload class."""
+    q = pd.read_csv(A / "latency_quantiles.csv")
+    for phase in ["compute", "bandwidth"]:
+        fig, axes = plt.subplots(2, 3, figsize=(16, 8.5), gridspec_kw={"height_ratios": [1, 1]})
+        for j, met in enumerate(["ttft", "itl_mean", "e2e"]):
+            for row, (lo, ttl) in enumerate([(0.0, "all requests"), (0.9, "tail (p90 to p99.9)")]):
+                ax = axes[row, j]
+                for L in sorted(q.level.unique()):
+                    for scen in ["solo", f"colo {'50%' if L == 20 else '95%'}"]:
+                        d = q[(q.phase == phase) & (q.level == L) & (q.scenario == scen) & (q.metric == met) & (q.q >= lo)]
+                        if scen == "solo" and L != sorted(q.level.unique())[-1]:
+                            continue  # one solo line (solo is cut at the 95% run offsets; the 50% cut is equivalent)
+                        ax.plot(d.value_ms, d.q * 100, color=COL[scen], lw=2.2 if scen != "solo" else 2.6,
+                                label=scen if (row == 0 and j == 0) else None)
+                ax.set_xlabel(QN[met])
+                ax.set_ylabel("% of requests at or below")
+                ax.set_title(f"{QN[met].split(' (')[0]}: {ttl}", fontsize=11)
+                ax.grid(alpha=.3)
+                if lo:
+                    ax.set_ylim(90, 100)
+        h, l = axes[0, 0].get_legend_handles_labels()
+        order = [l.index(x) for x in ["solo", "colo 50%", "colo 95%"] if x in l]
+        fig.legend([h[i] for i in order], [l[i] for i in order], loc="upper right", ncol=3, frameon=False, fontsize=11)
+        fig.suptitle(f"GPU workload latency distribution alongside {CLASS[phase]}", fontsize=13, x=0.01, ha="left")
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
+        fig.savefig(P / f"latency_cdf_{phase}.png", dpi=140)
+        plt.close(fig)
+
+
+def delta_summary():
+    """% change vs solo for every metric, across co-location level x workload class, with 95% CI (wider of bootstrap/Welch)."""
+    imp = pd.read_csv(A / "vllm_phase_impact.csv")
     mets = ["ttft_p50", "ttft_p99", "itl_p50", "e2e_p50", "e2e_p99", "output_tok_s"]
-    fig, axes = plt.subplots(1, len(mets), figsize=(3.1 * len(mets), 3.6), sharey=True)
-    levels = sorted(imp.level.unique())
-    for ax, m in zip(axes, mets):
-        s = imp[imp.metric == m].set_index("level").reindex(levels)
-        y = np.arange(len(levels))
-        ax.errorbar(s.delta_pct, y, xerr=[s.delta_pct - s.ci_lo, s.ci_hi - s.delta_pct], fmt="o", capsize=3)
-        ax.axvline(0, color="k", lw=0.8)
-        ax.set_title(NICE[m])
-        ax.set_xlabel("colo vs solo (%)")
-        ax.grid(alpha=.3)
-    axes[0].set_yticks(np.arange(len(levels)))
-    axes[0].set_yticklabels([f"{LN[L]}\n({L} vCPU)" for L in levels])
-    fig.suptitle("vLLM (8 vCPU / 64 GiB slice) under SPEC co-location: mean delta and 95% bootstrap CI, n=5")
+    combos = [(20, "compute"), (38, "compute"), (20, "bandwidth"), (38, "bandwidth")]
+    lab = {(20, "compute"): "50% · compute-type", (38, "compute"): "95% · compute-type",
+           (20, "bandwidth"): "50% · bandwidth-heavy", (38, "bandwidth"): "95% · bandwidth-heavy"}
+    cols = {(20, "compute"): "#c9c7c1", (38, "compute"): "#8f8d87", (20, "bandwidth"): "#e8a27f", (38, "bandwidth"): "#d4572a"}
+    fig, ax = plt.subplots(figsize=(14, 5.8))
+    w = 0.2
+    x = np.arange(len(mets))
+    for k, cmb in enumerate(combos):
+        d = imp[(imp.level == cmb[0]) & (imp.phase == cmb[1])].set_index("metric").reindex(mets)
+        lo = np.minimum(d.boot_lo, d.welch_lo)
+        hi = np.maximum(d.boot_hi, d.welch_hi)
+        ax.bar(x + (k - 1.5) * w, d.delta_pct, w, color=cols[cmb], label=lab[cmb],
+               yerr=[d.delta_pct - lo, hi - d.delta_pct], capsize=3, ecolor="#444")
+        for xi, v in zip(x + (k - 1.5) * w, d.delta_pct):
+            ax.text(xi, v + (3 if v >= 0 else -6), f"{v:+.0f}%" if abs(v) >= 1 else f"{v:+.1f}%", ha="center", fontsize=8.5)
+    ax.axhline(0, color="k", lw=.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels([NICE[m] for m in mets])
+    ax.set_ylabel("change vs GPU workload alone (%)")
+    ax.set_ylim(-8, 125)
+    ax.legend(ncol=4, frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.08))
+    ax.grid(axis="y", alpha=.3)
+    ax.set_title("GPU workload change vs solo, by co-location level and co-located workload type (mean of 5 runs, 95% CI)")
     fig.tight_layout()
-    fig.savefig(P / "vllm_impact_forest.png", dpi=150)
-
-
-def vllm_abs():
-    c = pd.read_csv(A / "cells.csv")
-    v = c[c.kind.isin(["vllm_solo", "colo"])].copy()
-    v["lvl"] = np.where(v.kind == "vllm_solo", 0, v.level)
-    order = [0] + sorted(CFG["levels"])
-    labels = ["solo"] + [LN[L] for L in sorted(CFG["levels"])]
-    mets = [("ttft_p50", 1e3, "ms"), ("itl_p50", 1e3, "ms"), ("e2e_p50", 1e3, "ms"), ("e2e_p99", 1e3, "ms"), ("output_tok_s", 1, "tok/s")]
-    fig, axes = plt.subplots(1, len(mets), figsize=(3.3 * len(mets), 3.4))
-    for ax, (m, sc, u) in zip(axes, mets):
-        for i, L in enumerate(order):
-            vals = v[v.lvl == L][m] * sc
-            ax.scatter(np.full(len(vals), i) + np.random.uniform(-.08, .08, len(vals)), vals, s=14)
-            ax.hlines(vals.mean(), i - .25, i + .25, color="k")
-        ax.set_xticks(range(len(order)))
-        ax.set_xticklabels(labels, rotation=45)
-        ax.set_title(f"{NICE[m]} ({u})")
-        ax.grid(alpha=.3)
-    fig.suptitle("Per-rep values (dots) and mean (bar) by colo level")
-    fig.tight_layout()
-    fig.savefig(P / "vllm_abs_by_level.png", dpi=150)
+    fig.savefig(P / "vllm_delta_summary.png", dpi=140)
+    plt.close(fig)
 
 
 def spec_forest():
@@ -122,7 +148,7 @@ def util_bars():
 
 if __name__ == "__main__":
     P.mkdir(parents=True, exist_ok=True)
-    for fn in (vllm_forest, vllm_abs, spec_forest, util_heatmap, util_bars):
+    for fn in (latency_cdfs, delta_summary, spec_forest, util_heatmap, util_bars):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
