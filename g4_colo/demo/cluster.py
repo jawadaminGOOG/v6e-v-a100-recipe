@@ -273,14 +273,17 @@ class LiveBackend:
     def _fast_scale_vllm(self, rate: float) -> None:
         want = 2 if float(rate) > 700.0 else 1
         try:
-            self.hpa.patch_namespaced_horizontal_pod_autoscaler(
+            self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(
                 "vllm", "inference", {"spec": {"minReplicas": want}}
             )
+        except Exception as e:  # noqa: BLE001
+            log.warning("hpa patch failed: %s", e)
+        try:
             self.apps.patch_namespaced_deployment_scale(
                 "vllm", "inference", {"spec": {"replicas": want}}
             )
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("deployment scale patch failed: %s", e)
 
     async def set_gpu_rate(self, rate: float) -> dict:
         pods = await asyncio.to_thread(self._ready_pods, "inference", "app=loadgen")
