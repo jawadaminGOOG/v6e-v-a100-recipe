@@ -67,7 +67,7 @@ kind: PodMonitoring
 metadata: {name: vllm, namespace: inference}
 spec:
   selector: {matchLabels: {app: vllm}}
-  endpoints: [{port: http, path: /metrics, interval: 15s}]
+  endpoints: [{port: http, path: /metrics, interval: 5s}]
 ---
 # Scale vLLM replicas on completed requests per second per replica. Each new replica needs a G4 node, which the
 # g4-gpu ComputeClass adds; backfill CPU work then fills that node's spare cores.
@@ -88,5 +88,5 @@ spec:
       metric: {name: prometheus.googleapis.com|vllm:request_success_total|counter}
       target: {type: AverageValue, averageValue: "700"}
   behavior:
-    scaleUp: {stabilizationWindowSeconds: 30, policies: [{type: Pods, value: 1, periodSeconds: 60}]}
-    scaleDown: {stabilizationWindowSeconds: 60, policies: [{type: Pods, value: 1, periodSeconds: 60}]}
+    scaleUp: {stabilizationWindowSeconds: 0, policies: [{type: Pods, value: 1, periodSeconds: 15}]}
+    scaleDown: {stabilizationWindowSeconds: 15, policies: [{type: Pods, value: 1, periodSeconds: 15}]}

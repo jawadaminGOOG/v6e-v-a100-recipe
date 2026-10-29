@@ -85,6 +85,22 @@
   </aside>
 
   <main>
+    <section id="scen-banner" class="card scen-banner" hidden>
+      <div class="scen-banner-head">
+        <div>
+          <span id="sb-badge" class="badge">RUNNING</span>
+          <strong id="sb-title">Scenario</strong>
+          <span id="sb-step" class="muted"></span>
+        </div>
+        <div class="scen-banner-right">
+          <span id="sb-elapsed" class="mono muted">0s</span>
+          <button id="sb-cancel" class="link">Stop scenario</button>
+        </div>
+      </div>
+      <div class="scen-bar"><div id="sb-fill" class="scen-fill" style="width:0%"></div></div>
+      <div id="sb-now" class="scen-now"></div>
+    </section>
+
     <section class="kpis">
       <div class="kpi"><div class="label">Achieved / target</div><div class="value"><span id="k-rps">–</span><small> / <span id="k-target">–</span> rps</small></div></div>
       <div class="kpi"><div class="label">TTFT p50 · p99</div><div class="value"><span id="k-p50">–</span><small> · </small><span id="k-p99">–</span><small> ms</small></div></div>

@@ -270,14 +270,29 @@ class LiveBackend:
             raise RuntimeError("no Ready colo-controller pod")
         return pods[0].metadata.name
 
+    def _fast_scale_vllm(self, rate: float) -> None:
+        want = 2 if float(rate) > 700.0 else 1
+        try:
+            self.hpa.patch_namespaced_horizontal_pod_autoscaler(
+                "vllm", "inference", {"spec": {"minReplicas": want}}
+            )
+            self.apps.patch_namespaced_deployment_scale(
+                "vllm", "inference", {"spec": {"replicas": want}}
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     async def set_gpu_rate(self, rate: float) -> dict:
         pods = await asyncio.to_thread(self._ready_pods, "inference", "app=loadgen")
         if not pods:
             raise RuntimeError("no Ready loadgen pods")
         names = [p.metadata.name for p in pods]
-        res = await asyncio.gather(
-            *[self.proxy("inference", n, 8080, "rate", "POST", {"rate": float(rate)}) for n in names],
-            return_exceptions=True,
+        res, _ = await asyncio.gather(
+            asyncio.gather(
+                *[self.proxy("inference", n, 8080, "rate", "POST", {"rate": float(rate)}) for n in names],
+                return_exceptions=True,
+            ),
+            asyncio.to_thread(self._fast_scale_vllm, float(rate)),
         )
         return {n: (str(r) if isinstance(r, Exception) else r) for n, r in zip(names, res)}
 

@@ -510,11 +510,12 @@ def guard_step(
     requests: int,
     now: float,
     cfg: GuardConfig,
+    has_memory_heavy: bool = True,
 ) -> tuple[NodeGuard, list[GuardAction]]:
     """Advance one node's guard by one sample.
 
-    healthy --(p99 > factor*baseline)--> block-memory-heavy
-    block-memory-heavy --(still breaching for >= escalate_s)--> block-all
+    healthy --(p99 > factor*baseline and has_memory_heavy)--> block-memory-heavy
+    block-memory-heavy --(cfg.escalate_s > 0 and still breaching for >= escalate_s)--> block-all
     block-* --(healthy for >= cooldown_s)--> healthy (all labels released)
 
     Insufficient data (p99 None, requests < min_requests, or no baseline): no
@@ -538,7 +539,7 @@ def guard_step(
     desc = f"TTFT p99 {p99_ms:.0f} ms vs threshold {thr:.0f} ms ({requests} req)"
 
     if g.state is GuardState.HEALTHY:
-        if breaching:
+        if breaching and has_memory_heavy:
             return NodeGuard(GuardState.BLOCK_MEMORY_HEAVY, breach_since=now, changed_at=now), [
                 GuardAction("block", (CLASS_MEMORY_HEAVY,), "ColoGuardEvict",
                             f"{desc}; blocking and evicting memory-heavy backfill")]
@@ -546,7 +547,7 @@ def guard_step(
 
     if breaching:
         since = g.breach_since if g.breach_since is not None else now
-        if g.state is GuardState.BLOCK_MEMORY_HEAVY and now - since >= cfg.escalate_s:
+        if g.state is GuardState.BLOCK_MEMORY_HEAVY and cfg.escalate_s > 0 and now - since >= cfg.escalate_s:
             return NodeGuard(GuardState.BLOCK_ALL, breach_since=now, changed_at=now), [
                 GuardAction("block", (CLASS_INTEGER,), "ColoGuardEvict",
                             f"{desc} for {now - since:.0f}s after memory-heavy block; "

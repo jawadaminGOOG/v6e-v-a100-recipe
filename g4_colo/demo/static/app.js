@@ -8,9 +8,9 @@ const COLORS = {
   muted: "#6b6a66", ok: "#3b8a5a", dark: "#555451", line: "#e4e2dd",
 };
 const PRESETS = {
-  integer: { sandbox: 10, toolcall: 10, analytics: 0 },
+  integer: { sandbox: 10, toolcall: 9, analytics: 0 },
   memory: { sandbox: 0, toolcall: 0, analytics: 16 },
-  mixed: { sandbox: 6, toolcall: 6, analytics: 6 },
+  mixed: { sandbox: 10, toolcall: 9, analytics: 16 },
 };
 const SVCS = ["sandbox", "toolcall", "analytics"];
 
@@ -63,6 +63,7 @@ $("guard").addEventListener("change", (e) => { touched.guard = Date.now(); act("
 $("btn-baseline").addEventListener("click", () => act("/api/baseline", {}, "baseline measured"));
 document.querySelectorAll("[data-scenario]").forEach((b) => b.addEventListener("click", () => act(`/api/scenario/${b.dataset.scenario}`, {}, `scenario ${b.dataset.scenario} started`)));
 $("scen-cancel").addEventListener("click", () => act("/api/scenario/cancel", {}, "scenario cancelled"));
+if ($("sb-cancel")) $("sb-cancel").addEventListener("click", () => act("/api/scenario/cancel", {}, "scenario cancelled"));
 
 const fresh = (k) => touched[k] && Date.now() - touched[k] < 8000;
 
@@ -230,6 +231,25 @@ function renderScenario(sc) {
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   log.innerHTML = (sc.log || []).map((e) => `<li class="${e.level}"><span class="t">+${Math.round(e.elapsed_s)}s</span>${esc(e.msg)}</li>`).join("");
   if (atBottom) log.scrollTop = log.scrollHeight;
+  const sb = $("scen-banner");
+  if (sb) {
+    sb.hidden = !sc.name || sc.status === "idle";
+    if (!sb.hidden) {
+      $("sb-badge").textContent = sc.status.toUpperCase();
+      $("sb-badge").className = `badge ${sc.status}`;
+      $("sb-title").textContent = sc.title || sc.name;
+      const idx = Math.max(0, sc.step_index) + 1;
+      const tot = Math.max(1, sc.n_steps || 1);
+      $("sb-step").textContent = `· Step ${idx} of ${tot}`;
+      $("sb-elapsed").textContent = `${Math.round(sc.elapsed_s || 0)}s elapsed`;
+      $("sb-cancel").hidden = sc.status !== "running";
+      const pct = sc.status === "done" ? 100 : Math.min(98, Math.round((idx / tot) * 100));
+      $("sb-fill").style.width = `${pct}%`;
+      const lastLog = (sc.log || [])[sc.log.length - 1];
+      const curNote = sc.current_step && sc.current_step.note ? sc.current_step.note : "";
+      $("sb-now").textContent = lastLog ? `${lastLog.msg}${curNote && !lastLog.msg.includes(curNote) ? " — " + curNote : ""}` : curNote;
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ charts */

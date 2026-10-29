@@ -52,8 +52,8 @@ spec:
   priorities:
   - nodepools: [g4gpu-jawadamin-us-west8-1026]
   whenUnsatisfiable: DoNotScaleUp
-  # Remove an unneeded node after 5 min instead of the default 10.
-  autoscalingPolicy: {consolidationDelayMinutes: 5}
+  # Remove an unneeded GPU node after 1 min (GKE minimum) and ignore expendable CPU utilization when consolidating GPU nodes.
+  autoscalingPolicy: {consolidationDelayMinutes: 1, gpuConsolidationThreshold: 100}
 ---
 apiVersion: cloud.google.com/v1
 kind: ComputeClass
@@ -64,5 +64,5 @@ spec:
   priorities:
   - nodepools: [n4dcpu-jawadamin-us-west8-1026]
   whenUnsatisfiable: DoNotScaleUp
-  # Remove an unneeded node after 5 min instead of the default 10.
-  autoscalingPolicy: {consolidationDelayMinutes: 5}
+  # Remove an unneeded N4D node after 1 min instead of the default 10.
+  autoscalingPolicy: {consolidationDelayMinutes: 1}

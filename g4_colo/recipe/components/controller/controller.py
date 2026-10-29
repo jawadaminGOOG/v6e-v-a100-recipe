@@ -277,7 +277,11 @@ class Controller:
             summ = ttft.nodes.get(name)
             p99 = summ.p99_ms if summ else None
             reqs = summ.requests if summ else 0
-            g, acts = L.guard_step(g, p99, reqs, now, gcfg)
+            has_mem_bf = any(
+                _is_backfill(p) and _labels(p).get("colo.class") == L.CLASS_MEMORY_HEAVY
+                for p in pods_by_node.get(name, [])
+            )
+            g, acts = L.guard_step(g, p99, reqs, now, gcfg, has_memory_heavy=has_mem_bf)
             self.guards[name] = g
             for a in acts:
                 self.record(a.reason, name, a.message, classes=list(a.classes))
@@ -315,7 +319,7 @@ class Controller:
             name = n.metadata.name
             npods = pods_by_node.get(name, [])
             has_vllm = any(p.metadata.namespace == NS_INF and _labels(p).get("app") == "vllm"
-                           and p.status and _ready(p.status.conditions) for p in npods)
+                           and not p.metadata.deletion_timestamp for p in npods)
             eligible = _ready(n.status.conditions) and has_vllm \
                 and not n.spec.unschedulable
             used_cpu = used_mem = 0
