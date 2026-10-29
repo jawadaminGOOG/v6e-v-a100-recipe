@@ -1,0 +1,48 @@
+# Production template: start here for a real deployment. Not applied as-is; edit the
+# placeholders (pool names, replica limits, images) for your environment first.
+#   kubectl kustomize g4_colo/recipe/overlays/production-template   # review
+#   kubectl apply -k g4_colo/recipe/overlays/production-template     # after editing
+#
+# Differences from the demo overlay:
+#   1. No synthetic load generator: real clients call the vLLM Service.
+#   2. The colo controller runs on any system node, not the load-generator pool.
+#   3. The g4-gpu ComputeClass lists capacity tiers in cost order:
+#      reservation -> Spot -> on-demand. Each tier is a node pool you create with the same
+#      kubelet config, labels and taints as the on-demand pool (see infra/create-node-pools.sh).
+#   4. The vLLM HPA allows more replicas.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+patches:
+# 1. Drop the load generator.
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: loadgen, namespace: inference}
+- patch: |-
+    $patch: delete
+    apiVersion: monitoring.googleapis.com/v1
+    kind: PodMonitoring
+    metadata: {name: loadgen, namespace: inference}
+# 2. Controller on any system node.
+- target: {kind: Deployment, name: colo-controller, namespace: colo-system}
+  patch: |-
+    - op: remove
+      path: /spec/template/spec/nodeSelector
+# 3. Capacity tiers for G4. Pools that do not exist are skipped by the autoscaler.
+- target: {kind: ComputeClass, name: g4-gpu}
+  patch: |-
+    - op: replace
+      path: /spec/priorities
+      value:
+      - nodepools: [g4gpu-reservation-pool]   # REPLACE: pool bound to a G4 reservation / CUD
+      - nodepools: [g4gpu-spot-pool]          # REPLACE: Spot pool (needs PREEMPTIBLE GPU quota)
+      - nodepools: [g4gpu-jawadamin-us-west8-1026]   # REPLACE: on-demand pool
+# 4. More vLLM replicas.
+- target: {kind: HorizontalPodAutoscaler, name: vllm, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/maxReplicas
+      value: 8

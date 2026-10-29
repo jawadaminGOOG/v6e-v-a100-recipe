@@ -1,0 +1,21 @@
+# Scenario 4 overlay: Latency guard with memory-bandwidth-heavy analytics (evicts analytics from G4 to N4D overflow).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+patches:
+- target: {kind: ConfigMap, name: colo-config, namespace: colo-system}
+  patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: colo-config, namespace: colo-system}
+    data:
+      config.json: |
+        {"demand": {"sandbox": 0, "toolcall": 0, "analytics": 16},
+         "guard": {"enabled": true, "baseline_ttft_p99_ms": 20, "factor": 1.5, "cooldown_s": 600, "window_s": 30},
+         "buffer_replicas": 1}
+- target: {kind: Deployment, name: loadgen, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/env/4/value
+      value: "400"

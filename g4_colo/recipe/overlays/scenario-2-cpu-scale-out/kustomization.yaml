@@ -1,0 +1,21 @@
+# Scenario 2 overlay: CPU scale-out beyond G4 spare capacity (overflows to N4D, G4 stays at 1).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+patches:
+- target: {kind: ConfigMap, name: colo-config, namespace: colo-system}
+  patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: colo-config, namespace: colo-system}
+    data:
+      config.json: |
+        {"demand": {"sandbox": 16, "toolcall": 16, "analytics": 0},
+         "guard": {"enabled": false, "baseline_ttft_p99_ms": 20, "factor": 1.5, "cooldown_s": 600, "window_s": 30},
+         "buffer_replicas": 1}
+- target: {kind: Deployment, name: loadgen, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/env/4/value
+      value: "300"

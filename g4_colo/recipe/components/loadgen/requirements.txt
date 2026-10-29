@@ -1,0 +1,4 @@
+aiohttp>=3.10,<4
+kubernetes>=30
+prometheus_client>=0.20
+uvloop>=0.19

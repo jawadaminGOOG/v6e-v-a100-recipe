@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- cluster.yaml
+- custom-metrics-adapter.yaml
+- vllm.yaml
+- loadgen.yaml
+- controller.yaml
+- colo-services.yaml
+- guardrails.yaml
+images:
+- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
+  newTag: latest
+- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen
+  newTag: latest
+- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-controller
+  newTag: latest
+- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
+  newTag: latest

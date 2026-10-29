@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>G4 colo at scale</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="title">
+    <h1>G4 colo at scale</h1>
+    <div class="sub"><span id="cluster-name">…</span> · <span id="cluster-region"></span> · <span id="cluster-project"></span>
+      <span id="mode-badge" class="badge" hidden>MOCK</span>
+      <span id="conn" class="conn">connecting…</span></div>
+  </div>
+  <div class="ticker">
+    <div class="tick-main">
+      <div class="label">Fleet cost</div>
+      <div class="value"><span id="cost-hr">$0.00</span><small>/hr</small></div>
+      <div class="detail" id="cost-split"></div>
+    </div>
+    <div class="tick-acc">
+      <div class="label">Spent since page open</div>
+      <div class="value mono" id="cost-acc">$0.0000</div>
+    </div>
+    <div class="tick-reclaim">
+      <div class="label">Reclaimed on G4</div>
+      <div class="value"><span id="reclaim-vcpu">0</span><small> vCPU</small></div>
+      <div class="detail" id="reclaim-val"></div>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="panel">
+    <section class="card">
+      <h2>GPU load</h2>
+      <label class="slider-row">
+        <span>Request rate</span><output id="rate-out">0</output><span class="unit">rps</span>
+      </label>
+      <input type="range" id="rate" min="0" max="1400" step="10" value="300">
+      <div class="hint">POST /rate to every loadgen replica</div>
+    </section>
+
+    <section class="card">
+      <h2>CPU service demand <span class="muted">(pods)</span></h2>
+      <label class="slider-row"><span class="dot integer"></span><span>sandbox</span><output id="d-sandbox-out">0</output></label>
+      <input type="range" id="d-sandbox" min="0" max="20" step="1" value="0" data-svc="sandbox">
+      <label class="slider-row"><span class="dot integer"></span><span>toolcall</span><output id="d-toolcall-out">0</output></label>
+      <input type="range" id="d-toolcall" min="0" max="20" step="1" value="0" data-svc="toolcall">
+      <label class="slider-row"><span class="dot memory"></span><span>analytics</span><output id="d-analytics-out">0</output></label>
+      <input type="range" id="d-analytics" min="0" max="20" step="1" value="0" data-svc="analytics">
+      <div class="presets">
+        <button data-preset="integer">Integer-type</button>
+        <button data-preset="memory">Memory-heavy</button>
+        <button data-preset="mixed">Mixed</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>TTFT guard</h2>
+      <div class="row">
+        <label class="switch"><input type="checkbox" id="guard"><span class="track"></span></label>
+        <span id="guard-label">…</span>
+      </div>
+      <div class="row kv"><span>Baseline p99</span><b id="baseline">–</b></div>
+      <div class="row kv"><span>Threshold</span><b id="threshold">–</b></div>
+      <button id="btn-baseline" class="wide">Measure baseline</button>
+    </section>
+
+    <section class="card">
+      <h2>Scenarios</h2>
+      <div class="scen-buttons">
+        <button data-scenario="gpu-scale-out">1 · GPU scale-out</button>
+        <button data-scenario="gpu-scale-in">2 · GPU scale-in</button>
+        <button data-scenario="cpu-scale-out">3 · CPU scale-out</button>
+        <button data-scenario="guard-integer-vs-memory">4 · Guard: integer vs memory</button>
+      </div>
+      <div class="scen-head"><span id="scen-status">idle</span><button id="scen-cancel" class="link" hidden>cancel</button></div>
+      <ol id="scen-log" class="scen-log"></ol>
+    </section>
+    <div id="toast" class="toast" hidden></div>
+  </aside>
+
+  <main>
+    <section class="kpis">
+      <div class="kpi"><div class="label">Achieved / target</div><div class="value"><span id="k-rps">–</span><small> / <span id="k-target">–</span> rps</small></div></div>
+      <div class="kpi"><div class="label">TTFT p50 · p99</div><div class="value"><span id="k-p50">–</span><small> · </small><span id="k-p99">–</span><small> ms</small></div></div>
+      <div class="kpi"><div class="label">vLLM replicas</div><div class="value"><span id="k-vllm">–</span><small id="k-hpa"></small></div></div>
+      <div class="kpi"><div class="label">Nodes G4 · N4D</div><div class="value"><span id="k-g4">–</span><small> · </small><span id="k-n4d">–</span></div></div>
+      <div class="kpi"><div class="label">Backfill · overflow</div><div class="value"><span id="k-bf">–</span><small> · </small><span id="k-of">–</span><small> pods</small></div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Node map</h2>
+        <div class="legend">
+          <span><i class="sw vllm"></i>vLLM</span>
+          <span><i class="sw integer"></i>integer services</span>
+          <span><i class="sw memory"></i>memory-heavy services</span>
+          <span><i class="sw system"></i>system (exclusive)</span>
+          <span><i class="sw shared"></i>shared pool (shade = busy %)</span>
+          <span><i class="sw buffer"></i>warm buffer</span>
+        </div>
+      </div>
+      <div id="nodes" class="nodes"></div>
+    </section>
+
+    <section class="charts">
+      <div class="card chart"><h3>TTFT p99 vs baseline</h3><canvas id="c-ttft"></canvas></div>
+      <div class="card chart"><h3>Achieved rps vs target</h3><canvas id="c-rps"></canvas></div>
+      <div class="card chart"><h3>vLLM replicas and nodes</h3><canvas id="c-scale"></canvas></div>
+      <div class="card chart"><h3>Backfill vs overflow replicas</h3><canvas id="c-svc"></canvas></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Events</h2><span class="muted">cluster-autoscaler · guard · preemption (newest first)</span></div>
+      <ul id="events" class="events"></ul>
+      <div id="errors" class="errors"></div>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

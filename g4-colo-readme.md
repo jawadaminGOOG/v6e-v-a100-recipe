@@ -280,3 +280,10 @@ available on request. All tables and figures can be regenerated from the committ
 Same image and node, vLLM with one API server process, 250 concurrent requests: 8 vCPU / 64 GiB reached 726 RPS (two
 runs: 728.1, 723.8) vs 738 RPS with 40 vCPU / 150 GiB (739.3, 737.5), i.e. −1.7%. Not repeated for the 4-process
 configuration.
+
+## 8. Fleet Recipe and Live Demo (`g4_colo/recipe/` & `g4_colo/demo/`)
+
+To run this co-location pattern across a multi-node GKE Standard cluster—with custom `ComputeClass` definitions (`g4-gpu` and `n4d-cpu`), expendable `PriorityClass` backfill (`value: -100`) so CPU demand never scales out GPU nodes, warm N4D overflow buffers (`value: -5`), admission/quota/network guardrails, and an automated TTFT p99 latency guard that evicts memory-bandwidth-heavy backfill to N4D—see:
+
+- **[`g4_colo/recipe/README.md`](g4_colo/recipe/README.md):** Kustomize base and overlays (`overlays/demo`, `overlays/production-template`), controller, node-agent, and gate verification suite.
+- **[`g4_colo/demo/README.md`](g4_colo/demo/README.md):** Local FastAPI + Chart.js dashboard showing per-core G4 CPU ownership, live TTFT p99 vs. baseline, backfill vs. overflow placement, and one-click scenario runners.

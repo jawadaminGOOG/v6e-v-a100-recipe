@@ -1,0 +1,269 @@
+"""Demo scenarios as data + a small async runner.
+
+Each scenario is a list of steps (plain dicts) so the web app, run_scenario.py
+and any other harness (e.g. recipe/tests/run_scenario.py) can share them.
+
+Step kinds:
+  {"do": "gpu_rate", "rate": 300}
+  {"do": "demand", "sandbox": 4, "toolcall": 4, "analytics": 2}
+  {"do": "guard", "enabled": true}
+  {"do": "baseline"}
+  {"do": "capture", "name": "n4d0", "metric": "n4d_nodes"}      # save a metric value
+  {"do": "wait", "s": 60}
+  {"do": "wait_until", "all": [["vllm_ready", ">=", 2]], "timeout_s": 900}
+       # rhs may be a number or "$name" (captured) or "$name+1"
+  {"do": "observe", "label": "steady"}                          # record a snapshot
+Every step may carry a "note" shown in the step log.
+Metric names are the keys of state.summarize().
+"""
+
+from __future__ import annotations
+
+import asyncio
+import operator
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+from state import summarize
+
+SCENARIOS: dict[str, dict[str, Any]] = {
+    "gpu-scale-out": {
+        "title": "GPU scale-out: HPA adds a vLLM replica, CA adds a G4 node",
+        "steps": [
+            {"do": "gpu_rate", "rate": 300, "note": "steady load on one replica"},
+            {"do": "wait", "s": 45},
+            {"do": "baseline", "note": "baseline = current TTFT p99"},
+            {"do": "observe", "label": "before"},
+            {"do": "capture", "name": "g4_0", "metric": "g4_nodes"},
+            {"do": "gpu_rate", "rate": 1200, "note": "push past HPA target (700 rps/pod)"},
+            {"do": "wait_until", "all": [["vllm_desired", ">=", 2]], "timeout_s": 300, "note": "HPA scales vLLM to 2"},
+            {"do": "wait_until", "all": [["g4_nodes", ">=", "$g4_0+1"]], "timeout_s": 600, "note": "CA TriggeredScaleUp: new G4 node"},
+            {"do": "wait_until", "all": [["vllm_ready", ">=", 2]], "timeout_s": 1500, "note": "second replica Ready"},
+            {"do": "wait", "s": 40, "note": "let latency settle"},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+    "gpu-scale-in": {
+        "title": "GPU scale-in: HPA drops a replica, CA removes the G4 node (backfill is expendable)",
+        "steps": [
+            {"do": "observe", "label": "before"},
+            {"do": "gpu_rate", "rate": 300, "note": "drop load"},
+            {"do": "wait_until", "all": [["vllm_desired", "<=", 1]], "timeout_s": 900, "note": "HPA scale-down (stabilization window)"},
+            {"do": "wait_until", "all": [["g4_nodes", "<=", 1]], "timeout_s": 1800, "note": "CA ScaleDown of the empty G4 node"},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+    "cpu-scale-out": {
+        "title": "CPU scale-out: backfill fills G4 spare cores first, overflow spills to N4D",
+        "steps": [
+            {"do": "demand", "sandbox": 4, "toolcall": 4, "analytics": 2, "note": "small demand fits in G4 spare"},
+            {"do": "wait_until", "all": [["overflow_desired", "==", 0], ["backfill_ready", ">=", 10]], "timeout_s": 300},
+            {"do": "observe", "label": "fits-in-backfill"},
+            {"do": "capture", "name": "n4d0", "metric": "n4d_nodes"},
+            {"do": "demand", "sandbox": 16, "toolcall": 14, "analytics": 10, "note": "demand > G4 spare slots"},
+            {"do": "wait_until", "all": [["overflow_desired", ">", 0]], "timeout_s": 120, "note": "controller assigns overflow"},
+            {"do": "wait_until", "all": [["n4d_nodes", ">", "$n4d0"]], "timeout_s": 600, "note": "CA adds N4D nodes"},
+            {"do": "wait_until", "all": [["overflow_ready", ">=", "$overflow_target"]], "timeout_s": 900, "capture_before": {"overflow_target": "overflow_desired"}, "note": "all overflow Ready"},
+            {"do": "observe", "label": "spilled"},
+            {"do": "demand", "sandbox": 4, "toolcall": 4, "analytics": 2, "note": "back to small demand (overflow shrinks first)"},
+            {"do": "wait_until", "all": [["overflow_desired", "==", 0]], "timeout_s": 120},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+    "guard-integer-vs-memory": {
+        "title": "Guard: integer backfill is harmless, memory-heavy backfill trips the TTFT guard",
+        "steps": [
+            {"do": "guard", "enabled": True},
+            {"do": "gpu_rate", "rate": 400},
+            {"do": "demand", "sandbox": 0, "toolcall": 0, "analytics": 0, "note": "no backfill"},
+            {"do": "wait", "s": 40},
+            {"do": "baseline", "note": "baseline with GPU alone"},
+            {"do": "observe", "label": "gpu-alone"},
+            {"do": "demand", "sandbox": 9, "toolcall": 9, "analytics": 0, "note": "integer-type mix"},
+            {"do": "wait_until", "all": [["integer_backfill_ready", ">=", 18]], "timeout_s": 300},
+            {"do": "wait", "s": 40, "note": "observe p99 with integer backfill"},
+            {"do": "observe", "label": "integer"},
+            {"do": "capture", "name": "ev0", "metric": "guard_evict_events"},
+            {"do": "demand", "sandbox": 0, "toolcall": 0, "analytics": 16, "note": "memory-heavy mix"},
+            {"do": "wait_until", "any": [["guard_evict_events", ">", "$ev0"], ["guard_blocks", ">=", 1]], "timeout_s": 300, "note": "guard blocks + evicts memory-heavy"},
+            {"do": "observe", "label": "guard-fired"},
+            {"do": "wait", "s": 40, "note": "memory-heavy now runs as overflow on N4D"},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+}
+SCENARIO_ALIASES = {"1": "gpu-scale-out", "2": "gpu-scale-in", "3": "cpu-scale-out", "4": "guard-integer-vs-memory"}
+
+OPS = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq, "!=": operator.ne}
+
+
+def resolve_name(name: str) -> str:
+    name = SCENARIO_ALIASES.get(name, name)
+    if name not in SCENARIOS:
+        raise KeyError(f"unknown scenario {name!r}; choose from {list(SCENARIOS)}")
+    return name
+
+
+def _iso(t: float) -> str:
+    return datetime.fromtimestamp(t, tz=timezone.utc).isoformat(timespec="seconds")
+
+
+class ScenarioRunner:
+    """Runs one scenario at a time against a backend; keeps a step log."""
+
+    def __init__(self, backend, poll_s: float = 4.0, time_scale: float = 1.0):
+        self.backend = backend
+        self.poll_s = poll_s
+        self.time_scale = time_scale
+        self.task: asyncio.Task | None = None
+        self.reset(None)
+
+    def reset(self, name: str | None):
+        self.name = name
+        self.status = "idle" if name is None else "running"
+        self.started = time.time()
+        self.finished: float | None = None
+        self.step_index = -1
+        self.log: list[dict] = []
+        self.observations: list[dict] = []
+        self.vars: dict[str, Any] = {}
+
+    def snapshot(self) -> dict:
+        return {
+            "name": self.name,
+            "title": SCENARIOS.get(self.name or "", {}).get("title"),
+            "status": self.status,
+            "started": self.started,
+            "finished": self.finished,
+            "step_index": self.step_index,
+            "n_steps": len(SCENARIOS.get(self.name or "", {}).get("steps", [])),
+            "log": self.log[-200:],
+            "observations": self.observations,
+        }
+
+    def _log(self, msg: str, level: str = "info", **extra):
+        t = time.time()
+        self.log.append({"t": t, "time": _iso(t), "elapsed_s": round(t - self.started, 1), "level": level, "msg": msg, **extra})
+
+    async def _metrics(self) -> dict:
+        return summarize(await self.backend.state())
+
+    def _rhs(self, v: Any) -> Any:
+        if isinstance(v, str) and v.startswith("$"):
+            expr = v[1:]
+            for sign in ("+", "-"):
+                if sign in expr:
+                    k, d = expr.split(sign, 1)
+                    base = self.vars.get(k, 0) or 0
+                    return base + float(d) if sign == "+" else base - float(d)
+            return self.vars.get(expr)
+        return v
+
+    def _check(self, m: dict, conds: list, mode: str) -> tuple[bool, list[str]]:
+        res, desc = [], []
+        for metric, op, rhs in conds:
+            rv = self._rhs(rhs)
+            lv = m.get(metric)
+            ok = lv is not None and rv is not None and OPS[op](lv, rv)
+            res.append(ok)
+            desc.append(f"{metric}={lv} {op} {rv}")
+        return (all(res) if mode == "all" else any(res)), desc
+
+    async def run(self, name: str) -> dict:
+        name = resolve_name(name)
+        self.reset(name)
+        steps = SCENARIOS[name]["steps"]
+        self._log(f"scenario {name}: {SCENARIOS[name]['title']}")
+        try:
+            for i, step in enumerate(steps):
+                self.step_index = i
+                await self._run_step(i, step)
+            self.status = "done"
+            self._log("scenario finished", "ok")
+        except asyncio.CancelledError:
+            self.status = "cancelled"
+            self._log("scenario cancelled", "warn")
+            raise
+        except Exception as e:  # noqa: BLE001
+            self.status = "failed"
+            self._log(f"step {self.step_index + 1} failed: {type(e).__name__}: {e}", "error")
+        finally:
+            self.finished = time.time()
+        return self.snapshot()
+
+    async def _run_step(self, i: int, step: dict):
+        do = step["do"]
+        note = f" - {step['note']}" if step.get("note") else ""
+        b = self.backend
+        prefix = f"[{i + 1}] "
+        if do == "gpu_rate":
+            await b.set_gpu_rate(step["rate"])
+            self._log(f"{prefix}GPU request rate -> {step['rate']} rps{note}", step=i)
+        elif do == "demand":
+            d = {k: step[k] for k in ("sandbox", "toolcall", "analytics") if k in step}
+            await b.set_demand(d)
+            self._log(f"{prefix}demand -> {d}{note}", step=i)
+        elif do == "guard":
+            await b.set_guard(step["enabled"])
+            self._log(f"{prefix}guard -> {'on' if step['enabled'] else 'off'}{note}", step=i)
+        elif do == "baseline":
+            r = await b.baseline()
+            self._log(f"{prefix}baseline measured: {r}{note}", step=i)
+        elif do == "capture":
+            m = await self._metrics()
+            self.vars[step["name"]] = m.get(step["metric"])
+            self._log(f"{prefix}captured {step['name']} = {step['metric']} = {self.vars[step['name']]}{note}", step=i)
+        elif do == "wait":
+            s = step["s"] * self.time_scale
+            self._log(f"{prefix}wait {s:.0f}s{note}", step=i)
+            await asyncio.sleep(s)
+        elif do == "observe":
+            m = await self._metrics()
+            self.observations.append({"label": step["label"], "time": _iso(time.time()), "metrics": m})
+            self._log(
+                f"{prefix}observe '{step['label']}': rps {m['achieved_rps']}/{m['target_rps']}, p99 {m['ttft_p99_ms']} ms, "
+                f"vLLM {m['vllm_ready']}/{m['vllm_desired']}, G4 {m['g4_nodes']}, N4D {m['n4d_nodes']}, "
+                f"backfill {m['backfill_ready']}, overflow {m['overflow_ready']}, blocks {m['guard_blocks']}{note}",
+                "ok",
+                step=i,
+                metrics=m,
+            )
+        elif do == "wait_until":
+            for var, metric in (step.get("capture_before") or {}).items():
+                self.vars[var] = (await self._metrics()).get(metric)
+            mode = "any" if "any" in step else "all"
+            conds = step.get(mode) or []
+            timeout = step.get("timeout_s", 600) * self.time_scale
+            t0 = time.time()
+            self._log(f"{prefix}wait until {mode} {conds} (timeout {timeout:.0f}s){note}", step=i)
+            last_desc = []
+            while True:
+                try:
+                    m = await self._metrics()
+                except Exception as e:  # noqa: BLE001 - transient API errors must not kill a long scenario
+                    self._log(f"{prefix}  state fetch failed ({type(e).__name__}: {e}); retrying", "warn", step=i)
+                    m = {}
+                ok, last_desc = self._check(m, conds, mode)
+                if ok:
+                    self._log(f"{prefix}  met after {time.time() - t0:.0f}s: {', '.join(last_desc)}", "ok", step=i)
+                    return
+                if time.time() - t0 > timeout:
+                    raise TimeoutError(f"condition not met in {timeout:.0f}s: {', '.join(last_desc)}")
+                await asyncio.sleep(self.poll_s)
+        else:
+            raise ValueError(f"unknown step kind {do!r}")
+
+    def start(self, name: str) -> dict:
+        name = resolve_name(name)
+        if self.task and not self.task.done():
+            raise RuntimeError(f"scenario {self.name} already running")
+        self.reset(name)
+        self.task = asyncio.create_task(self.run(name))
+        return self.snapshot()
+
+    def cancel(self) -> bool:
+        if self.task and not self.task.done():
+            self.task.cancel()
+            return True
+        return False

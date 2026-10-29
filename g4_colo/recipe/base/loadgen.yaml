@@ -1,0 +1,57 @@
+# Load generator: open-loop streaming requests to every Ready vLLM pod; per-pod TTFT stats for the guard and demo.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: loadgen, namespace: inference}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: loadgen, namespace: inference}
+rules:
+- apiGroups: [""]
+  resources: [pods, endpoints]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: loadgen, namespace: inference}
+subjects: [{kind: ServiceAccount, name: loadgen, namespace: inference}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: loadgen}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: loadgen, namespace: inference, labels: {app: loadgen}}
+spec:
+  replicas: 4
+  selector: {matchLabels: {app: loadgen}}
+  template:
+    metadata: {labels: {app: loadgen}}
+    spec:
+      serviceAccountName: loadgen
+      nodeSelector: {colo.role: loadgen}
+      containers:
+      - name: loadgen
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen:latest
+        imagePullPolicy: Always
+        env:
+        - {name: VLLM_NAMESPACE, value: inference}
+        - {name: VLLM_LABEL, value: app=vllm}
+        - {name: VLLM_PORT, value: "8000"}
+        - {name: MODEL, value: Qwen/Qwen3-1.7B-Base}
+        - {name: INITIAL_RATE, value: "0"}
+        - {name: REPLICAS_LABEL, value: app=loadgen}
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        - name: POD_NAMESPACE
+          valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+        ports: [{name: http, containerPort: 8080}]
+        resources:
+          requests: {cpu: 1500m, memory: 1Gi}
+          limits: {memory: 2Gi}
+        readinessProbe: {httpGet: {path: /stats, port: 8080}, periodSeconds: 5}
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: loadgen, namespace: inference}
+spec:
+  selector: {matchLabels: {app: loadgen}}
+  endpoints: [{port: http, path: /metrics, interval: 15s}]

@@ -1,0 +1,92 @@
+# GPU workload: vLLM on the 8 vCPU / 64 GiB / 1 GPU slice of each G4 node, autoscaled on in-flight requests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+  labels: {app: vllm}
+spec:
+  # No `replicas:` field: the HPA below owns the replica count (re-applying must not reset it).
+  selector: {matchLabels: {app: vllm}}
+  strategy: {type: Recreate}
+  template:
+    metadata:
+      labels: {app: vllm}
+    spec:
+      priorityClassName: gpu-serving
+      enableServiceLinks: false   # a Service named "vllm" would inject VLLM_PORT, which vLLM itself reads
+      nodeSelector: {cloud.google.com/compute-class: g4-gpu}
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: vllm
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai:v0.32.0
+        args:
+        - --model=Qwen/Qwen3-1.7B-Base
+        - --port=8000
+        - --max-model-len=4096
+        - --gpu-memory-utilization=0.9
+        - --enable-prefix-caching
+        - --api-server-count=4
+        env:
+        - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+        - {name: HF_HOME, value: /hf}
+        ports: [{name: http, containerPort: 8000}]
+        # Guaranteed QoS + integer CPU => exclusive cores from the static CPU manager.
+        resources:
+          requests: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
+          limits: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
+        readinessProbe:
+          httpGet: {path: /health, port: 8000}
+          periodSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet: {path: /health, port: 8000}
+          periodSeconds: 5
+          failureThreshold: 180
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: shm, mountPath: /dev/shm}
+      volumes:
+      - {name: hf, hostPath: {path: /var/lib/colo/hf, type: DirectoryOrCreate}}
+      - {name: shm, emptyDir: {medium: Memory, sizeLimit: 8Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: vllm, namespace: inference}
+spec:
+  selector: {app: vllm}
+  ports: [{name: http, port: 8000, targetPort: 8000}]
+---
+# Managed Prometheus scrape of vLLM metrics (vllm:num_requests_running, TTFT histograms, ...).
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: vllm, namespace: inference}
+spec:
+  selector: {matchLabels: {app: vllm}}
+  endpoints: [{port: http, path: /metrics, interval: 15s}]
+---
+# Scale vLLM replicas on completed requests per second per replica. Each new replica needs a G4 node, which the
+# g4-gpu ComputeClass adds; backfill CPU work then fills that node's spare cores.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: vllm, namespace: inference}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: vllm}
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+  - type: Pods
+    pods:
+      # Completed requests per second per replica (the adapter turns a Prometheus
+      # counter into a per-second rate). One replica on the 8-vCPU shape saturates
+      # near 1,300 rps with this prompt mix, so 700 rps/replica leaves headroom and,
+      # unlike num_requests_running, stays linear in load (no flapping after scale-out).
+      metric: {name: prometheus.googleapis.com|vllm:request_success_total|counter}
+      target: {type: AverageValue, averageValue: "700"}
+  behavior:
+    scaleUp: {stabilizationWindowSeconds: 30, policies: [{type: Pods, value: 1, periodSeconds: 60}]}
+    scaleDown: {stabilizationWindowSeconds: 60, policies: [{type: Pods, value: 1, periodSeconds: 60}]}

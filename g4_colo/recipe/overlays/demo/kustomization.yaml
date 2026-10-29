@@ -1,0 +1,6 @@
+# Demo overlay: the full stack exactly as validated, including the synthetic load generator.
+#   kubectl apply -k g4_colo/recipe/overlays/demo
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base

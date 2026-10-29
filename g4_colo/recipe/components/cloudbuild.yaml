@@ -1,0 +1,32 @@
+# Builds and pushes the colo-at-scale component images.
+#   gcloud builds submit g4_colo/recipe/components \
+#     --config g4_colo/recipe/components/cloudbuild.yaml \
+#     --project northam-ce-mlai-tpu --region us-west8 --substitutions _TAG=v1
+substitutions:
+  _REGISTRY: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026
+  _TAG: latest
+options:
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY
+steps:
+  - id: colo-worker
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args: ['build', '-t', '${_REGISTRY}/colo-worker:${_TAG}', 'worker']
+  - id: colo-loadgen
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args: ['build', '-t', '${_REGISTRY}/colo-loadgen:${_TAG}', 'loadgen']
+  - id: colo-node-agent
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args: ['build', '-t', '${_REGISTRY}/colo-node-agent:${_TAG}', 'node-agent']
+  - id: colo-controller
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args: ['build', '-t', '${_REGISTRY}/colo-controller:${_TAG}', 'controller']
+images:
+  - ${_REGISTRY}/colo-worker:${_TAG}
+  - ${_REGISTRY}/colo-loadgen:${_TAG}
+  - ${_REGISTRY}/colo-node-agent:${_TAG}
+  - ${_REGISTRY}/colo-controller:${_TAG}

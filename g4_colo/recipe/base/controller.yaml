@@ -1,0 +1,150 @@
+# Colo controller: balances backfill (G4 spare cores) vs overflow (N4D) replicas and runs the latency guard.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: colo-controller, namespace: colo-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: colo-controller}
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list, watch, patch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+- apiGroups: [events.k8s.io]
+  resources: [events]
+  verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: colo-controller}
+subjects: [{kind: ServiceAccount, name: colo-controller, namespace: colo-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: colo-controller}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: colo-controller, namespace: colo-svc}
+rules:
+- apiGroups: [apps]
+  resources: [deployments, deployments/scale]
+  verbs: [get, list, watch, patch, update]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: colo-controller, namespace: colo-svc}
+subjects: [{kind: ServiceAccount, name: colo-controller, namespace: colo-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: colo-controller}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: colo-controller, namespace: colo-system}
+rules:
+- apiGroups: [apps]
+  resources: [deployments, deployments/scale]
+  verbs: [get, list, watch, patch, update]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: colo-controller, namespace: colo-system}
+subjects: [{kind: ServiceAccount, name: colo-controller, namespace: colo-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: colo-controller}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: colo-controller-read, namespace: inference}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: colo-controller-read, namespace: inference}
+subjects: [{kind: ServiceAccount, name: colo-controller, namespace: colo-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: colo-controller-read}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: colo-config, namespace: colo-system}
+data:
+  config.json: |
+    {"demand": {"sandbox": 0, "toolcall": 0, "analytics": 0},
+     "guard": {"enabled": true, "baseline_ttft_p99_ms": 60, "factor": 1.5, "cooldown_s": 600, "window_s": 30},
+     "buffer_replicas": 1}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: colo-controller, namespace: colo-system, labels: {app: colo-controller}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: colo-controller}}
+  template:
+    metadata: {labels: {app: colo-controller}}
+    spec:
+      serviceAccountName: colo-controller
+      nodeSelector: {colo.role: loadgen}
+      containers:
+      - name: controller
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-controller:latest
+        imagePullPolicy: Always
+        ports: [{name: http, containerPort: 8080}]
+        resources:
+          requests: {cpu: 200m, memory: 256Mi}
+          limits: {memory: 512Mi}
+        readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: colo-controller, namespace: colo-system}
+spec:
+  selector: {matchLabels: {app: colo-controller}}
+  endpoints: [{port: http, path: /metrics, interval: 15s}]
+---
+# Node agent: exposes the kubelet CPU-manager state and per-CPU utilisation (read-only) for the demo node map.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: colo-node-agent, namespace: colo-system}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: colo-node-agent, namespace: colo-system, labels: {app: colo-node-agent}}
+spec:
+  selector: {matchLabels: {app: colo-node-agent}}
+  template:
+    metadata: {labels: {app: colo-node-agent}}
+    spec:
+      serviceAccountName: colo-node-agent
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions: [{key: colo.role, operator: In, values: [g4, n4d]}]
+      tolerations: [{operator: Exists}]
+      containers:
+      - name: agent
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent:latest
+        imagePullPolicy: Always
+        env:
+        - name: NODE_NAME
+          valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+        ports: [{name: http, containerPort: 8080}]
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {memory: 128Mi}
+        volumeMounts:
+        - {name: kubelet, mountPath: /host/var/lib/kubelet, readOnly: true}
+        - {name: proc, mountPath: /host/proc, readOnly: true}
+      volumes:
+      - {name: kubelet, hostPath: {path: /var/lib/kubelet}}
+      - {name: proc, hostPath: {path: /proc}}

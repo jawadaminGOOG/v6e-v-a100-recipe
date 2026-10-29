@@ -1,0 +1,68 @@
+# Namespaces, PriorityClasses and ComputeClasses for the colo recipe.
+apiVersion: v1
+kind: Namespace
+metadata: {name: inference}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: colo-svc}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: colo-system}
+---
+# GPU workload: highest priority; preempts any co-located CPU pod on a G4 node.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: gpu-serving}
+value: 1000000
+description: GPU inference serving (vLLM).
+---
+# CPU services on N4D. Normal priority: pending pods make the autoscaler add N4D nodes.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: colo-overflow}
+value: 0
+description: CPU services running on N4D overflow nodes.
+---
+# Warm buffer on N4D: triggers scale-up (>= -10) but is preempted by colo-overflow pods.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: colo-buffer}
+value: -5
+preemptionPolicy: Never
+description: Placeholder pods that keep warm N4D capacity.
+---
+# CPU services on G4 spare cores. Below the cluster autoscaler's expendable cutoff (-10):
+# a pending backfill pod never makes the autoscaler add a node, and these pods are preempted first.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: colo-backfill}
+value: -100
+preemptionPolicy: Never
+description: CPU services backfilling spare cores on G4 GPU nodes (expendable).
+---
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata: {name: g4-gpu}
+spec:
+  # Order = preference. Add tiers as needed, e.g.:
+  #   - nodepools: [g4gpu-reservation-pool]   # CUD / reservation-backed pool
+  #   - nodepools: [g4gpu-spot-pool]          # Spot pool (cheapest, preemptible)
+  priorities:
+  - nodepools: [g4gpu-jawadamin-us-west8-1026]
+  whenUnsatisfiable: DoNotScaleUp
+  # Remove an unneeded node after 5 min instead of the default 10.
+  autoscalingPolicy: {consolidationDelayMinutes: 5}
+---
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata: {name: n4d-cpu}
+spec:
+  # Manually created pool first (carries the static CPU manager config and gVisor).
+  # Add `- machineFamily: n4d` with nodePoolAutoCreation for automatic pools if desired.
+  priorities:
+  - nodepools: [n4dcpu-jawadamin-us-west8-1026]
+  whenUnsatisfiable: DoNotScaleUp
+  # Remove an unneeded node after 5 min instead of the default 10.
+  autoscalingPolicy: {consolidationDelayMinutes: 5}
