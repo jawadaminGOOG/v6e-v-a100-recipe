@@ -7,41 +7,141 @@ metadata:
   name: colo-demo
   namespace: colo-system
 ---
+# RBAC (finding 1.11): cluster-wide access is read-only and limited to what the map needs.
+# Writes (pod proxy POSTs, HPA/Deployment scale for the demo accelerator, config reads) are
+# namespaced Roles in inference / colo-system / colo-svc only.
+#
+# Subjects: edit the `subjects:` list of each of the 4 bindings below (keep them identical). The Cloud Run
+# demo runs as a dedicated Google service account, mapped to a Kubernetes User by its email.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: colo-demo
+  name: colo-demo-read
 rules:
 - apiGroups: [""]
-  resources: [nodes, pods, events, configmaps]
+  resources: [nodes, pods, events]
   verbs: [get, list, watch]
-- apiGroups: [""]
-  resources: [pods/proxy]
-  verbs: [get, create, update, patch, delete]
 - apiGroups: [events.k8s.io]
   resources: [events]
   verbs: [get, list, watch]
-- apiGroups: [apps]
-  resources: [deployments, deployments/scale]
-  verbs: [get, list, watch, patch, update]
-- apiGroups: [autoscaling]
-  resources: [horizontalpodautoscalers]
-  verbs: [get, list, watch, patch, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: colo-demo
+  name: colo-demo-read
 subjects:
 - kind: ServiceAccount
   name: colo-demo
   namespace: colo-system
 - kind: User
-  name: 9452062936-compute@developer.gserviceaccount.com
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
   apiGroup: rbac.authorization.k8s.io
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
+  name: colo-demo-read
+---
+# inference: loadgen /rate + /stats through the pod proxy; vLLM HPA/Deployment scale (demo accelerator only).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: colo-demo
+  namespace: inference
+rules:
+- apiGroups: [""]
+  resources: [pods/proxy]
+  verbs: [get, create]
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get, list, watch]
+- apiGroups: [apps]
+  resources: [deployments/scale]
+  resourceNames: [vllm]
+  verbs: [get, patch, update]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [get, list, watch]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  resourceNames: [vllm]
+  verbs: [patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: colo-demo
+  namespace: inference
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: colo-demo
+---
+# colo-system: controller /state, /config, /baseline and node-agent /cpus through the pod proxy;
+# the colo-config ConfigMap as a fallback when the controller is down.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: colo-demo
+  namespace: colo-system
+rules:
+- apiGroups: [""]
+  resources: [pods/proxy]
+  verbs: [get, create]
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [colo-config]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: colo-demo
+  namespace: colo-system
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: colo-demo
+---
+# colo-svc: read the backfill/overflow Deployments.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: colo-demo
+  namespace: colo-svc
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: colo-demo
+  namespace: colo-svc
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
   name: colo-demo
 ---
 apiVersion: apps/v1

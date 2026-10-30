@@ -258,6 +258,85 @@ def merge_loadgen(loadgen: dict[str, dict], pods_by_name: dict[str, dict]) -> di
     }
 
 
+# ---------------------------------------------------------------- counterfactual + errors
+# n4d-standard-16 allocatable on GKE (used when no N4D node is up to read it from).
+N4D_ALLOC_CPU_DEFAULT = float(os.environ.get("DEMO_N4D_ALLOC_CPU", "15.89"))
+N4D_ALLOC_MEM_GIB_DEFAULT = float(os.environ.get("DEMO_N4D_ALLOC_MEM_GIB", "57.0"))
+
+
+def counterfactual_n4d(pods: list[dict], cap_cpu: float, cap_mem_gib: float, overhead_cpu: float = 0.0,
+                       overhead_mem_gib: float = 0.0, price_hr: float = PRICE_N4D16_HR) -> dict:
+    """N4D nodes an all-N4D cluster would need to host `pods` (the backfill pods now on G4).
+
+    First-fit-decreasing bin packing of each pod's (cpu, mem) requests onto n4d-standard-16
+    allocatable, minus the per-node daemonset overhead observed on real N4D nodes. A pod
+    that alone exceeds one node still takes one node (never under-counts).
+    """
+    cpu_cap = max(0.1, cap_cpu - overhead_cpu)
+    mem_cap = max(0.1, cap_mem_gib - overhead_mem_gib)
+    bins: list[list[float]] = []  # [free_cpu, free_mem]
+    items = sorted(((float(p.get("cpu_req") or 0.0), float(p.get("mem_req_gib") or 0.0)) for p in pods),
+                   key=lambda x: (x[0] / cpu_cap + x[1] / mem_cap), reverse=True)
+    for c, m in items:
+        for b in bins:
+            if b[0] + 1e-9 >= c and b[1] + 1e-9 >= m:
+                b[0] -= c
+                b[1] -= m
+                break
+        else:
+            bins.append([max(0.0, cpu_cap - c), max(0.0, mem_cap - m)])
+    n = len(bins)
+    return {
+        "pods": len(items),
+        "vcpu": round(sum(c for c, _ in items), 2),
+        "mem_gib": round(sum(m for _, m in items), 2),
+        "n4d_nodes": n,
+        "node_cpu": round(cpu_cap, 2),
+        "node_mem_gib": round(mem_cap, 2),
+        "price_n4d16_hr": price_hr,
+        "per_hour": round(n * price_hr, 4),
+        "method": "first-fit-decreasing pack of G4 backfill pod requests onto n4d-standard-16 allocatable",
+    }
+
+
+_AUTH_MARKERS = ("401", "403", "unauthorized", "forbidden", "invalid_grant", "reauth", "refresherror",
+                 "default credentials", "token")
+_NET_MARKERS = ("max retries", "connection refused", "newconnectionerror", "timed out", "timeout",
+                "name or service not known", "temporary failure in name resolution", "connectionreseterror",
+                "remotedisconnected", "network is unreachable")
+
+
+def classify_errors(errors: list[str], have_nodes: bool) -> list[dict]:
+    """Turn raw backend error strings into at most a few presenter-readable alerts."""
+    out: list[dict] = []
+    low = [(e, e.lower()) for e in errors or []]
+    auth = [e for e, l in low if any(k in l for k in _AUTH_MARKERS) and ("http" in l or "status" in l or
+                                                                       "unauthorized" in l or "forbidden" in l or
+                                                                       "credential" in l or "token" in l)]
+    net = [e for e, l in low if e not in auth and any(k in l for k in _NET_MARKERS)]
+    ctrl = [e for e, l in low if e not in auth and e not in net and l.startswith("controller")]
+    rest = [e for e, _ in low if e not in auth and e not in net and e not in ctrl]
+    if auth:
+        out.append({"kind": "auth", "severity": "error",
+                    "title": "The GKE API rejected the demo's credentials",
+                    "detail": "Cluster data is not updating. Check the demo service account's IAM and RBAC "
+                              "(container.clusters.get + the colo-demo roles).",
+                    "raw": auth[:3]})
+    if net:
+        out.append({"kind": "unreachable", "severity": "error" if not have_nodes else "warn",
+                    "title": "Cluster unreachable" if not have_nodes else "Some cluster calls are timing out",
+                    "detail": "The demo cannot reach the GKE API or an in-cluster service; numbers may be stale.",
+                    "raw": net[:3]})
+    if ctrl:
+        out.append({"kind": "controller", "severity": "warn", "title": "Colo controller not reachable",
+                    "detail": "Placement still runs in the cluster, but demand and guard changes cannot be applied.",
+                    "raw": ctrl[:3]})
+    if rest:
+        out.append({"kind": "other", "severity": "warn", "title": f"{len(rest)} backend call(s) failed",
+                    "detail": "Some panels may be incomplete.", "raw": rest[:3]})
+    return out
+
+
 # ---------------------------------------------------------------- main builder
 def build_state(raw: dict, mode: str = "live") -> dict:
     now = time.time()
@@ -279,6 +358,12 @@ def build_state(raw: dict, mode: str = "live") -> dict:
     reclaimed_mem = 0.0
     cost_g4 = 0.0
     cost_n4d = 0.0
+    backfill_on_g4: list[dict] = []
+    g4_alloc = g4_vllm = g4_sys = g4_buffer = 0.0
+    vllm_slices: list[float] = []
+    overflow_pods = 0
+    overflow_vcpu = 0.0
+    n4d_caps: list[tuple[float, float, float, float]] = []  # (alloc_cpu, alloc_mem, ds_cpu, ds_mem)
     for n in sorted(raw.get("nodes") or [], key=lambda n: (node_role(n.get("labels") or {}), n.get("created") or "", n["name"])):
         labels = n.get("labels") or {}
         role = node_role(labels)
@@ -312,6 +397,27 @@ def build_state(raw: dict, mode: str = "live") -> dict:
             if role == "g4" and pl.get("colo.tier") == "backfill" and p.get("phase") == "Running":
                 reclaimed_vcpu += p.get("cpu_req", 0.0)
                 reclaimed_mem += p.get("mem_req_gib", 0.0)
+                backfill_on_g4.append(p)
+            if role == "n4d" and pl.get("colo.tier") == "overflow" and p.get("phase") == "Running":
+                overflow_pods += 1
+                overflow_vcpu += p.get("cpu_req", 0.0)
+
+        # vCPU budget of this node: what the GPU slice, system pods and colo pods use.
+        node_all = pods_by_node.get(n["name"], [])
+        sys_cpu = sum(p.get("cpu_req", 0.0) for p in node_all if p.get("namespace") not in ("inference", "colo-svc"))
+        sys_mem = sum(p.get("mem_req_gib", 0.0) for p in node_all if p.get("namespace") not in ("inference", "colo-svc"))
+        if role == "g4" and n.get("ready"):
+            g4_alloc += parse_cpu(alloc.get("cpu"))
+            g4_sys += sys_cpu
+            for p in node_all:
+                cat = pod_category(p)
+                if cat == "vllm":
+                    g4_vllm += p.get("cpu_req", 0.0)
+                    vllm_slices.append(p.get("cpu_req", 0.0))
+                elif cat == "buffer":
+                    g4_buffer += p.get("cpu_req", 0.0)
+        elif role == "n4d" and n.get("ready"):
+            n4d_caps.append((parse_cpu(alloc.get("cpu")), parse_mem_gib(alloc.get("memory")), sys_cpu, sys_mem))
 
         agent = agents.get(n["name"]) or {}
         ncpu = int(agent.get("ncpu") or round(parse_cpu(alloc.get("cpu_capacity") or 0)) or (48 if role == "g4" else 16 if role == "n4d" else 0))
@@ -425,12 +531,45 @@ def build_state(raw: dict, mode: str = "live") -> dict:
     events = sorted(raw.get("events") or [], key=lambda e: e.get("time") or "", reverse=True)[:50]
 
     reclaimed_value = reclaimed_vcpu * PRICE_VCPU_HR + reclaimed_mem * PRICE_GIB_HR
+
+    if n4d_caps:
+        cap = n4d_caps[0]
+        cf = counterfactual_n4d(backfill_on_g4, cap[0], cap[1], cap[2], cap[3])
+    else:
+        cf = counterfactual_n4d(backfill_on_g4, N4D_ALLOC_CPU_DEFAULT, N4D_ALLOC_MEM_GIB_DEFAULT)
+    fleet = cost_g4 + cost_n4d
+    cf["fleet_per_hour"] = round(fleet + cf["per_hour"], 4)
+    cf["saved_per_hour"] = cf["per_hour"]
+    cf["saved_pct"] = round(100.0 * cf["per_hour"] / cf["fleet_per_hour"], 1) if cf["fleet_per_hour"] else 0.0
+
+    # Spare = what is left on Ready G4 nodes after the GPU slice and system pods; colo fills it.
+    g4_spare = max(0.0, g4_alloc - g4_vllm - g4_sys)
+    story = {
+        "gpu_slice_vcpu": round(max(vllm_slices), 2) if vllm_slices else None,
+        "gpu_slice_total_vcpu": round(g4_vllm, 2),
+        "g4_alloc_vcpu": round(g4_alloc, 2),
+        "g4_system_vcpu": round(g4_sys, 2),
+        "g4_spare_vcpu": round(g4_spare, 2),
+        "g4_buffer_vcpu": round(g4_buffer, 2),
+        "reclaimed_vcpu": round(reclaimed_vcpu, 2),
+        "reclaimed_pods": len(backfill_on_g4),
+        "reclaimed_pct_of_spare": round(min(100.0, 100.0 * reclaimed_vcpu / g4_spare), 1) if g4_spare > 0 else None,
+        "g4_idle_vcpu": round(max(0.0, g4_spare - reclaimed_vcpu - g4_buffer), 2),
+        "overflow_pods": overflow_pods,
+        "overflow_vcpu": round(overflow_vcpu, 2),
+        "n4d_nodes": counts.get("n4d", 0),
+        "saved_per_hour": cf["saved_per_hour"],
+        "saved_pct": cf["saved_pct"],
+        "counterfactual_n4d_nodes": cf["n4d_nodes"],
+    }
     return {
         "ts": now,
         "mode": mode,
         "cluster": CLUSTER,
         "nodes": nodes_out,
         "counts": counts,
+        "story": story,
+        "alerts": classify_errors(errors, have_nodes=bool(raw.get("nodes"))),
         "vllm": vllm,
         "loadgen": lg,
         "services": services,
@@ -441,7 +580,8 @@ def build_state(raw: dict, mode: str = "live") -> dict:
             "guard_enabled": guard_enabled,
             "baseline_ttft_p99_ms": baseline,
             "factor": guard.get("factor", 1.5),
-            "threshold_ms": baseline * float(guard.get("factor", 1.5)) if baseline else None,
+            "threshold_ms": (float((cstate or {})["threshold_ttft_p99_ms"]) if isinstance((cstate or {}).get("threshold_ttft_p99_ms"), (int, float))
+                             else baseline * float(guard.get("factor", 1.5)) if baseline else None),
             "config": conf,
             "state": cstate,
         },
@@ -453,6 +593,8 @@ def build_state(raw: dict, mode: str = "live") -> dict:
             "reclaimed_vcpu": round(reclaimed_vcpu, 1),
             "reclaimed_mem_gib": round(reclaimed_mem, 1),
             "reclaimed_per_hour": round(reclaimed_value, 4),
+            "counterfactual": cf,
+            "saved_per_hour": cf["saved_per_hour"],
             "prices": {
                 "g4_hr": PRICE_G4_HR,
                 "n4d16_hr": PRICE_N4D16_HR,
@@ -497,6 +639,13 @@ def summarize(state: dict) -> dict:
         "reclaimed_vcpu": (state.get("cost") or {}).get("reclaimed_vcpu"),
         "guard_evict_events": sum(1 for e in state.get("events") or [] if e.get("reason") == "ColoGuardEvict"),
         "scale_up_events": sum(1 for e in state.get("events") or [] if e.get("reason") == "TriggeredScaleUp"),
+        "controller_reachable": bool(ctrl.get("reachable")),
+        "hpa_min": ((state.get("vllm") or {}).get("hpa") or {}).get("min"),
+        "saved_per_hour": (state.get("story") or {}).get("saved_per_hour"),
+        "g4_spare_vcpu": (state.get("story") or {}).get("g4_spare_vcpu"),
+        # 2-vCPU integer pods that fit in one G4 node's spare (used for scenario note text).
+        "g4_slots_per_node": (int(((state.get("story") or {}).get("g4_spare_vcpu") or 0) // 2 // max(1, state["counts"].get("g4_ready", 0) or 1))
+                              if (state.get("story") or {}).get("g4_spare_vcpu") else None),
     }
     for name, s in svc.items():
         m[f"{name}_backfill_ready"] = s["backfill"]["ready"] or 0

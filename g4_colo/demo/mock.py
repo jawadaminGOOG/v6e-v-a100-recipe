@@ -21,6 +21,7 @@ Behaviour (deliberately plausible, not calibrated):
 from __future__ import annotations
 
 import math
+import os
 import random
 import string
 import time
@@ -90,6 +91,9 @@ class MockBackend:
         g4 = next(n for n in self.nodes.values() if n["role"] == "g4")
         self.vllm.append({"name": f"vllm-6f9c7d8b5-{_sfx()}", "uid": _sfx(32), "node": g4["name"], "ready_at": now - 7000})
         self.hpa_desired = 1
+        self.hpa_min = 1
+        self.fast_scale = os.environ.get("DEMO_FAST_SCALE", "1") == "1"
+        self.fast_scale_forced = False
         self.hpa_low_since: float | None = None
         self.svc_pods: list[dict] = []  # {name, uid, app, tier, node|None, ready_at}
         self.buffer_pods: list[dict] = []
@@ -455,7 +459,7 @@ class MockBackend:
                 deployments.append(dep("colo-svc", f"{svc}-{tier}", len(mine), sum(1 for p in mine if ready_pod(p))))
         running = self.eff_rate * 0.15
         rv = max(1, sum(1 for v in self.vllm if ready_pod(v)))
-        hpas = [{"name": "vllm", "namespace": "inference", "target": "vllm", "min": 1, "max": 2, "current": len(self.vllm), "desired": self.hpa_desired, "metric": f"{running / rv:.0f}"}]
+        hpas = [{"name": "vllm", "namespace": "inference", "target": "vllm", "min": self.hpa_min, "max": 2, "current": len(self.vllm), "desired": self.hpa_desired, "metric": f"{running / rv:.0f}"}]
 
         # node agents
         agents = {}
@@ -566,6 +570,9 @@ class MockBackend:
     # ------------------------------------------------------------ actions
     async def set_gpu_rate(self, rate: float) -> dict:
         self.rate = float(rate)
+        if self.fast_scale:
+            self.hpa_min = 2 if self.rate > 700 else 1
+            self.fast_scale_forced = self.hpa_min > 1
         return {p: {"rate": self.rate} for p in self.loadgen_pods}
 
     async def set_demand(self, demand: dict) -> dict:
@@ -574,6 +581,11 @@ class MockBackend:
                 self.demand[k] = max(0, int(v))
         self._step(time.time(), force=True)
         return {"demand": self.demand}
+
+    async def restore_hpa_min(self) -> bool:
+        self.hpa_min = 1
+        self.fast_scale_forced = False
+        return True
 
     async def set_guard(self, enabled: bool) -> dict:
         self.guard["enabled"] = bool(enabled)

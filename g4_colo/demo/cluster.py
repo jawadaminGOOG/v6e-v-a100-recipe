@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
+import time
 from typing import Any
 
 from state import NAMESPACES, WATCH_REASONS, build_state, parse_cpu, parse_mem_gib
@@ -17,6 +19,17 @@ from state import NAMESPACES, WATCH_REASONS, build_state, parse_cpu, parse_mem_g
 log = logging.getLogger("demo.cluster")
 
 PROXY_TIMEOUT_S = 4
+PODS_FIELD_SELECTOR = "status.phase!=Succeeded,status.phase!=Failed"
+# High-volume reasons that are never shown; dropping them server-side keeps the list small.
+_NOISY_REASONS = ("Scheduled", "Pulling", "Pulled", "Created", "Started", "Killing", "SuccessfulCreate",
+                  "SuccessfulDelete", "ScalingReplicaSet", "FailedScheduling", "Unhealthy", "BackOff")
+EVENTS_FIELD_SELECTOR = ",".join(f"reason!={r}" for r in _NOISY_REASONS)
+EVENTS_LIMIT = 200
+EVENTS_TTL_S = float(os.environ.get("DEMO_EVENTS_TTL_S", "10"))
+# Demo accelerator: on a rate change, force HPA minReplicas/replicas so scale-out shows in seconds
+# instead of waiting for the HPA metric window. Demo-only; production never patches the HPA.
+FAST_SCALE = os.environ.get("DEMO_FAST_SCALE", "1") == "1"
+FAST_SCALE_RPS = float(os.environ.get("DEMO_FAST_SCALE_RPS", "700"))
 
 
 def _iso(ts: Any) -> str | None:
@@ -51,6 +64,9 @@ class LiveBackend:
         self.apps = client.AppsV1Api()
         self.autoscaling = client.AutoscalingV2Api()
         self._pod_ips: dict[tuple[str, str], str] = {}
+        self._events_cache: tuple[float, list[dict]] | None = None
+        self.fast_scale = FAST_SCALE
+        self.fast_scale_forced = False  # True while this process has HPA minReplicas > 1
 
     def _init_gke_adc(self, client: Any) -> None:
         import base64
@@ -186,7 +202,9 @@ class LiveBackend:
 
     def _pods(self) -> list[dict]:
         out = []
-        for p in self.core.list_pod_for_all_namespaces().items:
+        # Finished pods are never drawn; let the apiserver drop them.
+        items = self.core.list_pod_for_all_namespaces(field_selector=PODS_FIELD_SELECTOR).items
+        for p in items:
             if p.status and p.status.pod_ip:
                 self._pod_ips[(p.metadata.namespace, p.metadata.name)] = p.status.pod_ip
             cpu = 0.0
@@ -251,8 +269,13 @@ class LiveBackend:
         return out
 
     def _events(self) -> list[dict]:
+        # Events change slowly relative to the 2 s poll: list at most every EVENTS_TTL_S, drop the
+        # high-volume kubelet/scheduler reasons server-side, and cap the page size.
+        now = time.monotonic()
+        if self._events_cache is not None and now - self._events_cache[0] < EVENTS_TTL_S:
+            return self._events_cache[1]
         out = []
-        for e in self.core.list_event_for_all_namespaces(limit=2000).items:
+        for e in self.core.list_event_for_all_namespaces(field_selector=EVENTS_FIELD_SELECTOR, limit=EVENTS_LIMIT).items:
             if e.reason not in WATCH_REASONS:
                 continue
             t = e.last_timestamp or e.event_time or e.first_timestamp or e.metadata.creation_timestamp
@@ -269,7 +292,9 @@ class LiveBackend:
                 }
             )
         out.sort(key=lambda x: x["time"] or "", reverse=True)
-        return out[:50]
+        out = out[:50]
+        self._events_cache = (now, out)
+        return out
 
     def _configmap(self) -> dict | None:
         try:
@@ -317,11 +342,9 @@ class LiveBackend:
         ag_res = await self._gather_named({p["node"]: self.proxy("colo-system", p["name"], 8080, "cpus") for p in agents}, errors, "agent")
         controller: dict = {"state": None, "config": None}
         if ctrl:
+            # /state already carries the effective config, so one proxy call is enough.
             c = await self._gather_named(
-                {
-                    "state": self.proxy("colo-system", ctrl[0]["name"], 8080, "state"),
-                    "config": self.proxy("colo-system", ctrl[0]["name"], 8080, "config"),
-                },
+                {"state": self.proxy("colo-system", ctrl[0]["name"], 8080, "state")},
                 errors,
                 "controller",
             )
@@ -347,11 +370,14 @@ class LiveBackend:
         return pods[0].metadata.name
 
     def _fast_scale_vllm(self, rate: float) -> None:
-        want = 2 if float(rate) > 700.0 else 1
+        if not self.fast_scale:
+            return
+        want = 2 if float(rate) > FAST_SCALE_RPS else 1
         try:
             self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(
                 "vllm", "inference", {"spec": {"minReplicas": want}}
             )
+            self.fast_scale_forced = want > 1
         except Exception as e:  # noqa: BLE001
             log.warning("hpa patch failed: %s", e)
         try:
@@ -360,6 +386,26 @@ class LiveBackend:
             )
         except Exception as e:  # noqa: BLE001
             log.warning("deployment scale patch failed: %s", e)
+
+    def _restore_hpa_min_sync(self) -> bool:
+        """Put HPA minReplicas back to 1 if it is above 1 (left behind by the accelerator)."""
+        try:
+            h = self.autoscaling.read_namespaced_horizontal_pod_autoscaler("vllm", "inference")
+            if (h.spec.min_replicas or 1) > 1:
+                self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(
+                    "vllm", "inference", {"spec": {"minReplicas": 1}}
+                )
+                log.info("restored HPA vllm minReplicas %s -> 1", h.spec.min_replicas)
+            self.fast_scale_forced = False
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.warning("hpa minReplicas restore failed: %s", e)
+            return False
+
+    async def restore_hpa_min(self) -> bool:
+        if not self.fast_scale:
+            return True
+        return await asyncio.to_thread(self._restore_hpa_min_sync)
 
     async def set_gpu_rate(self, rate: float) -> dict:
         pods = await asyncio.to_thread(self._ready_pods, "inference", "app=loadgen")
@@ -376,15 +422,10 @@ class LiveBackend:
         return {n: (str(r) if isinstance(r, Exception) else r) for n, r in zip(names, res)}
 
     async def _post_config(self, patch: dict) -> Any:
+        # The controller deep-merges the POST body into its config, so send only the patch:
+        # a read-modify-write here could overwrite a concurrent kubectl edit.
         pod = await self._controller_pod()
-        cur = await self.proxy("colo-system", pod, 8080, "config")
-        cur = cur if isinstance(cur, dict) else {}
-        for k, v in patch.items():
-            if isinstance(v, dict) and isinstance(cur.get(k), dict):
-                cur[k] = {**cur[k], **v}
-            else:
-                cur[k] = v
-        return await self.proxy("colo-system", pod, 8080, "config", "POST", cur)
+        return await self.proxy("colo-system", pod, 8080, "config", "POST", patch)
 
     async def set_demand(self, demand: dict) -> Any:
         return await self._post_config({"demand": {k: int(v) for k, v in demand.items()}})
