@@ -12,6 +12,12 @@ spec:
   template:
     metadata:
       labels: {app: vllm}
+      annotations:
+        # Cluster Autoscaler must never consolidate a G4 node by moving a serving vLLM pod: backfill
+        # pods are expendable (priority -100), so without this every G4 node looks "movable" and CA
+        # may evict vLLM onto another node, causing a full model reload (wave-2 clause 5b: 138 s with
+        # 0 ready replicas). Scale-in happens through the HPA removing a replica, never through CA.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
       priorityClassName: gpu-serving
       enableServiceLinks: false   # a Service named "vllm" would inject VLLM_PORT, which vLLM itself reads

@@ -139,7 +139,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "reserve_cpu_per_node": 2,
     # Seconds a node may stay ineligible (e.g. vLLM Recreate rollout) before its
     # remaining backfill pods are deleted even if overflow is not ready yet.
-    "dehydrate_grace_s": 60,
+    "dehydrate_grace_s": 180,
     # Where the guard reads per-node TTFT from: loadgen /stats (demo), Google
     # Managed Prometheus (production) or none (guard reports no_signal, never acts).
     "ttft_source": {

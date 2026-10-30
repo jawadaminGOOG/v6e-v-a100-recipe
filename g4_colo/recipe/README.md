@@ -72,10 +72,13 @@ Spare CPU on a G4 node = allocatable − requests of every non-backfill pod − 
 ### G4 scale-in: make-before-break dehydrate
 When a G4 node loses its vLLM pod (HPA scale-in, rollout, crash), or is cordoned or marked for deletion by Cluster Autoscaler:
 1. The controller removes `colo.active` at once, so no new backfill lands there, and drops the node from allocation, so overflow on N4D is scaled up first.
-2. It deletes the node's remaining backfill pods, per service, only when ready overflow plus ready backfill on eligible nodes covers that service's demand, or after `dehydrate_grace_s` (60 s), or at once if the node is cordoned or carries the Cluster Autoscaler deletion taint.
+2. It deletes the node's remaining backfill pods, per service, only when ready overflow plus ready backfill on eligible nodes covers that service's demand, or after `dehydrate_grace_s` (180 s; longer than an N4D cold scale-up, measured ~95 s in wave-2 clause 5b), or at once if the node is cordoned or carries the Cluster Autoscaler deletion taint.
 3. A vLLM `Recreate` rollout that brings vLLM back within the grace deletes nothing.
+4. Draining backfill pods get `controller.kubernetes.io/pod-deletion-cost: "-1000"`, so when `<svc>-backfill` shrinks the ReplicaSet removes them before ready pods on healthy G4 nodes.
 
-Within a service the scale plan never lowers one tier until the other tier's ready pods cover the target. This make-before-break dehydrate is new in wave 2; its live behaviour is **not measured yet** (wave-2 gate clause 5b). The wave-1 scale-in run kept sandbox ready ≥ demand in 100% of 213 samples with the buffer set to 15 replicas, but predates both `colo.active` gating and this change (`.agents/wave-1/logs/g1g3.verdict.json`).
+vLLM pods carry `cluster-autoscaler.kubernetes.io/safe-to-evict: "false"`. Backfill is expendable, so without it Cluster Autoscaler treats every G4 node as movable and may consolidate by evicting a serving vLLM pod onto another node; in wave-2 clause 5b that caused 138 s with no ready vLLM replica. G4 nodes are removed only after the HPA has removed their vLLM replica.
+
+Within a service the scale plan never lowers one tier until the other tier's ready pods cover the target. Wave-2 clause 5b measured the 60 s grace this release replaced: the N1 ordering held (all 7 pods removed by the scale-down came from the drained node), but one service dipped for 34 s because two N4D nodes took ~95 s to come up; the default is now 180 s (`.agents/wave-2/logs/clause5.verdict.json`). The 180 s value is re-measured in the wave-2 final test pass. The wave-1 scale-in run kept sandbox ready ≥ demand in 100% of 213 samples with the buffer set to 15 replicas, but predates `colo.active` gating (`.agents/wave-1/logs/g1g3.verdict.json`).
 
 ### Latency guard
 CPU cgroups bound core count and RAM capacity, **not** L3 cache or memory-bus bandwidth. Memory-bandwidth-heavy workloads (e.g., 3D stencil sweeps, large-array analytics) contend with CPU→GPU host transfers even on disjoint physical cores.
@@ -161,10 +164,10 @@ It prints the pool names to copy into `overlays/<yours>/settings.yaml`. Set `CRE
 gcloud builds submit g4_colo/recipe/components \
   --config g4_colo/recipe/components/cloudbuild.yaml \
   --project "$PROJECT" --region "$REGION" \
-  --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.2
+  --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.4
 ```
 
-Images are pinned (`v0.2.2`) with `imagePullPolicy: IfNotPresent`. vLLM uses the public `vllm/vllm-openai:v0.32.0`; map it to a mirror in `images:` if you have one.
+Images are pinned (`v0.2.4`) with `imagePullPolicy: IfNotPresent`. vLLM uses the public `vllm/vllm-openai:v0.32.0`; map it to a mirror in `images:` if you have one.
 
 ### Step 3: Configure and apply an overlay
 ```bash
@@ -219,7 +222,7 @@ Checked by [`scripts/check_readme.py`](scripts/check_readme.py) against `DEFAULT
 | `guard.escalate_s` | 60 | 60 | 0 | 60 |
 | `buffer_replicas` | 1 | 1 | 1 | 1 |
 | `reserve_cpu_per_node` | 2 | 2 | 2 | 2 |
-| `dehydrate_grace_s` | 60 | 60 | 60 | 60 |
+| `dehydrate_grace_s` | 180 | 180 | 180 | 180 |
 | `max_total_cpu` | null | 144 | 144 | 144 |
 | `ttft_source.type` | loadgen | loadgen | loadgen | prometheus |
 | `colo-svc-quota requests.cpu` | — | 180 | 180 | 180 |

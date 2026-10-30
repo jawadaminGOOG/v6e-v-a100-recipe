@@ -47,7 +47,7 @@ N4D overflow, and guards vLLM TTFT by blocking and evicting backfill on nodes wh
    - ineligible node: `colo.active` removed **at once** (no new placements) and the node is dropped
      from allocation, so overflow scales up first. Its remaining backfill pods are deleted, per
      service, only when (a) ready overflow plus ready backfill on eligible nodes covers that
-     service's demand, or (b) the node has been ineligible for `dehydrate_grace_s` (60 s), or (c) the
+     service's demand, or (b) the node has been ineligible for `dehydrate_grace_s` (180 s; longer than an N4D cold scale-up, measured ~95 s in wave-2 clause 5b), or (c) the
      node is cordoned or carries the CA deletion taint. GPU scale-in is therefore make-before-break,
      and a vLLM `Recreate` rollout that brings vLLM back within the grace deletes nothing.
    - Backfill pods on an ineligible node are annotated
@@ -84,7 +84,7 @@ Defaults (`DEFAULT_CONFIG` in `colo_logic.py`); any key may be left out:
            "window_s": 30, "escalate_s": 60, "min_requests": 200},
  "buffer_replicas": 1,
  "reserve_cpu_per_node": 2,
- "dehydrate_grace_s": 60,
+ "dehydrate_grace_s": 180,
  "ttft_source": {"type": "loadgen",
                  "prometheus": {"project": "", "location": "global", "query_window_s": 60,
                                 "metric": "vllm:time_to_first_token_seconds", "cluster": null}},

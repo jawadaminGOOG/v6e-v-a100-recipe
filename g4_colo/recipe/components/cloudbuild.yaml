@@ -3,10 +3,10 @@
 #   gcloud builds submit g4_colo/recipe/components \
 #     --config g4_colo/recipe/components/cloudbuild.yaml \
 #     --project "$PROJECT" --region "$REGION" \
-#     --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.2
+#     --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.4
 substitutions:
   _REGISTRY: ""
-  _TAG: v0.2.2
+  _TAG: v0.2.4
 options:
   dynamicSubstitutions: true
   logging: CLOUD_LOGGING_ONLY

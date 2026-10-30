@@ -31,7 +31,7 @@ data:
                "escalate_s": 60, "min_requests": 200},
      "buffer_replicas": 1,
      "reserve_cpu_per_node": 2,
-     "dehydrate_grace_s": 60,
+     "dehydrate_grace_s": 180,
      "max_total_cpu": 144,
      "ttft_source": {"type": "prometheus",
                      "prometheus": {"project": "PROJECT_ID", "cluster": "CLUSTER_NAME", "location": "global",

@@ -18,16 +18,16 @@ resources:
 images:
 - name: colo-registry.invalid/colo-worker
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
-  newTag: v0.2.2
+  newTag: v0.2.4
 - name: colo-registry.invalid/colo-loadgen
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen
-  newTag: v0.2.2
+  newTag: v0.2.4
 - name: colo-registry.invalid/colo-controller
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-controller
-  newTag: v0.2.2
+  newTag: v0.2.4
 - name: colo-registry.invalid/colo-node-agent
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
-  newTag: v0.2.2
+  newTag: v0.2.4
 # Private mirror of the public vllm/vllm-openai image (same tag).
 - name: vllm/vllm-openai
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai

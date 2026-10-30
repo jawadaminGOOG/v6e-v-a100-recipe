@@ -221,7 +221,7 @@ def test_plan_scale_hold_still_protects_ready_pods():
 
 def test_config_new_defaults():
     c = L.validate_config({})
-    assert c["reserve_cpu_per_node"] == 2 and c["dehydrate_grace_s"] == 60
+    assert c["reserve_cpu_per_node"] == 2 and c["dehydrate_grace_s"] == 180
     assert c["ttft_source"]["type"] == "loadgen"
     assert c["ttft_source"]["prometheus"]["location"] == "global"
     assert c["ttft_source"]["prometheus"]["query_window_s"] == 60

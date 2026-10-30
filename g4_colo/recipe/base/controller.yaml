@@ -92,7 +92,7 @@ data:
                "escalate_s": 60, "min_requests": 200},
      "buffer_replicas": 1,
      "reserve_cpu_per_node": 2,
-     "dehydrate_grace_s": 60,
+     "dehydrate_grace_s": 180,
      "max_total_cpu": 144,
      "ttft_source": {"type": "loadgen"}}
 ---
@@ -112,7 +112,7 @@ spec:
       nodeSelector: {colo.role: loadgen}
       containers:
       - name: controller
-        image: colo-registry.invalid/colo-controller:v0.2.2
+        image: colo-registry.invalid/colo-controller:v0.2.4
         imagePullPolicy: IfNotPresent
         ports: [{name: http, containerPort: 8080}]
         resources:
@@ -175,7 +175,7 @@ spec:
       - {key: sandbox.gke.io/runtime, operator: Exists, effect: NoSchedule}
       containers:
       - name: agent
-        image: colo-registry.invalid/colo-node-agent:v0.2.2
+        image: colo-registry.invalid/colo-node-agent:v0.2.4
         imagePullPolicy: IfNotPresent
         env:
         - name: NODE_NAME

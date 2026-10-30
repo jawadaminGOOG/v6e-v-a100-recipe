@@ -30,16 +30,16 @@ resources:
 images:
 - name: colo-registry.invalid/colo-worker
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-worker            # REPLACE
-  newTag: v0.2.2
+  newTag: v0.2.4
 - name: colo-registry.invalid/colo-loadgen   # unused here (loadgen is removed); kept so all images map in one place
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-loadgen           # REPLACE
-  newTag: v0.2.2
+  newTag: v0.2.4
 - name: colo-registry.invalid/colo-controller
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-controller        # REPLACE
-  newTag: v0.2.2
+  newTag: v0.2.4
 - name: colo-registry.invalid/colo-node-agent
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-node-agent        # REPLACE
-  newTag: v0.2.2
+  newTag: v0.2.4
 # vLLM uses the public vllm/vllm-openai image from base. To use a private mirror, uncomment:
 # - name: vllm/vllm-openai
 #   newName: us-docker.pkg.dev/your-project-id/your-repository/vllm-openai
