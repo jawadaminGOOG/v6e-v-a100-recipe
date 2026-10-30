@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from typing import Any
 
 from state import NAMESPACES, WATCH_REASONS, build_state, parse_cpu, parse_mem_gib
@@ -68,19 +69,32 @@ class LiveBackend:
         cfg.host = endpoint if endpoint.startswith("https://") else f"https://{endpoint}"
         cfg.ssl_ca_cert = ca_path
         self._adc_creds = creds
+        self._adc_lock = threading.Lock()
+
+        # set_default() deep-copies cfg, so refreshing a token on our own object never reaches the
+        # ApiClients. The hook runs on every request against the copy actually in use.
+        def _refresh_hook(c: Any) -> None:
+            c.api_key = {"authorization": self._adc_token()}
+            c.api_key_prefix = {"authorization": "Bearer"}
+
+        cfg.refresh_api_key_hook = _refresh_hook
+        _refresh_hook(cfg)
         self._adc_cfg = cfg
-        self._ensure_adc()
         client.Configuration.set_default(cfg)
 
-    def _ensure_adc(self) -> None:
-        if self._adc_creds is None or self._adc_cfg is None:
-            return
+    def _adc_token(self) -> str:
         import google.auth.transport.requests
 
-        if not self._adc_creds.valid or not self._adc_creds.token:
-            self._adc_creds.refresh(google.auth.transport.requests.Request())
-            self._adc_cfg.api_key = {"authorization": self._adc_creds.token}
-            self._adc_cfg.api_key_prefix = {"authorization": "Bearer"}
+        with self._adc_lock:
+            # google-auth marks creds invalid ~3-5 min before expiry, so this refreshes ahead of time.
+            if not self._adc_creds.valid or not self._adc_creds.token:
+                self._adc_creds.refresh(google.auth.transport.requests.Request())
+            return self._adc_creds.token
+
+    def _ensure_adc(self) -> None:
+        # Token refresh happens per request in refresh_api_key_hook; kept as a cheap pre-warm.
+        if self._adc_creds is not None:
+            self._adc_token()
 
     # ------------------------------------------------------------ pod proxy
     def _direct_http_sync(self, ip: str, port: int, path: str, method: str = "GET", body: Any = None) -> Any:
