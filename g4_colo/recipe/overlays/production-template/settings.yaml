@@ -15,6 +15,11 @@ data:
   n4dNodePool: your-n4d-pool                    # REPLACE: N4D overflow pool (N4D_POOL)
   # Hugging Face model id served by vLLM (--model).
   model: Qwen/Qwen3-1.7B-Base                   # REPLACE
+  # Optional, only read when kustomization.yaml enables components/vllm-gcs-cache (faster vLLM start on new nodes):
+  # a regional bucket in the G4 region (infra/create-node-pools.sh CREATE_CACHE_BUCKET=1) and a cache key to change
+  # whenever the vLLM image, model, GPU type or vLLM args change (then re-run scripts/seed-vllm-cache.sh).
+  cacheBucket: your-cache-bucket                # REPLACE (if the component is enabled)
+  cacheKey: vllm-v0.32.0/Qwen3-1.7B-Base/rtx-pro-6000   # REPLACE (if the component is enabled)
   # Namespace your inference gateway / clients run in; the only one (besides metrics and the controller)
   # allowed to reach vLLM on :8000.
   gatewayNamespace: your-gateway-namespace      # REPLACE

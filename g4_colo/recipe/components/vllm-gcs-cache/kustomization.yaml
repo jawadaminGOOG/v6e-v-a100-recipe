@@ -1,0 +1,38 @@
+# Optional component: start vLLM on a new G4 node from a GCS copy of the model and of vLLM's startup cache
+# (torch.compile artifacts, startup plan) instead of downloading from Hugging Face and compiling again.
+#
+# Enable it in an overlay:
+#   components:
+#   - ../../components/vllm-gcs-cache
+# and set in that overlay's settings.yaml:
+#   cacheBucket: <regional bucket in the G4 region>
+#   cacheKey:    <vllm version>/<model>/<gpu>   change it whenever the vLLM image, model, GPU type or vLLM args change
+# The model comes from the existing `model` setting.
+#
+# Once per project: a bucket and read access for the Workload Identity principal ns/inference/sa/vllm
+# (infra/create-node-pools.sh with CREATE_CACHE_BUCKET=1). Once per cacheKey: scripts/seed-vllm-cache.sh.
+# Until the bucket is seeded, the init container finds nothing and vLLM starts from Hugging Face as without the
+# component.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- serviceaccount.yaml
+configMapGenerator:
+- name: vllm-cache-seed
+  namespace: inference
+  files: [cache_seed.py]
+patches:
+- path: vllm-patch.yaml
+replacements:
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.cacheBucket}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.initContainers.[name=cache-seed].env.[name=CACHE_BUCKET].value']
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.cacheKey}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.initContainers.[name=cache-seed].env.[name=CACHE_KEY].value']
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.model}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.initContainers.[name=cache-seed].env.[name=MODEL].value']

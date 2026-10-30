@@ -10,6 +10,10 @@ data:
   g4NodePool: g4gpu-jawadamin-us-west8-1026     # ComputeClass g4-gpu on-demand pool
   n4dNodePool: n4dcpu-jawadamin-us-west8-1026   # ComputeClass n4d-cpu pool
   model: Qwen/Qwen3-1.7B-Base                   # vLLM --model and loadgen MODEL
+  # components/vllm-gcs-cache: bucket holding models/<model>/ and vllm-cache/<cacheKey>/cache.tar, and the cache key
+  # (change it whenever the vLLM image, model, GPU type or vLLM args change; then run scripts/seed-vllm-cache.sh).
+  cacheBucket: bucket-cache-jawadamin-us-west8-1026
+  cacheKey: vllm-v0.32.0/Qwen3-1.7B-Base/rtx-pro-6000
   # colo-controller config (ConfigMap colo-system/colo-config, key config.json). Demo guard values: see
   # kustomization.yaml header.
   coloConfig: |

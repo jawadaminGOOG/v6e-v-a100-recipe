@@ -27,6 +27,11 @@ kind: Kustomization
 resources:
 - ../../base
 - settings.yaml
+# Optional: start vLLM on new G4 nodes from a GCS copy of the model and startup cache instead of Hugging Face
+# (README "vLLM startup time"). Needs cacheBucket / cacheKey in settings.yaml, the bucket and IAM from
+# infra/create-node-pools.sh (CREATE_CACHE_BUCKET=1), and one run of scripts/seed-vllm-cache.sh. Uncomment:
+# components:
+# - ../../components/vllm-gcs-cache
 images:
 - name: colo-registry.invalid/colo-worker
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-worker            # REPLACE

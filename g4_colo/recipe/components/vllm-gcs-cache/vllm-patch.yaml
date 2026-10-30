@@ -1,0 +1,51 @@
+# Changes to the vllm Deployment:
+# - cache-seed init container (the vLLM image, so no extra image pull; google-cloud-storage is already in it):
+#   copies gs://<cacheBucket>/models/<model>/ into a memory-backed emptyDir (/models) and
+#   gs://<cacheBucket>/vllm-cache/<cacheKey>/cache.tar into the node's /hf hostPath (once per node).
+# - vllm runs through a short wrapper: it serves /models/<model> when cache-seed copied it, else the Hugging Face id
+#   (the args keep `--model=<hf id>` first, so the overlay's model replacement still works). --served-model-name is
+#   the HF id either way, so clients see no change.
+# The model sits in RAM (counted in the Pod's 64Gi limit) rather than on the node disk: writing 3+ GiB to a new
+# node's boot disk delayed the vllm container's start by ~58 s in testing; in RAM the copy is ~5 s per Pod start.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: vllm, namespace: inference}
+spec:
+  template:
+    spec:
+      serviceAccountName: vllm
+      initContainers:
+      - name: cache-seed
+        image: vllm/vllm-openai:v0.32.0
+        command: [python3, /seed/cache_seed.py]
+        env:
+        - {name: CACHE_BUCKET, value: set-by-settings-cacheBucket}
+        - {name: CACHE_KEY, value: set-by-settings-cacheKey}
+        - {name: MODEL, value: set-by-settings-model}
+        - {name: DEST_DIR, value: /models}
+        # Same requests and limits as vllm: the Pod stays Guaranteed with integer CPU (static CPU manager);
+        # init-container resources do not add to the Pod's.
+        resources:
+          requests: {cpu: "8", memory: 64Gi}
+          limits: {cpu: "8", memory: 64Gi}
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: models, mountPath: /models}
+        - {name: cache-seed, mountPath: /seed}
+      containers:
+      - name: vllm
+        command:
+        - /bin/bash
+        - -c
+        - |
+          m="${1#--model=}"; shift
+          src="$m"; [ -f "/models/.cache-seed/model-${m//\//_}" ] && src="/models/$m"
+          exec vllm serve --model="$src" --served-model-name="$m" "$@"
+        - --
+        volumeMounts:
+        - {name: models, mountPath: /models}
+      volumes:
+      - name: models
+        emptyDir: {medium: Memory, sizeLimit: 8Gi}
+      - name: cache-seed
+        configMap: {name: vllm-cache-seed}

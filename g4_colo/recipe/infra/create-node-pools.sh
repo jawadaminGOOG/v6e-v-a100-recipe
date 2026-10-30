@@ -11,6 +11,7 @@
 #   - N4D pool: CPU overflow nodes across zones; same kubelet config plus GKE Sandbox (gVisor) for
 #     sandbox-overflow; n4d-cpu ComputeClass.
 #   - loadgen pool (CREATE_LOADGEN_POOL=1 only): demo load generator and colo controller. Not needed in production.
+#   - cache bucket (CREATE_CACHE_BUCKET=1 only): GCS bucket + read IAM for components/vllm-gcs-cache.
 #
 # Pool names are printed at the end; copy them into overlays/<your-overlay>/settings.yaml.
 set -euo pipefail
@@ -25,6 +26,8 @@ N4D_MAX=${N4D_MAX:-4}
 NETWORK=${NETWORK:-default}
 CREATE_NAT=${CREATE_NAT:-1}
 CREATE_LOADGEN_POOL=${CREATE_LOADGEN_POOL:-0}
+CREATE_CACHE_BUCKET=${CREATE_CACHE_BUCKET:-0}      # 1 = bucket + IAM for components/vllm-gcs-cache
+CACHE_BUCKET=${CACHE_BUCKET:-bucket-cache-${SUFFIX}}
 G4_POOL=${G4_POOL:-g4gpu-${SUFFIX}}
 N4D_POOL=${N4D_POOL:-n4dcpu-${SUFFIX}}
 LOADGEN_POOL=${LOADGEN_POOL:-loadgen-${SUFFIX}}
@@ -73,6 +76,20 @@ for ksa in custom-metrics/custom-metrics-stackdriver-adapter colo-system/colo-co
     --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${PROJECT}.svc.id.goog/subject/ns/${ksa%%/*}/sa/${ksa##*/}"
 done
 
+# Optional (components/vllm-gcs-cache): regional bucket holding the model and vLLM's startup cache, readable by the
+# vLLM pods' KSA (inference/vllm) through Workload Identity. Seed it with scripts/seed-vllm-cache.sh after vLLM runs.
+if [[ "$CREATE_CACHE_BUCKET" == 1 ]]; then
+  gcloud storage buckets create "gs://$CACHE_BUCKET" --project "$PROJECT" --location "$REGION" \
+    --uniform-bucket-level-access --public-access-prevention || true
+  for role in roles/storage.objectViewer roles/storage.legacyBucketReader; do
+    gcloud storage buckets add-iam-policy-binding "gs://$CACHE_BUCKET" --role "$role" --format=none \
+      --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${PROJECT}.svc.id.goog/subject/ns/inference/sa/vllm"
+  done
+fi
+
 echo "Put these in overlays/<your-overlay>/settings.yaml:"
 echo "  g4NodePool: ${G4_POOL}"
 echo "  n4dNodePool: ${N4D_POOL}"
+if [[ "$CREATE_CACHE_BUCKET" == 1 ]]; then
+  echo "  cacheBucket: ${CACHE_BUCKET}   (and enable components/vllm-gcs-cache)"
+fi

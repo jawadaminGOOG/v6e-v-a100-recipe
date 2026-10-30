@@ -38,11 +38,18 @@ spec:
         - --gpu-memory-utilization=0.9
         - --enable-prefix-caching
         - --api-server-count=4
+        # PIECEWISE CUDA graphs only. The default (FULL_AND_PIECEWISE) also captures FULL graphs, a fixed ~46 s at
+        # every vLLM start on RTX PRO 6000 whatever the capture-size list, with no measured TTFT or throughput gain
+        # at 450 or 1,200 rps for this short-output workload (README "vLLM startup time").
+        - '--compilation-config={"cudagraph_mode": "PIECEWISE"}'
         env:
         - {name: VLLM_USE_DEEP_GEMM, value: "0"}
         - {name: HF_HOME, value: /hf}
         - {name: VLLM_CACHE_ROOT, value: /hf/vllm_cache}
         - {name: TORCHINDUCTOR_CACHE_DIR, value: /hf/inductor_cache}
+        # Save the memory-profiling result under VLLM_CACHE_ROOT/startup_plan and reuse it on later starts with the
+        # same GPU type and config, skipping the profiling pass. A mismatch falls back to profiling.
+        - {name: VLLM_ENABLE_STARTUP_PLAN, value: "1"}
         ports: [{name: http, containerPort: 8000}]
         # Guaranteed QoS + integer CPU => exclusive cores from the static CPU manager.
         resources:
@@ -60,10 +67,9 @@ spec:
         - {name: hf, mountPath: /hf}
         - {name: shm, mountPath: /dev/shm}
       volumes:
-      # HF weights + vLLM/Inductor compile cache on the node. This only helps when vLLM returns to a node it has
-      # already used (pod restart or reschedule). A node added by the autoscaler starts cold: weights download
-      # from Hugging Face and kernels compile again. For production, prefer a secondary boot disk, Hyperdisk ML
-      # or GCS FUSE for weights and cache. The compile-cache speedup is not measured.
+      # HF weights + vLLM/Inductor compile cache on the node. On its own this only helps when vLLM returns to a node
+      # it has already used (pod restart or reschedule); a node added by the autoscaler starts cold (HF download +
+      # compile). components/vllm-gcs-cache seeds new nodes from a GCS bucket instead (README "vLLM startup time").
       - {name: hf, hostPath: {path: /var/lib/colo/hf, type: DirectoryOrCreate}}
       - {name: shm, emptyDir: {medium: Memory, sizeLimit: 8Gi}}
 ---

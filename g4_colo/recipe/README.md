@@ -141,9 +141,11 @@ g4_colo/recipe/
 │   ├── node-agent/                # Read-only /var/lib/kubelet/cpu_manager_state + /proc/stat exporter
 │   ├── worker/                    # Synthetic sandbox, toolcall, and memory-bandwidth analytics workers
 │   ├── loadgen/                   # Streaming OpenAI client with per-pod 2 ms TTFT histograms
+│   ├── vllm-gcs-cache/            # Optional kustomize component: model + vLLM startup cache from GCS on new nodes
 │   └── cloudbuild.yaml            # Builds and pushes the four component images (_REGISTRY required)
 ├── scripts/
-│   └── check_readme.py            # Fails if this README's defaults differ from the manifests and code
+│   ├── check_readme.py            # Fails if this README's defaults differ from the manifests and code
+│   └── seed-vllm-cache.sh         # Uploads the model + vLLM startup cache for components/vllm-gcs-cache
 └── tests/
     ├── admission_cases.py         # Server-side dry-run of the admission policy (incl. bypass cases) + quota
     ├── netpol_check.py            # Live verification of G4 exclusive cpusets + sandbox NetworkPolicy isolation
@@ -163,7 +165,7 @@ G4_ZONES=us-central1-a N4D_ZONES=us-central1-a,us-central1-b \
   bash g4_colo/recipe/infra/create-node-pools.sh
 ```
 
-It prints the pool names to copy into `overlays/<yours>/settings.yaml`. Set `CREATE_LOADGEN_POOL=1` only for the demo.
+It prints the pool names to copy into `overlays/<yours>/settings.yaml`. Set `CREATE_LOADGEN_POOL=1` only for the demo. Set `CREATE_CACHE_BUCKET=1` (optionally `CACHE_BUCKET=<name>`) to create the bucket and IAM for `components/vllm-gcs-cache` (see "vLLM startup time").
 
 ### Step 2: Build component images
 ```bash
@@ -200,8 +202,40 @@ Make-before-break briefly runs a moved pod in both tiers. Size `colo-svc-quota` 
 - **Cost floor:** with `buffer_replicas: 1` (the default), one `n4d-standard-16` node stays up 24×7 to hold the warm buffer pod. Set the buffer to 0 replicas for cost-first deployments, accepting that overflow then waits for Cluster Autoscaler to add an N4D node (not measured; the old 60–90 s estimate has no log behind it).
 - **Absorbing a whole G4 node:** size the buffer to one G4 node's backfill (18 pods) so that a scale-in's overflow lands on warm N4D capacity. Wave 1 ran scale-in with the buffer at 15 replicas (see section 3). How fast a buffer pod is preempted and an overflow pod becomes Ready is not measured.
 
-### vLLM compile and weight cache
-`base/vllm.yaml` keeps Hugging Face weights and the vLLM/Inductor compile cache on hostPath `/var/lib/colo/hf`. This helps only when vLLM returns to a node it has already used (pod restart or reschedule). A new node added by the autoscaler starts cold: it downloads weights and compiles again, which is the main scale-out case. The speedup is not measured. For production, prefer a secondary boot disk, Hyperdisk ML or GCS FUSE for weights and cache.
+### vLLM startup time
+A GPU scale-out is node start plus vLLM start. Measured on this recipe (G4 `g4-standard-48`, vLLM v0.32.0, Qwen3-1.7B-Base), each on a fresh node, HPA-triggered by loadgen 450 → 1,200 rps. "Before" = the recipe without these changes (2 runs); "After" = `overlays/demo` as shipped (3 runs). Sources: `.agents/wave-3/logs/cold_{base1,base2,int1,int2,int3}.timeline.json`, `.agents/wave-3/logs/clause4b.verdict.json`, `.agents/wave-3/summary.md`.
+
+| Phase (fresh G4 node) | Before (HF download, FULL+PIECEWISE graphs) | After (this recipe + `vllm-gcs-cache`) |
+|---|---|---|
+| HPA asks for the 2nd replica after load rises to 1,200 rps | 30 s | 19–45 s |
+| Cluster Autoscaler + GCE VM + node registers | 58–100 s (varies run to run) | 49–76 s |
+| Node Ready, GPU driver install (10–27 s), device plugin, pod scheduled | 31–42 s | 30–41 s |
+| Image pull (image streaming) | 1–2 s | 2 s |
+| `cache-seed` init container (model 3.2 GiB + cache from GCS) | — | 6–7 s |
+| Init container done → vLLM container started (new node only) | — | 17–25 s |
+| Python imports (lazy image-streaming reads) | 25–27 s | 20–25 s |
+| Hugging Face metadata, weights download | 10 s + 22–24 s | 0 s (local copy in RAM) |
+| torch.compile | 18 s (cache miss) | 1.4 s (seeded cache) |
+| CUDA graphs: memory-profiling pass + capture | 23 s + 43 s | 22 s (PIECEWISE capture; profiling pass skipped by the startup plan) |
+| Engine init, model load, FlashInfer warm-up, API ready | ~37 s | ~39 s |
+| **vLLM pod scheduled → Ready** | **186 s** | **111–122 s** |
+| **vLLM pod created → Ready** | **286–317 s** | **190–229 s** |
+| **Load rises → vLLM Ready** | **286–347 s** | **223–274 s (mean 245 s, −30% vs the HPA-triggered baseline)** |
+
+What each change saves, and where it lives:
+- **PIECEWISE CUDA graphs** (`base/vllm.yaml`, `--compilation-config={"cudagraph_mode": "PIECEWISE"}`): −45 s on every start. The default also captures FULL graphs, a fixed ~46 s on this GPU whatever the capture-size list. TTFT and throughput at 450 and 1,200 rps are the same as with FULL graphs (p99 82–84 ms vs 78 ms at 1,200 rps).
+- **Startup plan** (`base/vllm.yaml`, `VLLM_ENABLE_STARTUP_PLAN=1`): skips the memory-profiling pass when a saved plan for the same GPU and config exists; −3 s on a node that already ran vLLM, and lets new nodes skip the pass when the plan is shipped with the cache.
+- **`components/vllm-gcs-cache`** (optional): an init container in the vLLM image copies the model into RAM and the compile cache and startup plan onto the node, from a regional GCS bucket at ~1 GiB/s. This removes the Hugging Face download, the metadata lookup and the compile miss on new nodes (≈ −50 s), for ~7 s of copying. Enabled in `overlays/demo`, offered commented out in `overlays/production-template`.
+
+Without the component, `base/vllm.yaml` still keeps Hugging Face weights and the compile cache on hostPath `/var/lib/colo/hf`: that only helps when vLLM restarts on a node it has already used; a new node added by the autoscaler starts cold.
+
+Using the component:
+1. `CREATE_CACHE_BUCKET=1` with `infra/create-node-pools.sh` (bucket + read access for the KSA `inference/vllm`).
+2. Set `cacheBucket` and `cacheKey` in `settings.yaml`, enable the component in the overlay, apply.
+3. Seed once: `OVERLAY=g4_colo/recipe/overlays/<yours> bash g4_colo/recipe/scripts/seed-vllm-cache.sh`; the first time add `RESTART=1` (the compile cache must come from a vLLM that serves the local copy).
+4. **Any change to the vLLM image, model, GPU type, vLLM args or vLLM env needs a new `cacheKey` and a re-seed.** vLLM keys its compile cache on all of them; a stale cache is ignored (no error) and costs ~19 s of torch.compile on every new node.
+
+Not measured: a secondary boot disk with the vLLM image (the cold-node Python imports take 24–27 s vs ~10 s on a node that has the image; needs a new node pool), and Autopilot-mode ComputeClasses ("fast-starting nodes"), which do not allow this recipe's static CPU manager kubelet config. A warm standby G4 node would remove the node phases but costs a G4 node-hour per hour, against this recipe's goal. About 45 s of every vLLM start (first CUDA graph and the FlashInfer warm-up run) is fixed and unexplained.
 
 ### Measured scale-out timings (wave 1)
 From `.agents/wave-1/logs/g1g3.verdict.json` (before `colo.active` gating and the 2 s loop): the HPA asked for a second vLLM replica 70.2 s after load rose from 300 to 1200 rps; backfill filled 17 of 19 slots on the new node 11 s after vLLM became Ready; the HPA removed the replica 110.6 s after load fell, and Cluster Autoscaler removed the extra G4 node 436 s later.

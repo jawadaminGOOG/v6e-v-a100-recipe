@@ -15,6 +15,9 @@ kind: Kustomization
 resources:
 - ../../base
 - settings.yaml
+# vLLM starts on new G4 nodes from a GCS copy of the model and startup cache (cacheBucket / cacheKey in settings.yaml).
+components:
+- ../../components/vllm-gcs-cache
 images:
 - name: colo-registry.invalid/colo-worker
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
