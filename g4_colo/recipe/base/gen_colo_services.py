@@ -44,6 +44,14 @@ def deploy(name, mode, cls, cpu, mem, bf_rtc, of_rtc, tier):
               - {{key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}}
               - {{key: colo.active, operator: In, values: ["true"]}}
               - {{key: colo.block.{cls}, operator: NotIn, values: ["true"]}}
+        # Scheduler-enforced, independent of colo-controller: a backfill pod only binds to a node that
+        # already runs a vLLM pod. Covers the controller-down case where a stale colo.active label
+        # would otherwise keep attracting backfill to a G4 node whose vLLM replica was removed.
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {{matchLabels: {{app: vllm}}}}
+            namespaces: [inference]
+            topologyKey: kubernetes.io/hostname
       tolerations:
 {G4_TOL}"""
     else:

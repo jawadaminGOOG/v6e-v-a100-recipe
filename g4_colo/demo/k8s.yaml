@@ -167,7 +167,7 @@ spec:
         colo.role: loadgen
       containers:
       - name: demo
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-demo:v0.2.3
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-demo:v0.2.5
         imagePullPolicy: IfNotPresent
         ports:
         - name: http

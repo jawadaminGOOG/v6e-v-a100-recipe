@@ -366,3 +366,42 @@ def test_counterfactual_ignores_buffer_and_uses_min_overhead():
 def test_buffer_deployment_read_from_colo_system():
     st = build_state({"nodes": [], "pods": [], "deployments": [{"namespace": "colo-system", "name": "colo-buffer", "replicas": 2, "ready": 1}]})
     assert st["buffer"] == {"desired": 2, "ready": 1}
+
+
+def test_cancel_restores_gpu_rate_after_spike():
+    """A cancelled scale-out must put the load generator back to its pre-scenario rate."""
+    import asyncio
+    import scenarios as sc
+
+    class B:
+        def __init__(self):
+            self.rates = []
+        async def set_gpu_rate(self, r):
+            self.rates.append(r)
+        async def state(self):
+            return {}
+
+    b = B()
+    sc.SCENARIOS["_t_cancel"] = {"title": "t", "steps": [
+        {"do": "gpu_rate", "rate": 1200},
+        {"do": "wait_until", "all": [["vllm_desired", ">=", 99]], "timeout_s": 60},
+    ]}
+
+    async def go():
+        r = sc.ScenarioRunner(b)
+        r._metrics = lambda: asyncio.sleep(0, result={"target_rps": 450.0, "vllm_desired": 1})
+        r.start("_t_cancel")
+        await asyncio.sleep(0.2)
+        assert r.cancel()
+        try:
+            await r.task
+        except asyncio.CancelledError:
+            pass
+        return r
+
+    try:
+        r = asyncio.run(go())
+    finally:
+        sc.SCENARIOS.pop("_t_cancel", None)
+    assert r.status == "cancelled"
+    assert b.rates == [1200, 450.0]

@@ -622,6 +622,29 @@ def build_state(raw: dict, mode: str = "live") -> dict:
     }
 
 
+def _g4_slots_per_node(state: dict) -> int | None:
+    """2-vCPU integer slots the controller actually places on one G4 node (used in scenario text).
+
+    Prefer the controller's own per-node slot count (it subtracts reserve_cpu_per_node); fall back
+    to spare vCPU minus the configured reserve when the controller state is unavailable.
+    """
+    ctrl = state.get("controller") or {}
+    rows = ((ctrl.get("state") or {}).get("nodes")) or []
+    slots = []
+    for r in rows:
+        sl = r.get("slots") if isinstance(r, dict) else None
+        if isinstance(sl, dict) and r.get("eligible"):
+            slots.append(int(sl.get("sandbox") or 0))
+    if slots:
+        return max(slots)
+    spare = (state.get("story") or {}).get("g4_spare_vcpu")
+    if not spare:
+        return None
+    nodes = max(1, state["counts"].get("g4_ready", 0) or 1)
+    reserve = float(((ctrl.get("config") or {}).get("reserve_cpu_per_node")) or 0)
+    return max(0, int((spare / nodes - reserve) // 2))
+
+
 def summarize(state: dict) -> dict:
     """Flat metrics used by scenario conditions and the CLI observation log."""
     svc = state.get("services") or {}
@@ -660,8 +683,7 @@ def summarize(state: dict) -> dict:
         "saved_per_hour": (state.get("story") or {}).get("saved_per_hour"),
         "g4_spare_vcpu": (state.get("story") or {}).get("g4_spare_vcpu"),
         # 2-vCPU integer pods that fit in one G4 node's spare (used for scenario note text).
-        "g4_slots_per_node": (int(((state.get("story") or {}).get("g4_spare_vcpu") or 0) // 2 // max(1, state["counts"].get("g4_ready", 0) or 1))
-                              if (state.get("story") or {}).get("g4_spare_vcpu") else None),
+        "g4_slots_per_node": _g4_slots_per_node(state),
     }
     for name, s in svc.items():
         m[f"{name}_backfill_ready"] = s["backfill"]["ready"] or 0

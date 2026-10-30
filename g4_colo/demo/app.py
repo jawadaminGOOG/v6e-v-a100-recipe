@@ -85,7 +85,26 @@ runner = ScenarioRunner(
 
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Optional heartbeat (DEMO_HEARTBEAT_S > 0): fetch state on a timer so a hosted instance with no
+    # open browser still exercises GKE auth and token refresh, and logs one line per beat for soak checks.
+    beat_s = float(os.environ.get("DEMO_HEARTBEAT_S", "0"))
+    beat_task = None
+    if beat_s > 0:
+        async def _beat():
+            while True:
+                try:
+                    st = await current_state()
+                    errs = st.get("errors") or []
+                    auth = sum(1 for e in errs if "401" in e or "403" in e or "Forbidden" in e or "Unauthorized" in e)
+                    log.info("heartbeat ok nodes=%d errors=%d auth_errors=%d",
+                             len(st.get("nodes") or []), len(errs), auth)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("heartbeat failed: %s: %s", type(e).__name__, e)
+                await asyncio.sleep(beat_s)
+        beat_task = asyncio.create_task(_beat())
     yield
+    if beat_task:
+        beat_task.cancel()
     # Never leave HPA minReplicas forced to 2 (a G4 node at ~$2/hr) behind a stopped instance.
     runner.cancel()
     try:

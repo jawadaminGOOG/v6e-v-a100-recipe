@@ -77,8 +77,8 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             {"do": "require", "all": [_CTRL, ["g4_ready", ">=", 1], ["g4_nodes", "<=", 1]],
              "msg": "Needs exactly 1 Ready G4 node. Run scenario 2 (GPU scale-in) first, or wait for the 2nd G4 node to drain."},
             {"do": "gpu_rate", "rate": 300, "note": "steady 300 rps on 1 G4 node"},
-            {"do": "demand", "sandbox": 10, "toolcall": 9, "analytics": 0,
-             "note": "19 integer pods (38 vCPU) against {g4_slots_per_node} spare slots on G4 #1"},
+            {"do": "demand", "sandbox": 9, "toolcall": 9, "analytics": 0,
+             "note": "18 integer pods (36 vCPU) against {g4_slots_per_node} spare slots on G4 #1"},
             {"do": "wait_until", "all": [["overflow_desired", "==", 0], ["backfill_ready", ">=", 18]], "timeout_s": 120,
              "note": "all pods run on G4 spare cores (0 on N4D)"},
             {"do": "observe", "label": "fits-in-backfill"},
@@ -88,7 +88,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             {"do": "wait_until", "all": [["overflow_ready", ">=", 17]], "timeout_s": 180,
              "note": "overflow pods Ready on N4D; G4 node count unchanged"},
             {"do": "observe", "label": "spilled"},
-            {"do": "demand", "sandbox": 10, "toolcall": 9, "analytics": 0, "note": "drop demand back to 19 pods (overflow shrinks first)"},
+            {"do": "demand", "sandbox": 9, "toolcall": 9, "analytics": 0, "note": "drop demand back to 18 pods (overflow shrinks first)"},
             {"do": "wait_until", "all": [["overflow_desired", "==", 0], ["backfill_ready", ">=", 18]], "timeout_s": 60,
              "note": "N4D overflow back to 0; G4 #1 keeps its pods"},
             {"do": "observe", "label": "after"},
@@ -199,6 +199,7 @@ class ScenarioRunner:
         self.reset(None)
 
     def reset(self, name: str | None):
+        self._rate_before = None
         self.name = name
         self.status = "idle" if name is None else "running"
         self.started = time.time()
@@ -288,6 +289,13 @@ class ScenarioRunner:
         except asyncio.CancelledError:
             self.status = "cancelled"
             self._log("scenario cancelled", "warn")
+            # A cancelled scale-out must not leave the load spike running (it would still add a G4 node).
+            if self._rate_before is not None:
+                try:
+                    await self.backend.set_gpu_rate(self._rate_before)
+                    self._log(f"GPU rate restored to {self._rate_before:.0f} rps", "warn")
+                except Exception:  # noqa: BLE001
+                    log.exception("rate restore on cancel failed")
             raise
         except PreconditionError as e:
             self.status = "failed"
@@ -330,6 +338,8 @@ class ScenarioRunner:
                 raise PreconditionError(f"{step.get('msg') or 'precondition not met'} [{failed}]")
             self._log(f"{prefix}preconditions met", "ok", step=i)
         elif do == "gpu_rate":
+            if self._rate_before is None:
+                self._rate_before = (await self._safe_metrics()).get("target_rps")
             await b.set_gpu_rate(step["rate"])
             self._acted()
             self._log(f"{prefix}GPU request rate -> {step['rate']} rps{note}", step=i)

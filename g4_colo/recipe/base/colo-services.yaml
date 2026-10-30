@@ -25,6 +25,14 @@ spec:
               - {key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}
               - {key: colo.active, operator: In, values: ["true"]}
               - {key: colo.block.integer, operator: NotIn, values: ["true"]}
+        # Scheduler-enforced, independent of colo-controller: a backfill pod only binds to a node that
+        # already runs a vLLM pod. Covers the controller-down case where a stale colo.active label
+        # would otherwise keep attracting backfill to a G4 node whose vLLM replica was removed.
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {matchLabels: {app: vllm}}
+            namespaces: [inference]
+            topologyKey: kubernetes.io/hostname
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
@@ -114,6 +122,14 @@ spec:
               - {key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}
               - {key: colo.active, operator: In, values: ["true"]}
               - {key: colo.block.integer, operator: NotIn, values: ["true"]}
+        # Scheduler-enforced, independent of colo-controller: a backfill pod only binds to a node that
+        # already runs a vLLM pod. Covers the controller-down case where a stale colo.active label
+        # would otherwise keep attracting backfill to a G4 node whose vLLM replica was removed.
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {matchLabels: {app: vllm}}
+            namespaces: [inference]
+            topologyKey: kubernetes.io/hostname
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
@@ -189,6 +205,14 @@ spec:
               - {key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}
               - {key: colo.active, operator: In, values: ["true"]}
               - {key: colo.block.memory-heavy, operator: NotIn, values: ["true"]}
+        # Scheduler-enforced, independent of colo-controller: a backfill pod only binds to a node that
+        # already runs a vLLM pod. Covers the controller-down case where a stale colo.active label
+        # would otherwise keep attracting backfill to a G4 node whose vLLM replica was removed.
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector: {matchLabels: {app: vllm}}
+            namespaces: [inference]
+            topologyKey: kubernetes.io/hostname
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
