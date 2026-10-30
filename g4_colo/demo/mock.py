@@ -79,7 +79,7 @@ class MockBackend:
         self.rate = 300.0
         self.eff_rate = 300.0
         self.demand = {"sandbox": 6, "toolcall": 6, "analytics": 2}
-        self.guard = {"enabled": True, "baseline_ttft_p99_ms": 60.0, "factor": 1.5, "cooldown_s": GUARD_COOLDOWN_S, "window_s": 30}
+        self.guard = {"enabled": True, "baseline_ttft_p99_ms": 60.0, "factor": 1.5, "cooldown_s": GUARD_COOLDOWN_S, "window_s": 30, "escalate_s": 0}
         self.buffer_replicas = 1
         self.events: list[dict] = []
         self.guard_events: list[dict] = []
@@ -308,7 +308,11 @@ class MockBackend:
                 n["breach_since"] = n["breach_since"] or now
                 if "memory-heavy" not in n["blocks"]:
                     self._block(n, "memory-heavy", p99, thr)
-                elif "integer" not in n["blocks"] and now - n["blocks"]["memory-heavy"] >= 60 and now - n["breach_since"] >= 60:
+                # Same rule as the controller: escalate to integer only when escalate_s > 0
+                # (the demo config ships escalate_s 0, so integer work is never blocked).
+                elif (float(self.guard.get("escalate_s") or 0) > 0 and "integer" not in n["blocks"]
+                      and now - n["blocks"]["memory-heavy"] >= float(self.guard["escalate_s"])
+                      and now - n["breach_since"] >= float(self.guard["escalate_s"])):
                     self._block(n, "integer", p99, thr)
             else:
                 n["breach_since"] = None

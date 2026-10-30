@@ -578,7 +578,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
         "counterfactual_n4d_nodes": cf["n4d_nodes"],
         "saved_nodes": saved_nodes,
     }
-    return {
+    out = {
         "ts": now,
         "mode": mode,
         "cluster": CLUSTER,
@@ -620,6 +620,12 @@ def build_state(raw: dict, mode: str = "live") -> dict:
         },
         "errors": errors,
     }
+    # Additive field for the UI ("N of M G4 slots"); same source as the scenario text.
+    try:
+        story["g4_slots_per_node"] = _g4_slots_per_node(out)
+    except Exception:  # noqa: BLE001 - never break /api/state for a display hint
+        story["g4_slots_per_node"] = None
+    return out
 
 
 def _g4_slots_per_node(state: dict) -> int | None:

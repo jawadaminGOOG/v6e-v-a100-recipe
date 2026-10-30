@@ -17,7 +17,7 @@
 <header class="top">
   <div class="brand">
     <h1>G4 colo</h1>
-    <p class="lede">CPU services run on the spare cores of GPU nodes. Only the excess goes to N4D.</p>
+    <p class="lede secondary">CPU services run on the spare cores of GPU nodes. Only the excess goes to N4D.</p>
   </div>
   <div class="top-right">
     <span id="accel" class="pill warn" hidden title="The demo set the vLLM HPA minReplicas to 2 so scale-out shows in seconds. It is reset to 1 when the rate drops, when a scenario ends, and on shutdown.">Demo accelerator on: HPA min 2</span>
@@ -28,151 +28,182 @@
 
 <div id="alerts" class="alerts" role="alert" aria-live="assertive"></div>
 
-<main id="main">
-  <section id="story" class="story" aria-labelledby="story-h">
-    <h2 id="story-h" class="sr-only">Summary</h2>
-    <div class="metric">
-      <span class="m-label">GPU slice</span>
-      <span class="m-value"><span id="h-slice">–</span><small> vCPU</small></span>
-      <span class="m-note" id="h-slice-note">reserved for vLLM on each G4 node</span>
-    </div>
-    <div class="metric win">
-      <span class="m-label">Reclaimed on G4</span>
-      <span class="m-value"><span id="h-reclaim">–</span><small> vCPU</small></span>
-      <span class="m-note" id="h-reclaim-note">spare GPU-node cores running CPU services</span>
-    </div>
-    <div class="metric">
-      <span class="m-label">Overflow on N4D</span>
-      <span class="m-value"><span id="h-overflow">–</span><small> vCPU</small></span>
-      <span class="m-note" id="h-overflow-note">CPU pods that did not fit on G4</span>
-    </div>
-    <div class="metric save">
-      <span class="m-label">Saved vs CPU on N4D</span>
-      <span class="m-value"><span id="h-saved">–</span><small>/hr</small></span>
-      <span class="m-note" id="h-saved-note">N4D nodes you would rent without colo</span>
-    </div>
-    <div class="budget" aria-hidden="false">
-      <div class="budget-head">
-        <span>G4 vCPU budget</span>
-        <span class="muted" id="budget-total"></span>
-      </div>
-      <div class="budget-bar" id="budget-bar" role="img" aria-label="G4 vCPU budget"></div>
-      <ul class="budget-key" id="budget-key"></ul>
-    </div>
-  </section>
-
-  <section id="scen-banner" class="banner" hidden role="status" aria-live="polite" aria-atomic="false">
-    <div class="banner-row">
-      <span id="sb-badge" class="tag">Running</span>
-      <strong id="sb-title" class="banner-title">Scenario</strong>
-      <span id="sb-step" class="muted"></span>
-      <span class="spacer"></span>
-      <span id="sb-clock" class="mono-num muted"></span>
-      <button id="sb-cancel" class="btn" type="button">Stop scenario</button>
-    </div>
-    <div class="progress" aria-hidden="true"><div id="sb-fill" class="progress-fill"></div></div>
-    <p id="sb-now" class="banner-now"></p>
-    <ul id="sb-conds" class="conds"></ul>
-  </section>
-
-  <div class="work">
-    <div class="col">
-    <section class="panel nodes-panel" aria-labelledby="nodes-h">
-      <div class="panel-head">
-        <h2 id="nodes-h">Where the work runs</h2>
-        <ul class="legend" aria-label="Legend">
-          <li><i class="cell v" aria-hidden="true">V</i>vLLM (GPU slice)</li>
-          <li><i class="cell i" aria-hidden="true">I</i>Integer CPU service</li>
-          <li><i class="cell m" aria-hidden="true">M</i>Memory-heavy CPU service</li>
-          <li><i class="cell b" aria-hidden="true">B</i>Warm buffer</li>
-          <li><i class="cell s" aria-hidden="true"></i>System / reserved</li>
-          <li><i class="cell idle" aria-hidden="true"></i>Free</li>
-        </ul>
-      </div>
-      <div id="nodes" class="nodes"></div>
-    </section>
-      <section class="panel chart-panel" aria-labelledby="ttft-h">
-        <div class="panel-head"><h2 id="ttft-h">GPU latency</h2><span class="muted small" id="ttft-now"></span></div>
-        <div class="chart-box"><canvas id="c-ttft" role="img" aria-label="TTFT p99 over the last 15 minutes against the guard threshold"></canvas></div>
+<div class="shell">
+  <!-- Left rail: every manual control, always visible, in the order a presenter uses them. -->
+  <aside class="rail panel" aria-labelledby="ctl-h">
+    <h2 id="ctl-h" class="sr-only">Controls</h2>
+    <fieldset id="manual-fields">
+      <legend class="sr-only">Manual controls</legend>
+      <p class="lock" id="manual-lock" hidden>Locked while a scenario runs. Stop it to adjust by hand.</p>
+      <section class="rail-sec">
+        <h3>GPU load</h3>
+        <div class="field">
+          <label for="rate">Request rate <output id="rate-out" for="rate">0</output><small>rps</small></label>
+          <input type="range" id="rate" min="0" max="1400" step="10" value="300">
+          <div class="marks" aria-hidden="true"><span style="left:0">0</span><span class="key" style="left:50%">~700 · 2nd G4 node</span><span style="left:100%" class="end">1,400</span></div>
+        </div>
       </section>
-    </div>
+      <section class="rail-sec">
+        <h3>CPU service demand <span class="muted">pods, 2 vCPU each</span></h3>
+        <div class="field svc a-sandbox">
+          <label for="d-sandbox"><i class="sw" aria-hidden="true"><b>S</b></i>sandbox <span class="cls">integer</span><output id="d-sandbox-out" for="d-sandbox">0</output></label>
+          <input type="range" id="d-sandbox" min="0" max="20" step="1" value="0" data-svc="sandbox">
+          <div class="split" id="sp-sandbox" aria-hidden="true"><i class="g"></i><i class="n"></i></div>
+          <div class="where" id="w-sandbox"></div>
+        </div>
+        <div class="field svc a-toolcall">
+          <label for="d-toolcall"><i class="sw" aria-hidden="true"><b>T</b></i>toolcall <span class="cls">integer</span><output id="d-toolcall-out" for="d-toolcall">0</output></label>
+          <input type="range" id="d-toolcall" min="0" max="20" step="1" value="0" data-svc="toolcall">
+          <div class="split" id="sp-toolcall" aria-hidden="true"><i class="g"></i><i class="n"></i></div>
+          <div class="where" id="w-toolcall"></div>
+        </div>
+        <div class="field svc a-analytics">
+          <label for="d-analytics"><i class="sw" aria-hidden="true"><b>A</b></i>analytics <span class="cls">memory-heavy</span><output id="d-analytics-out" for="d-analytics">0</output></label>
+          <input type="range" id="d-analytics" min="0" max="20" step="1" value="0" data-svc="analytics">
+          <div class="split" id="sp-analytics" aria-hidden="true"><i class="g"></i><i class="n"></i></div>
+          <div class="where" id="w-analytics"></div>
+        </div>
+        <div class="cap"><span id="cap-text">–</span><span class="meter" aria-hidden="true"><i id="cap-bar"></i></span></div>
+        <div class="presets" role="group" aria-label="Demand presets">
+          <button class="btn sm" type="button" data-preset="integer" aria-pressed="false">Integer-heavy</button>
+          <button class="btn sm" type="button" data-preset="memory" aria-pressed="false">Memory-heavy</button>
+          <button class="btn sm" type="button" data-preset="mixed" aria-pressed="false">Mixed</button>
+          <button class="btn sm" type="button" data-preset="light" aria-pressed="false">Light</button>
+        </div>
+      </section>
+      <section class="rail-sec">
+        <h3>Latency guard</h3>
+        <div class="field row">
+          <input type="checkbox" id="guard" class="switch" role="switch">
+          <label for="guard" id="guard-label">Latency guard</label>
+        </div>
+        <p class="hint secondary" id="guard-hint">Moves memory-heavy pods off a G4 node when its TTFT p99 passes the threshold.</p>
+        <div class="field row between">
+          <button id="btn-baseline" class="btn sm" type="button" title="Records the current TTFT p99 as the guard's reference. Do this at steady load with no memory-heavy pods.">Measure baseline</button>
+          <span class="small muted" id="baseline-info"></span>
+        </div>
+      </section>
+    </fieldset>
+    <section class="rail-sec" aria-labelledby="scen-h">
+      <h3 id="scen-h">Scenarios <span class="muted">keys 1–4</span></h3>
+      <div class="scen-list" id="scen-list">
+        <button class="scen" type="button" data-scenario="gpu-scale-out" title="Load spike adds a G4 node; its spare cores fill"><span class="k">1</span><b>GPU scale-out</b></button>
+        <button class="scen" type="button" data-scenario="gpu-scale-in" title="G4 node released; CPU pods keep running on N4D"><span class="k">2</span><b>GPU scale-in</b></button>
+        <button class="scen" type="button" data-scenario="cpu-scale-out" title="Extra CPU demand spills to N4D, never to GPU"><span class="k">3</span><b>CPU scale-out</b></button>
+        <button class="scen" type="button" data-scenario="guard-integer-vs-memory" title="Memory-heavy work is moved off G4 when TTFT rises"><span class="k">4</span><b>Latency guard</b></button>
+      </div>
+    </section>
+  </aside>
 
-    <aside class="side">
-      <section class="panel" aria-labelledby="scen-h">
-        <div class="panel-head"><h2 id="scen-h">Scenarios</h2><span class="muted small">keys 1–4</span></div>
-        <div class="scen-list" id="scen-list">
-          <button class="scen" type="button" data-scenario="gpu-scale-out"><span class="k">1</span><span><b>GPU scale-out</b><span>Load spike adds a G4 node; its spare cores fill</span></span></button>
-          <button class="scen" type="button" data-scenario="gpu-scale-in"><span class="k">2</span><span><b>GPU scale-in</b><span>G4 node released; CPU pods keep running on N4D</span></span></button>
-          <button class="scen" type="button" data-scenario="cpu-scale-out"><span class="k">3</span><span><b>CPU scale-out</b><span>Extra CPU demand spills to N4D, never to GPU</span></span></button>
-          <button class="scen" type="button" data-scenario="guard-integer-vs-memory"><span class="k">4</span><span><b>Latency guard</b><span>Memory-heavy work is moved off G4 when TTFT rises</span></span></button>
+  <main id="main" class="content">
+    <section id="story" class="story" aria-labelledby="story-h">
+      <h2 id="story-h" class="sr-only">Summary</h2>
+      <div class="metric">
+        <span class="m-label">GPU slice</span>
+        <span class="m-value"><span id="h-slice">–</span><small> vCPU</small></span>
+        <span class="m-note" id="h-slice-note">reserved for vLLM on each G4 node</span>
+      </div>
+      <div class="metric win">
+        <span class="m-label">Reclaimed on G4</span>
+        <span class="m-value"><span id="h-reclaim">–</span><small> vCPU</small></span>
+        <span class="m-note" id="h-reclaim-note">spare GPU-node cores running CPU services</span>
+      </div>
+      <div class="metric over">
+        <span class="m-label">Overflow on N4D</span>
+        <span class="m-value"><span id="h-overflow">–</span><small> vCPU</small></span>
+        <span class="m-note" id="h-overflow-note">CPU pods that did not fit on G4</span>
+      </div>
+      <div class="metric save">
+        <span class="m-label">Saved vs CPU on N4D</span>
+        <span class="m-value"><span id="h-saved">–</span><small>/hr</small></span>
+        <span class="m-note" id="h-saved-note">N4D nodes you would rent without colo</span>
+      </div>
+      <div class="budget">
+        <span class="budget-head">G4 vCPU budget</span>
+        <div class="budget-bar" id="budget-bar" role="img" aria-label="G4 vCPU budget"></div>
+        <span class="muted small" id="budget-total"></span>
+        <ul class="budget-key sr-only" id="budget-key"></ul>
+      </div>
+    </section>
+
+    <section id="scen-banner" class="banner" hidden role="status" aria-live="polite" aria-atomic="false">
+      <div class="banner-row">
+        <span id="sb-badge" class="tag">Running</span>
+        <strong id="sb-title" class="banner-title">Scenario</strong>
+        <span id="sb-step" class="muted"></span>
+        <span id="sb-now" class="banner-now"></span>
+        <span class="spacer"></span>
+        <span id="sb-clock" class="mono-num muted"></span>
+        <button id="sb-cancel" class="btn" type="button">Stop scenario</button>
+      </div>
+      <div class="progress" aria-hidden="true"><div id="sb-fill" class="progress-fill"></div></div>
+      <ul id="sb-conds" class="conds"></ul>
+    </section>
+
+    <section class="panel mrow" aria-label="Live metrics">
+      <div><span class="k">Requests / s · achieved of target</span><span class="v"><span id="m-ach">–</span><span class="sep">/</span><small id="m-tgt">– rps</small></span><div class="gauge" aria-hidden="true"><i id="m-gauge"></i><b id="m-gauge-t"></b></div></div>
+      <div><span class="k">TTFT p50</span><span class="v"><span id="m-p50">–</span><small> ms</small></span><span class="sub" id="m-p50s"></span></div>
+      <div><span class="k">TTFT p99 · vs threshold</span><span class="v"><span id="m-p99">–</span><small id="m-thr"></small></span><span class="sub" id="m-p99s"></span></div>
+      <div><span class="k">vLLM replicas</span><span class="v"><span id="m-rep">–</span><small id="m-rep-d"></small></span><span class="sub" id="m-rep-s"></span></div>
+      <div><span class="k">Nodes · G4 / N4D</span><span class="v"><span id="m-g4">–</span><span class="sep">/</span><span id="m-n4d">–</span></span><span class="sub" id="m-nodes-s"></span></div>
+      <div><span class="k">CPU pods · G4 / N4D</span><span class="v"><span id="m-bf">–</span><span class="sep">/</span><span id="m-of">–</span></span><span class="sub" id="m-pods-s"></span></div>
+    </section>
+
+    <div class="work">
+      <section class="panel nodes-panel" aria-labelledby="nodes-h">
+        <div class="panel-head">
+          <h2 id="nodes-h">Where the work runs <span class="muted h-sub">one tile per vCPU, grouped by L3 cache</span></h2>
+          <ul class="legend" aria-label="Legend">
+            <li><i class="sw a-vllm" aria-hidden="true"><b>V</b></i>vLLM</li>
+            <li><i class="sw a-sandbox" aria-hidden="true"><b>S</b></i>sandbox</li>
+            <li><i class="sw a-toolcall" aria-hidden="true"><b>T</b></i>toolcall</li>
+            <li><i class="sw a-analytics" aria-hidden="true"><b>A</b></i>analytics</li>
+            <li><i class="sw a-buffer" aria-hidden="true"><b>B</b></i>warm buffer</li>
+            <li><i class="sw a-system" aria-hidden="true"></i>reserved</li>
+            <li><i class="sw a-free" aria-hidden="true"></i>free · fill = busy %</li>
+          </ul>
+        </div>
+        <div id="nodes" class="nodes"></div>
+        <div class="lanes" id="lanes" aria-label="Where each CPU service runs">
+          <span></span><span class="zh"><span>On G4 spare cores</span><span id="zh-g"></span></span><span class="zh"><span>Overflow on N4D</span><span id="zh-n"></span></span>
         </div>
       </section>
 
-
-      <details class="panel manual" id="manual">
-        <summary>Manual controls</summary>
-        <fieldset id="manual-fields">
-          <legend class="sr-only">Manual controls</legend>
-          <p class="hint" id="manual-lock" hidden>Locked while a scenario runs.</p>
-          <div class="field">
-            <label for="rate">GPU request rate <output id="rate-out" for="rate">0</output> rps</label>
-            <input type="range" id="rate" min="0" max="1400" step="10" value="300">
-          </div>
-          <div class="field">
-            <label for="d-sandbox"><i class="cell i sm" aria-hidden="true">I</i>sandbox pods <output id="d-sandbox-out" for="d-sandbox">0</output></label>
-            <input type="range" id="d-sandbox" min="0" max="20" step="1" value="0" data-svc="sandbox">
-          </div>
-          <div class="field">
-            <label for="d-toolcall"><i class="cell i sm" aria-hidden="true">I</i>toolcall pods <output id="d-toolcall-out" for="d-toolcall">0</output></label>
-            <input type="range" id="d-toolcall" min="0" max="20" step="1" value="0" data-svc="toolcall">
-          </div>
-          <div class="field">
-            <label for="d-analytics"><i class="cell m sm" aria-hidden="true">M</i>analytics pods <output id="d-analytics-out" for="d-analytics">0</output></label>
-            <input type="range" id="d-analytics" min="0" max="20" step="1" value="0" data-svc="analytics">
-          </div>
-          <div class="field row">
-            <input type="checkbox" id="guard" class="switch" role="switch">
-            <label for="guard" id="guard-label">Latency guard</label>
-          </div>
-          <p class="hint" id="guard-hint">Moves memory-heavy pods off a G4 node when its TTFT p99 passes the threshold.</p>
-          <div class="field row between">
-            <button id="btn-baseline" class="btn" type="button">Measure baseline</button>
-            <span class="small muted" id="baseline-info"></span>
-          </div>
-          <p class="hint">Records the current TTFT p99 as the guard's reference. Do this at steady load with no memory-heavy pods.</p>
-        </fieldset>
-      </details>
-    </aside>
-  </div>
-
-  <section class="more" aria-label="Details">
-    <details class="panel">
-      <summary>CPU topology per node (L3 cache domains)</summary>
-      <p class="hint">Each tile is one vCPU; columns are the 8 physical cores of an L3 domain, rows are the two hyperthreads. vLLM keeps its own L3 domain.</p>
-      <div id="topology" class="topology"></div>
-    </details>
-    <details class="panel">
-      <summary>History (last 15 min)</summary>
-      <div class="charts">
-        <figure><figcaption>Requests per second: achieved vs target</figcaption><div class="chart-box"><canvas id="c-rps" role="img" aria-label="Achieved vs target requests per second"></canvas></div></figure>
-        <figure><figcaption>vLLM replicas and nodes</figcaption><div class="chart-box"><canvas id="c-scale" role="img" aria-label="vLLM replicas, G4 and N4D node counts"></canvas></div></figure>
-        <figure><figcaption>CPU pods on G4 vs N4D</figcaption><div class="chart-box"><canvas id="c-svc" role="img" aria-label="CPU pods on G4 backfill vs N4D overflow"></canvas></div></figure>
-        <figure><figcaption>Cost per hour: with colo vs CPU on N4D</figcaption><div class="chart-box"><canvas id="c-cost" role="img" aria-label="Fleet cost per hour with colo vs without colo"></canvas></div></figure>
+      <div class="charts-col">
+        <section class="panel chart-panel" aria-labelledby="ttft-h">
+          <div class="panel-head"><h2 id="ttft-h">GPU latency</h2><span class="muted small" id="ttft-now"></span></div>
+          <div class="chart-box"><canvas id="c-ttft" role="img" aria-label="TTFT p50 and p99 over the last 15 minutes against the guard threshold and baseline"></canvas></div>
+        </section>
+        <section class="panel chart-panel" aria-labelledby="rps-h">
+          <div class="panel-head"><h2 id="rps-h">Requests per second</h2><span class="muted small" id="rps-now"></span></div>
+          <div class="chart-box"><canvas id="c-rps" role="img" aria-label="Achieved vs target requests per second"></canvas></div>
+        </section>
       </div>
-    </details>
-    <details class="panel">
-      <summary>Cluster events and scenario log</summary>
-      <div class="two">
-        <div><h3>Events</h3><ul id="events" class="events"></ul></div>
-        <div><h3>Scenario log</h3><ol id="scen-log" class="scen-log"></ol></div>
-      </div>
-    </details>
-    <details class="panel">
-      <summary>How the numbers are computed</summary>
-      <ul class="method" id="method"></ul>
-    </details>
-  </section>
-</main>
+    </div>
+  </main>
+</div>
+
+<section class="more" aria-label="Details">
+  <details class="panel">
+    <summary>History (last 15 min)</summary>
+    <div class="charts">
+      <figure><figcaption>vLLM replicas and nodes</figcaption><div class="chart-box"><canvas id="c-scale" role="img" aria-label="vLLM replicas, G4 and N4D node counts"></canvas></div></figure>
+      <figure><figcaption>CPU pods on G4 vs N4D</figcaption><div class="chart-box"><canvas id="c-svc" role="img" aria-label="CPU pods on G4 backfill vs N4D overflow"></canvas></div></figure>
+      <figure><figcaption>Cost per hour: with colo vs CPU on N4D</figcaption><div class="chart-box"><canvas id="c-cost" role="img" aria-label="Fleet cost per hour with colo vs without colo"></canvas></div></figure>
+    </div>
+  </details>
+  <details class="panel">
+    <summary>Cluster events and scenario log</summary>
+    <div class="two">
+      <div><h3>Events</h3><ul id="events" class="events"></ul></div>
+      <div><h3>Scenario log</h3><ol id="scen-log" class="scen-log"></ol></div>
+    </div>
+  </details>
+  <details class="panel">
+    <summary>How the numbers are computed</summary>
+    <ul class="method" id="method"></ul>
+  </details>
+</section>
 
 <footer class="foot"><span id="cluster"></span></footer>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
