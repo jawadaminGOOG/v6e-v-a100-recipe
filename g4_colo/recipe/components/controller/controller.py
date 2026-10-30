@@ -104,6 +104,8 @@ def _pod_facts(pod) -> L.PodFacts:
         ready=bool(pod.status) and _ready(pod.status.conditions),
         cpu_m=cpu,
         mem=mem,
+        deletion_cost=(getattr(pod.metadata, "annotations", None) or {}).get(
+            L.DELETION_COST_ANNOTATION),
     )
 
 
@@ -236,6 +238,13 @@ class Controller:
 
     def _patch_node_labels(self, node: str, labels: dict[str, str | None]) -> None:
         self.core.patch_node(node, {"metadata": {"labels": labels}})
+
+    def _annotate_pod(self, ns: str, name: str, annotations: dict[str, str | None]) -> None:
+        try:
+            self.core.patch_namespaced_pod(name, ns, {"metadata": {"annotations": annotations}})
+        except ApiException as e:
+            if e.status != 404:
+                raise
 
     def _delete_pod(self, ns: str, name: str) -> bool:
         try:
@@ -432,6 +441,9 @@ class Controller:
         caps: list[L.NodeCapacity] = []
         node_rows: list[dict[str, Any]] = []
         dehydrate_coros: list = []
+        annotate_coros: list = []
+        ineligible_pods: list[L.PodFacts] = []
+        deleting: set[str] = set()
         for nm, nf in nfacts.items():
             plan = L.plan_node(nf, facts[nm], now, self.tracks.get(nm, L.NodeTrack()), cover, grace)
             self.tracks[nm] = plan.track
@@ -442,6 +454,13 @@ class Controller:
             label_patches[nm].update(plan.label_patch)
             for pod in plan.delete_pods:
                 dehydrate_coros.append(self._delete_rec(nm, pod, "dehydrate-pod", plan.drain_reason or ""))
+            deleting.update(plan.delete_pods)
+            if not plan.eligible:
+                ineligible_pods.extend(facts[nm])
+            for pod, cost in L.deletion_cost_patches(plan.eligible, facts[nm]).items():
+                if pod not in deleting:
+                    annotate_coros.append(self._io(self._annotate_pod, NS_SVC, pod,
+                                                   {L.DELETION_COST_ANNOTATION: cost}))
             g = self.guards.get(nm, L.NodeGuard())
             cap = L.node_capacity(nf, facts[nm], g.blocks, reserve_m)
             if plan.eligible:
@@ -474,6 +493,10 @@ class Controller:
             row["planned_backfill"] = alloc_res.placement.get(row["name"], {})
         svc_rows: dict[str, dict[str, int]] = {}
         scale_coros: list = []
+        # N1: never shrink <svc>-backfill in a tick that deletes its drained pods, or
+        # while drained pods lack the -1000 deletion cost; the ReplicaSet would pick
+        # its own victims, possibly ready pods on healthy nodes.
+        holds = L.backfill_scale_down_holds(ineligible_pods, deleting)
         for svc in L.SERVICE_ORDER:
             bf, ov = deploys[f"{svc}-backfill"], deploys[f"{svc}-overflow"]
             row = {"demand": demand[svc],
@@ -487,6 +510,10 @@ class Controller:
                 continue
             plan = L.plan_scale(bf[0], ov[0], bf[1], ov[1],
                                 alloc_res.backfill[svc], alloc_res.overflow[svc])
+            if svc in holds and plan.backfill < bf[0]:
+                log.info("%s-backfill scale-down %s -> %s held one tick (drained pods first)",
+                         svc, bf[0], plan.backfill)
+                plan = L.hold_backfill(plan, bf[0], ov[0])
             scale_coros.append(self._scale_service(svc, bf, ov, plan))
             row.update(backfill_desired=plan.backfill, backfill_ready=bf[1],
                        overflow_desired=plan.overflow, overflow_ready=ov[1])
@@ -500,16 +527,17 @@ class Controller:
                 scale_coros.append(self._scale_buffer(buf[0], want_buf))
             self.buffer_state = {"desired": want_buf, "ready": buf[1]}
 
-        # -- writes: labels+events, then evictions, then scale, then dehydrate --
+        # -- writes: labels+events+annotations, evictions, dehydrate, then scale --
         # Labels first so a blocked/inactive node takes no new backfill before pods
-        # are deleted; scale before dehydrate so a lowered backfill target is in
-        # place before its pods go (fewer Pending re-creations).
-        await self._gather_writes("label/event", [
+        # are deleted. Dehydrate deletes go before scales, and a service that
+        # deletes this tick does not shrink its backfill until the next tick, when
+        # the ReplicaSet removes the unscheduled replacements first.
+        await self._gather_writes("label/event/annotation", [
             self._patch_labels_rec(nm, p, "reconcile") for nm, p in label_patches.items() if p
-        ] + event_coros)
+        ] + event_coros + annotate_coros)
         await self._gather_writes("guard evict", evict_coros)
-        await self._gather_writes("scale", scale_coros)
         await self._gather_writes("dehydrate", dehydrate_coros)
+        await self._gather_writes("scale", scale_coros)
 
         evaluated = [s for s in signals.values() if s != "idle"]
         self.guard_sufficient = bool(evaluated) and all(s == L.GUARD_SIGNAL_OK for s in evaluated)

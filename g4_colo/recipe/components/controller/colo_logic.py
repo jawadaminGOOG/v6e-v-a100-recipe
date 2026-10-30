@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Iterable, Mapping
@@ -148,6 +149,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "location": "global",
             "query_window_s": 60,
             "metric": "vllm:time_to_first_token_seconds",
+            # Optional: adds cluster="<name>" to the selector (GMP's cluster label).
+            "cluster": None,
         },
     },
     # Optional upper bound on total requested CPU (cores) across all demand,
@@ -156,6 +159,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 TTFT_SOURCE_TYPES: tuple[str, ...] = ("loadgen", "prometheus", "none")
+_LABEL_VALUE_RE = re.compile(r"[A-Za-z0-9_.-]+")
 
 
 def deep_merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
@@ -214,6 +218,10 @@ def validate_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
     for key in ("location", "metric"):
         if not isinstance(pr.get(key), str) or not pr[key]:
             raise ValueError(f"ttft_source.prometheus.{key} must be a non-empty string")
+    cl = pr.get("cluster")
+    if cl is not None and not (isinstance(cl, str) and _LABEL_VALUE_RE.fullmatch(cl)):
+        raise ValueError("ttft_source.prometheus.cluster must be null or a cluster name "
+                         "([A-Za-z0-9_.-]+)")
     w = pr.get("query_window_s")
     if isinstance(w, bool) or not isinstance(w, (int, float)) or w < 10:
         raise ValueError("ttft_source.prometheus.query_window_s must be a number >= 10")
@@ -540,7 +548,9 @@ def summarize_prom_ttft(
 
     `samples` values are per-second rates of cumulative bucket counters; requests
     in the window = rate(+Inf) * window_s. Pods are mapped to nodes via `pod_node`
-    (current pod list); pods not in it count toward the cluster only. Buckets of
+    (this cluster's current vLLM pods); series of pods not in it (another cluster
+    in the same project, or a pod already gone) are dropped from both the per-node
+    and the cluster p99 and counted in `skipped`. Buckets of
     pods on the same node are summed before the quantile, as histogram_quantile
     over `sum by (node, le)` would.
     """
@@ -579,9 +589,11 @@ def summarize_prom_ttft(
         node = pod_node.get(pod)
         if node:
             by_node.setdefault(node, []).append(b)
+        else:
+            skipped += 1  # not a vLLM pod of this cluster (other cluster, or gone)
     return TTFTView(
         nodes={n: summ(merge(bs)) for n, bs in by_node.items()},
-        cluster=summ(merge(per_pod.values())),
+        cluster=summ(merge(b for bs in by_node.values() for b in bs)),
         window_s=window_s,
         bucket_ms=0.0,  # native Prometheus buckets, interpolated
         skipped=skipped,
@@ -767,6 +779,7 @@ class PodFacts:
     ready: bool = False
     cpu_m: int = 0
     mem: int = 0
+    deletion_cost: str | None = None  # controller.kubernetes.io/pod-deletion-cost annotation
 
 
 @dataclass(frozen=True)
@@ -922,6 +935,57 @@ def node_capacity(
             used_mem += p.mem
     return NodeCapacity(node.name, node.alloc_cpu_m, used_cpu, blocks,
                         node.alloc_mem, used_mem, reserve_cpu_m)
+
+
+DELETION_COST_ANNOTATION = "controller.kubernetes.io/pod-deletion-cost"
+DRAIN_DELETION_COST = "-1000"
+
+
+def deletion_cost_patches(eligible: bool, pods: Iterable[PodFacts]) -> dict[str, str | None]:
+    """pod -> pod-deletion-cost value to set (None = remove) for backfill on one node.
+
+    Backfill on an ineligible node gets -1000 so that when <svc>-backfill shrinks,
+    the ReplicaSet removes those pods before ready pods on healthy nodes. Once the
+    node is eligible again the annotation is removed.
+    """
+    out: dict[str, str | None] = {}
+    for p in pods:
+        if p.role != ROLE_BACKFILL or p.terminating:
+            continue
+        if not eligible and p.deletion_cost != DRAIN_DELETION_COST:
+            out[p.name] = DRAIN_DELETION_COST
+        elif eligible and p.deletion_cost == DRAIN_DELETION_COST:
+            out[p.name] = None
+    return out
+
+
+def backfill_scale_down_holds(
+    ineligible_pods: Iterable[PodFacts], deleting: Iterable[str]
+) -> set[str]:
+    """Services whose backfill Deployment must not shrink this tick.
+
+    A ReplicaSet scale-down picks its own victims. While a service still has a
+    live backfill pod on an ineligible node that is either being deleted this
+    tick or not yet observed with the drain deletion cost, a scale-down could
+    remove ready pods on healthy nodes instead. So hold it one tick: the deletes
+    (or annotations) land first, and the next tick shrinks the Deployment, when
+    the ReplicaSet removes the unscheduled replacements / the -1000 pods first.
+    """
+    deleting = set(deleting)
+    return {
+        p.service for p in ineligible_pods
+        if p.role == ROLE_BACKFILL and not p.terminating and p.service
+        and (p.name in deleting or p.deletion_cost != DRAIN_DELETION_COST)
+    }
+
+
+def hold_backfill(plan: ScalePlan, cur_bf: int, cur_ov: int) -> ScalePlan:
+    """Keep backfill at no less than its current replicas (see backfill_scale_down_holds)."""
+    if plan.backfill >= cur_bf:
+        return plan
+    growing = cur_bf + plan.overflow > cur_bf + cur_ov
+    return ScalePlan(cur_bf, plan.overflow,
+                     ("overflow", "backfill") if growing else ("backfill", "overflow"))
 
 
 def guard_label_patch(labels: Mapping[str, str], blocks: frozenset[str]) -> dict[str, str | None]:

@@ -234,12 +234,15 @@ def test_config_prometheus_requires_project():
     c = L.validate_config({"ttft_source": {"type": "prometheus", "prometheus": {"project": "p"}}})
     assert c["ttft_source"]["prometheus"] == {"project": "p", "location": "global",
                                               "query_window_s": 60,
-                                              "metric": "vllm:time_to_first_token_seconds"}
+                                              "metric": "vllm:time_to_first_token_seconds",
+                                              "cluster": None}
 
 
 @pytest.mark.parametrize("bad", [{"ttft_source": {"type": "gateway"}},
                                  {"ttft_source": {"type": "none", "prometheus": {"query_window_s": 1}}},
                                  {"dehydrate_grace_s": -1}, {"max_total_cpu": 0},
+                                 {"ttft_source": {"prometheus": {"cluster": 'x"} or up{a="'}}},
+                                 {"ttft_source": {"prometheus": {"cluster": ""}}},
                                  {"max_total_cpu": 40, "demand": {"sandbox": 21}}])
 def test_config_rejects_new_keys(bad):
     with pytest.raises(ValueError):
@@ -249,3 +252,30 @@ def test_config_rejects_new_keys(bad):
 def test_max_total_cpu_allows_demand_at_limit():
     c = L.validate_config({"max_total_cpu": 40, "demand": {"sandbox": 10, "analytics": 10}})
     assert L.demand_cpu_cores(c["demand"]) == 40
+
+
+# --- N1: ReplicaSet victim choice during dehydrate ---------------------------------
+
+def test_deletion_cost_patches():
+    pods = [bf("a"), L.PodFacts("b", L.ROLE_BACKFILL, service="sandbox",
+                                deletion_cost=L.DRAIN_DELETION_COST),
+            bf("c", terminating=True), vllm()]
+    assert L.deletion_cost_patches(False, pods) == {"a": L.DRAIN_DELETION_COST}
+    assert L.deletion_cost_patches(True, pods) == {"b": None}
+
+
+def test_backfill_scale_down_holds():
+    marked = L.PodFacts("m", L.ROLE_BACKFILL, service="toolcall", ready=True,
+                        deletion_cost=L.DRAIN_DELETION_COST)
+    unmarked = bf("u", "sandbox")
+    gone = bf("g", "analytics", L.CLASS_MEMORY_HEAVY, terminating=True)
+    assert L.backfill_scale_down_holds([marked, unmarked, gone], set()) == {"sandbox"}
+    assert L.backfill_scale_down_holds([marked], {"m"}) == {"toolcall"}  # deleting this tick
+    assert L.backfill_scale_down_holds([marked], set()) == set()  # marked: RS removes it first
+
+
+def test_hold_backfill():
+    p = L.hold_backfill(L.ScalePlan(2, 4, ("overflow", "backfill")), 4, 2)
+    assert (p.backfill, p.overflow, p.order) == (4, 4, ("overflow", "backfill"))
+    p = L.ScalePlan(5, 0, ("overflow", "backfill"))
+    assert L.hold_backfill(p, 4, 0) is p

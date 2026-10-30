@@ -50,6 +50,14 @@ N4D overflow, and guards vLLM TTFT by blocking and evicting backfill on nodes wh
      service's demand, or (b) the node has been ineligible for `dehydrate_grace_s` (60 s), or (c) the
      node is cordoned or carries the CA deletion taint. GPU scale-in is therefore make-before-break,
      and a vLLM `Recreate` rollout that brings vLLM back within the grace deletes nothing.
+   - Backfill pods on an ineligible node are annotated
+     `controller.kubernetes.io/pod-deletion-cost=-1000` (removed again if the node becomes eligible),
+     so when `<svc>-backfill` shrinks the ReplicaSet removes them before ready pods on healthy nodes.
+   - `<svc>-backfill` is never scaled down in a tick that deletes that service's drained pods, nor
+     while a drained pod is not yet observed with the -1000 cost. The next tick shrinks it, when the
+     ReplicaSet removes the unscheduled replacements (or the -1000 pods) first. Without the pods
+     `patch` permission the annotation never lands and scale-down waits until the drained pods are
+     deleted (at most `dehydrate_grace_s`): slower, still safe.
    - The ineligible timer is in memory; a controller restart restarts the grace (the safe direction).
 6. **Allocation** over eligible nodes. Spare = allocatable - requests of every non-backfill pod on
    the node (CPU and memory; effective request = max(sum containers, max init) + overhead) -
@@ -62,8 +70,9 @@ N4D overflow, and guards vLLM TTFT by blocking and evicting backfill on nodes wh
    (pods deleted externally are not recreated just to sit Pending). Patch order: overflow first when
    the total grows, backfill first otherwise. Unchanged replicas are never patched. Missing
    Deployments are logged and skipped. `colo-system/colo-buffer` replicas = `buffer_replicas`.
-8. **Writes** run in parallel within each phase, phases in order: node labels + Events, guard
-   evictions, Deployment scales (ordered within a service), dehydrate deletes. Concurrency is capped
+8. **Writes** run in parallel within each phase, phases in order: node labels + Events + pod
+   deletion-cost annotations, guard evictions, dehydrate deletes, Deployment scales (ordered within a
+   service). Concurrency is capped
    at `K8S_WRITE_CONCURRENCY`. A failed write is logged, counted in `colo_write_errors`, and retried
    next tick.
 
@@ -78,7 +87,7 @@ Defaults (`DEFAULT_CONFIG` in `colo_logic.py`); any key may be left out:
  "dehydrate_grace_s": 60,
  "ttft_source": {"type": "loadgen",
                  "prometheus": {"project": "", "location": "global", "query_window_s": 60,
-                                "metric": "vllm:time_to_first_token_seconds"}},
+                                "metric": "vllm:time_to_first_token_seconds", "cluster": null}},
  "max_total_cpu": null}
 ```
 | Key | Meaning |
@@ -90,6 +99,7 @@ Defaults (`DEFAULT_CONFIG` in `colo_logic.py`); any key may be left out:
 | `dehydrate_grace_s` | max seconds backfill stays on an ineligible node waiting for overflow |
 | `ttft_source.type` | `loadgen` (demo), `prometheus` (production), `none` (guard always no_signal) |
 | `ttft_source.prometheus.project` | required for `prometheus`: project of the Managed Prometheus data |
+| `ttft_source.prometheus.cluster` | optional: adds `cluster="<name>"` to the selector (GMP sets `cluster` to the GKE cluster name); set it when several clusters in the project run vLLM in the same namespace |
 | `ttft_source.prometheus.query_window_s` | `rate()` window, >= 10; keep >= 4 x the PodMonitoring interval |
 | `max_total_cpu` | optional: reject demand whose total request (pods x 2 CPU) exceeds it; set to the `colo-svc` ResourceQuota `requests.cpu` minus make-before-break headroom |
 
@@ -102,9 +112,11 @@ Defaults (`DEFAULT_CONFIG` in `colo_logic.py`); any key may be left out:
   `https://monitoring.googleapis.com/v1/projects/<project>/location/<location>/prometheus/api/v1/query`
   with an OAuth token from Application Default Credentials (Workload Identity):
   `sum by (pod, le)(rate(vllm:time_to_first_token_seconds_bucket{namespace="inference"}[60s]))`.
-  Pods are mapped to nodes from the current pod list; buckets of pods on one node are summed and the
-  PromQL `histogram_quantile(0.99, ...)` algorithm (linear interpolation in the bucket) is applied per
-  node and cluster-wide. Requests in window = rate(+Inf) x `query_window_s`. Requires a
+  With `cluster` set the selector also has `cluster="<name>"`. Pods are mapped to nodes from this
+  cluster's current vLLM pod list; series of any other pod (another cluster in the project, a pod
+  already gone) are dropped from the per-node and the cluster p99, and so from `POST /baseline`.
+  Buckets of pods on one node are summed and the PromQL `histogram_quantile(0.99, ...)` algorithm
+  (linear interpolation in the bucket) is applied per node and cluster-wide. Requests in window = rate(+Inf) x `query_window_s`. Requires a
   PodMonitoring that scrapes vLLM `:8000/metrics` with the `pod` target label.
   vLLM's default TTFT buckets are coarse around typical small-model baselines (`le` 0.01, 0.02,
   0.04, 0.06, 0.08, 0.1, 0.25 s), so p99 is an interpolated estimate; take the baseline with the
@@ -160,7 +172,8 @@ ClusterRole (bound to the controller ServiceAccount):
 | `""` | pods | get, list, watch | requests per node, vLLM/loadgen presence and IPs (all namespaces incl. `inference`) |
 | `""` | events | create | Node events (namespace `default`) |
 
-Role in `colo-svc`: `apps` deployments get; `apps` deployments/scale get, patch; `""` pods delete.
+Role in `colo-svc`: `apps` deployments get; `apps` deployments/scale get, patch; `""` pods delete,
+patch (patch: the drain `pod-deletion-cost` annotation).
 Role in `colo-system`: `apps` deployments get; `apps` deployments/scale get, patch;
 `""` configmaps get, create, update.
 (Events can instead be a Role in `default` with `create` on events.)
@@ -185,9 +198,8 @@ there; the guard stops; demand changes and the overflow/backfill split freeze. A
   one node, integer pods can land on the node the plan reserved for analytics, leaving some analytics
   backfill Pending. Pending backfill never triggers scale-up (priority -100) and the hold logic keeps
   overflow until backfill is ready, so capacity is not lost, but demand on G4 can be under-filled.
-- When the backfill Deployment shrinks, the ReplicaSet chooses which pods to delete; it may pick a
-  pod on an eligible node while the draining node's pods are deleted by dehydrate, causing a brief
-  re-creation on an eligible node.
+- Outside dehydrate (e.g. demand drops), the ReplicaSet still chooses which backfill pods to remove,
+  so per-node `planned_backfill` is advisory.
 - A held decrease waits for the other tier's ready pods with no timeout; if N4D cannot scale, the
   held backfill pods stay (harmless, visible in `/state`). Dehydrate itself is bounded by
   `dehydrate_grace_s`.

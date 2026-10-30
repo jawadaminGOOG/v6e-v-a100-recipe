@@ -5,7 +5,7 @@ Two sources, chosen by `ttft_source.type` in colo-config:
 * `loadgen`: GET http://<loadgen-pod-ip>:<port>/stats?window_s=N on every Ready
   loadgen pod (demo only; the payload already names each vLLM pod's node).
 * `prometheus`: one instant query against Google Managed Prometheus
-      sum by (pod, le)(rate(<metric>_bucket{namespace="<ns>"}[<w>s]))
+      sum by (pod, le)(rate(<metric>_bucket{namespace="<ns>"[,cluster="<c>"]}[<w>s]))
   authenticated with Application Default Credentials (Workload Identity on GKE).
   colo_logic.summarize_prom_ttft maps pods to nodes and applies the
   histogram_quantile(0.99, ...) algorithm per node and cluster-wide.
@@ -56,9 +56,11 @@ def prom_query_url(project: str, location: str = "global", endpoint: str = GMP_E
     return f"{endpoint}/v1/projects/{project}/location/{location}/prometheus/api/v1/query"
 
 
-def prom_ttft_query(metric: str, namespace: str, window_s: float) -> str:
-    return (f'sum by (pod, le)(rate({metric}_bucket{{namespace="{namespace}"}}'
-            f'[{int(window_s)}s]))')
+def prom_ttft_query(metric: str, namespace: str, window_s: float,
+                    cluster: str | None = None) -> str:
+    sel = f'namespace="{namespace}"' + (f',cluster="{cluster}"' if cluster else "")
+    return f'sum by (pod, le)(rate({metric}_bucket{{{sel}}}[{int(window_s)}s]))'
+
 
 
 class AdcToken:
@@ -160,7 +162,7 @@ async def poll_once(
             w = float(p["query_window_s"])
             url = prom_query_url(p["project"], p.get("location") or "global", prom_endpoint)
             snap.prom_samples = await fetch_prometheus(
-                prom_session, url, prom_ttft_query(p["metric"], namespace, w), token_fn)
+                prom_session, url, prom_ttft_query(p["metric"], namespace, w, p.get("cluster")), token_fn)
             snap.window_s = w
             snap.ok = True
         else:

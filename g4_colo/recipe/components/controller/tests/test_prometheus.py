@@ -60,14 +60,29 @@ def test_prom_bucket_quantile_matches_promql():
 
 
 def test_summarize_prom_maps_pods_to_nodes():
-    samples = series("vllm-a", FAST) + series("vllm-b", SLOW) + series("vllm-gone", FAST)
+    samples = series("vllm-a", FAST) + series("vllm-b", SLOW)
     v = L.summarize_prom_ttft(samples, {"vllm-a": "node-a", "vllm-b": "node-b"}, 60, 200)
     assert set(v.nodes) == {"node-a", "node-b"}
     assert v.nodes["node-a"].requests == 600 and v.nodes["node-a"].sufficient
     assert v.nodes["node-a"].p99_ms == pytest.approx(19.9, abs=0.05)
     assert v.nodes["node-b"].p99_ms == pytest.approx(59.6, abs=0.05)
-    assert v.cluster.requests == 1800  # unmapped pod still counts cluster-wide
+    assert v.cluster.requests == 1200
     assert v.window_s == 60
+
+
+def test_summarize_prom_drops_pods_not_in_this_cluster():
+    """N4: series of pods not in this cluster's pod->node map (another cluster in
+    the same project, same namespace) affect neither node nor cluster p99."""
+    other_cluster = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0]  # 100 req/s, all > 250 ms
+    mine = {"vllm-a": "node-a"}
+    alone = L.summarize_prom_ttft(series("vllm-a", FAST), mine, 60, 200)
+    mixed = L.summarize_prom_ttft(series("vllm-a", FAST) + series("vllm-x", other_cluster),
+                                  mine, 60, 200)
+    assert mixed.cluster == alone.cluster and mixed.nodes == alone.nodes
+    assert mixed.skipped == 1
+    # nothing of ours in the result -> no signal, so /baseline refuses
+    v = L.summarize_prom_ttft(series("vllm-x", other_cluster), mine, 60, 200)
+    assert v.cluster.requests == 0 and v.cluster.p99_ms is None and not v.cluster.sufficient
 
 
 def test_summarize_prom_sums_pods_on_one_node():
@@ -202,3 +217,28 @@ def test_guard_never_acts_without_signal():
     assert L.guard_signal(summ, ok, cfg) == L.GUARD_SIGNAL_NONE
     g, acts = L.guard_step(L.NodeGuard(), None, 0, 101, cfg, has_memory_heavy=True)
     assert g.state is L.GuardState.HEALTHY and acts == []
+
+
+def test_prom_query_cluster_matcher():
+    assert TS.prom_ttft_query("m", "inference", 60) == \
+        'sum by (pod, le)(rate(m_bucket{namespace="inference"}[60s]))'
+    assert TS.prom_ttft_query("m", "inference", 60, "g4-prod") == \
+        'sum by (pod, le)(rate(m_bucket{namespace="inference",cluster="g4-prod"}[60s]))'
+
+
+def test_poll_prometheus_sends_cluster_matcher():
+    cfg = L.validate_config({"ttft_source": {"type": "prometheus", "prometheus": {
+        "project": "proj-x", "cluster": "g4cluster-a"}}})
+    seen = {}
+
+    async def handler(req):
+        seen["query"] = (await req.post())["query"]
+        return web.json_response(vector([]))
+
+    async def run(session, ep):
+        return await TS.poll_once(cfg, loadgen_session=None, prom_session=session,
+                                  loadgen_ips=[], loadgen_port=8080, namespace="inference",
+                                  token_fn=_token, prom_endpoint=ep)
+
+    snap = asyncio.run(_with_fake(handler, run))
+    assert snap.ok and 'cluster="g4cluster-a"' in seen["query"]
