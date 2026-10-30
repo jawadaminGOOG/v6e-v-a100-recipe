@@ -1,3 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
 kubernetes>=29.0.0
+google-auth>=2.20.0
+requests>=2.31.0

@@ -33,23 +33,79 @@ class LiveBackend:
     def __init__(self, context: str | None = None):
         from kubernetes import client, config
 
+        self._adc_creds = None
+        self._adc_cfg = None
         try:
             config.load_kube_config(context=context)
-        except Exception:  # noqa: BLE001 - fall back when running in a pod
-            config.load_incluster_config()
+            self.incluster = False
+        except Exception:  # noqa: BLE001 - fall back when running in a pod or Cloud Run
+            try:
+                config.load_incluster_config()
+                self.incluster = True
+            except Exception:  # noqa: BLE001 - Cloud Run / Google ADC mode
+                self.incluster = False
+                self._init_gke_adc(client)
         self.client = client
         self.core = client.CoreV1Api()
         self.apps = client.AppsV1Api()
         self.autoscaling = client.AutoscalingV2Api()
+        self._pod_ips: dict[tuple[str, str], str] = {}
+
+    def _init_gke_adc(self, client: Any) -> None:
+        import base64
+        import os
+        import google.auth
+
+        endpoint = os.environ.get("GKE_ENDPOINT", "").strip()
+        ca_b64 = os.environ.get("GKE_CA_CERT", "").strip()
+        if not endpoint or not ca_b64:
+            raise RuntimeError("No kubeconfig, in-cluster config, or GKE_ENDPOINT/GKE_CA_CERT found")
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        ca_path = "/tmp/gke-cluster-ca.crt"
+        with open(ca_path, "wb") as f:
+            f.write(base64.b64decode(ca_b64))
+        cfg = client.Configuration()
+        cfg.host = endpoint if endpoint.startswith("https://") else f"https://{endpoint}"
+        cfg.ssl_ca_cert = ca_path
+        self._adc_creds = creds
+        self._adc_cfg = cfg
+        self._ensure_adc()
+        client.Configuration.set_default(cfg)
+
+    def _ensure_adc(self) -> None:
+        if self._adc_creds is None or self._adc_cfg is None:
+            return
+        import google.auth.transport.requests
+
+        if not self._adc_creds.valid or not self._adc_creds.token:
+            self._adc_creds.refresh(google.auth.transport.requests.Request())
+            self._adc_cfg.api_key = {"authorization": self._adc_creds.token}
+            self._adc_cfg.api_key_prefix = {"authorization": "Bearer"}
 
     # ------------------------------------------------------------ pod proxy
-    def _proxy_sync(self, ns: str, pod: str, port: int, path: str, method: str = "GET", body: Any = None) -> Any:
-        """HTTP request to <pod>:<port>/<path> via the API server pod proxy.
+    def _direct_http_sync(self, ip: str, port: int, path: str, method: str = "GET", body: Any = None) -> Any:
+        import urllib.request
 
-        Uses api_client.call_api with a pre-built resource path so the proxied
-        path is not URL-encoded and a JSON body can be sent (the generated
-        connect_post_* helpers take no body).
-        """
+        url = f"http://{ip}:{port}/{path.lstrip('/')}"
+        headers = {"Accept": "application/json"}
+        data_bytes = None
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            data_bytes = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(url, data=data_bytes, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=PROXY_TIMEOUT_S) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else None
+
+    def _proxy_sync(self, ns: str, pod: str, port: int, path: str, method: str = "GET", body: Any = None) -> Any:
+        """HTTP request to <pod>:<port>/<path> (direct Pod IP when in-cluster, else API server pod proxy)."""
+        if self.incluster:
+            ip = self._pod_ips.get((ns, pod))
+            if ip:
+                try:
+                    return self._direct_http_sync(ip, port, path, method, body)
+                except Exception:  # noqa: BLE001 - fall back to apiserver proxy if pod IP changed
+                    pass
         resource = f"/api/v1/namespaces/{ns}/pods/{pod}:{port}/proxy/{path.lstrip('/')}"
         headers = {"Accept": "application/json"}
         if body is not None:
@@ -86,12 +142,15 @@ class LiveBackend:
         return await asyncio.to_thread(self._proxy_sync, ns, pod, port, path, method, body)
 
     def _ready_pods(self, ns: str, selector: str) -> list[Any]:
+        self._ensure_adc()
         out = []
         for p in self.core.list_namespaced_pod(ns, label_selector=selector).items:
             if p.status.phase != "Running":
                 continue
             conds = {c.type: c.status for c in (p.status.conditions or [])}
             if conds.get("Ready") == "True":
+                if p.status.pod_ip:
+                    self._pod_ips[(p.metadata.namespace, p.metadata.name)] = p.status.pod_ip
                 out.append(p)
         return out
 
@@ -114,6 +173,8 @@ class LiveBackend:
     def _pods(self) -> list[dict]:
         out = []
         for p in self.core.list_pod_for_all_namespaces().items:
+            if p.status and p.status.pod_ip:
+                self._pod_ips[(p.metadata.namespace, p.metadata.name)] = p.status.pod_ip
             cpu = 0.0
             mem = 0.0
             for c in p.spec.containers or []:
@@ -215,6 +276,7 @@ class LiveBackend:
         return out
 
     async def raw(self) -> dict:
+        await asyncio.to_thread(self._ensure_adc)
         errors: list[str] = []
         t = asyncio.to_thread
         base = await self._gather_named(

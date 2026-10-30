@@ -1,0 +1,94 @@
+# In-cluster deployment of the G4 Colo at Scale live dashboard.
+# Pinned strictly to the dedicated `loadgen` node pool (colo.role=loadgen) so it has
+# zero CPU, memory, or network impact on G4 GPU nodes or N4D CPU overflow nodes.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: colo-demo
+  namespace: colo-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: colo-demo
+rules:
+- apiGroups: [""]
+  resources: [nodes, pods, events, configmaps]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods/proxy]
+  verbs: [get, create, update, patch, delete]
+- apiGroups: [events.k8s.io]
+  resources: [events]
+  verbs: [get, list, watch]
+- apiGroups: [apps]
+  resources: [deployments, deployments/scale]
+  verbs: [get, list, watch, patch, update]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [get, list, watch, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: colo-demo
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: 9452062936-compute@developer.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: colo-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: colo-demo
+  namespace: colo-system
+  labels: {app: colo-demo}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: colo-demo}
+  template:
+    metadata:
+      labels: {app: colo-demo}
+    spec:
+      serviceAccountName: colo-demo
+      # Strictly isolated to the control/loadgen node pool; never schedules on G4 or N4D nodes.
+      nodeSelector:
+        colo.role: loadgen
+      containers:
+      - name: demo
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-demo:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8088
+        resources:
+          requests: {cpu: 200m, memory: 256Mi}
+          limits: {cpu: 500m, memory: 512Mi}
+        readinessProbe:
+          httpGet: {path: /api/scenario/status, port: 8088}
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: colo-demo
+  namespace: colo-system
+  labels: {app: colo-demo}
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  selector:
+    app: colo-demo
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8088
