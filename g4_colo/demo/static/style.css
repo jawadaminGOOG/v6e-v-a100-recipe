@@ -394,11 +394,13 @@ details.more { padding-top: 0.55rem; font-size: 0.82rem; }
 .banner { padding: 0.35rem 0.8rem; gap: 0.3rem; }
 .nodes {
   container-type: size; min-height: 0; overflow: hidden;
+  /* padding keeps the 2px breach outline and the top L3 header inside the clip box */
+  padding: 4px 4px 2px;
   display: flex; flex-direction: column; gap: 6px;
   --g4n: 2; --ghost: 0; --n4dn: 1;
-  /* height available to one G4 tile row: what is left after the N4D line, the ghost row,
-     and each G4 row's L3 header, padding and borders (26 px) plus gaps, split over 2 rows per node */
-  --th-budget: calc((100cqh - var(--n4dn) * 78px - var(--ghost) * 30px - var(--g4n) * 32px) / (2 * var(--g4n)));
+  /* height available to one G4 tile row: what is left after the container padding, the N4D line, the ghost
+     row, and each G4 row's L3 header, padding, borders, outline and gap (40 px), split over 2 rows per node */
+  --th-budget: calc((100cqh - 8px - var(--n4dn) * 78px - var(--ghost) * 30px - var(--g4n) * 40px) / (2 * var(--g4n)));
 }
 .nname { gap: 0.2rem; }
 .nname b { font-size: 0.9rem; }
