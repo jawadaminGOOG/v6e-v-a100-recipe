@@ -1,2 +1,5 @@
 kubernetes>=30,<36
 aiohttp>=3.9,<4
+# ttft_source.type=prometheus: ADC / Workload Identity token for Managed Prometheus
+google-auth>=2.20,<3
+requests>=2.31,<3

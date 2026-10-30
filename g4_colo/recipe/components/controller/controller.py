@@ -1,15 +1,22 @@
 """colo-controller: backfills spare G4 CPU with CPU services and guards GPU TTFT.
 
-Loop (every LOOP_S seconds):
+Loop (every LOOP_S seconds, or at once after POST /config or /baseline):
   1. read ConfigMap colo-system/colo-config (create with defaults if missing)
-  2. list nodes and pods; poll every Ready loadgen pod's /stats
-  3. guard: per G4 node TTFT p99 vs factor x baseline -> block labels, evictions, Events
-  4. allocate backfill per service from spare slots (respecting block labels);
-     overflow = demand - backfill; patch Deployment scales safely
-  5. patch colo-buffer replicas
-HTTP on :8080: GET /state, POST /config, POST /baseline, GET /metrics, GET /healthz.
+  2. read nodes, pods and the backfill/overflow/buffer Deployments in parallel;
+     take the last TTFT snapshot (polled by a background task, see ttft_source.py)
+  3. guard, per G4 node with a vLLM pod: TTFT p99 vs factor x baseline -> block
+     labels, evictions, Events; no signal -> no action; no vLLM -> guard reset
+  4. per node (colo_logic.plan_node): colo.active on eligible nodes; on ineligible
+     nodes remove colo.active at once and delete backfill only when overflow is
+     ready, after dehydrate_grace_s, or when the node is cordoned / CA-tainted
+  5. allocate backfill per service over eligible nodes; overflow = demand -
+     backfill; patch Deployment scales without dropping ready capacity
+  6. patch colo-buffer replicas
+Writes run in parallel per phase (labels+events, evictions, scales, dehydrate).
+HTTP on :8080: GET /state, GET/POST /config, POST /baseline, GET /metrics,
+GET /healthz (liveness), GET /readyz.
 
-All decisions live in colo_logic.py; this file only does I/O.
+All decisions live in colo_logic.py; this file and ttft_source.py only do I/O.
 """
 
 from __future__ import annotations
@@ -31,6 +38,7 @@ from kubernetes import config as kconfig
 from kubernetes.client.rest import ApiException
 
 import colo_logic as L
+import ttft_source as TS
 
 NS_SVC = os.environ.get("COLO_SVC_NAMESPACE", "colo-svc")
 NS_SYS = os.environ.get("COLO_SYSTEM_NAMESPACE", "colo-system")
@@ -43,6 +51,14 @@ LOOP_S = float(os.environ.get("LOOP_S", "2"))
 PORT = int(os.environ.get("PORT", "8080"))
 LOADGEN_PORT = int(os.environ.get("LOADGEN_PORT", "8080"))
 LOADGEN_TIMEOUT_S = float(os.environ.get("LOADGEN_TIMEOUT_S", "2"))
+PROM_TIMEOUT_S = float(os.environ.get("PROM_TIMEOUT_S", "10"))
+PROM_ENDPOINT = os.environ.get("PROM_ENDPOINT", TS.GMP_ENDPOINT)
+# TTFT snapshot older than this is treated as no signal.
+TTFT_STALE_S = float(os.environ.get("TTFT_STALE_S", str(max(15.0, 5 * LOOP_S))))
+# /healthz fails when the loop has not finished an iteration for this long.
+LIVENESS_STALE_S = float(os.environ.get("LIVENESS_STALE_S", str(5 * LOOP_S)))
+STARTUP_GRACE_S = float(os.environ.get("STARTUP_GRACE_S", "60"))
+K8S_WRITE_CONCURRENCY = int(os.environ.get("K8S_WRITE_CONCURRENCY", "16"))
 COMPONENT = "colo-controller"
 INSTANCE = os.environ.get("POD_NAME", socket.gethostname())
 
@@ -69,8 +85,39 @@ def _pod_req(pod) -> tuple[int, int]:
     return L.pod_requests(cs, ics, spec.overhead or None)
 
 
-def _is_backfill(pod) -> bool:
-    return pod.metadata.namespace == NS_SVC and _labels(pod).get("colo.tier") == "backfill"
+def _pod_facts(pod) -> L.PodFacts:
+    lb = _labels(pod)
+    ns = pod.metadata.namespace
+    if ns == NS_INF and lb.get("app") == "vllm":
+        role = L.ROLE_VLLM
+    elif ns == NS_SVC and lb.get("colo.tier") == "backfill":
+        role = L.ROLE_BACKFILL
+    else:
+        role = L.ROLE_OTHER
+    cpu, mem = _pod_req(pod)
+    return L.PodFacts(
+        name=pod.metadata.name,
+        role=role,
+        service=lb.get("app") if role == L.ROLE_BACKFILL else None,
+        cls=lb.get("colo.class"),
+        terminating=bool(pod.metadata.deletion_timestamp),
+        ready=bool(pod.status) and _ready(pod.status.conditions),
+        cpu_m=cpu,
+        mem=mem,
+    )
+
+
+def _node_facts(node) -> L.NodeFacts:
+    alloc = (node.status.allocatable if node.status else None) or {}
+    return L.NodeFacts(
+        name=node.metadata.name,
+        labels=_labels(node),
+        ready=bool(node.status) and _ready(node.status.conditions),
+        unschedulable=bool(node.spec and node.spec.unschedulable),
+        taint_keys=frozenset(t.key for t in ((node.spec.taints if node.spec else None) or [])),
+        alloc_cpu_m=L.parse_cpu(alloc.get("cpu")),
+        alloc_mem=L.parse_mem(alloc.get("memory")),
+    )
 
 
 def _now_iso() -> str:
@@ -83,13 +130,18 @@ def _now_iso() -> str:
 
 
 class Controller:
-    def __init__(self) -> None:
-        try:
-            kconfig.load_incluster_config()
-        except kconfig.ConfigException:
-            kconfig.load_kube_config()
-        self.core = client.CoreV1Api()
-        self.apps = client.AppsV1Api()
+    def __init__(self, core: Any = None, apps: Any = None, token_fn: Any = None) -> None:
+        if core is None or apps is None:
+            try:
+                kconfig.load_incluster_config()
+            except kconfig.ConfigException:
+                kconfig.load_kube_config()
+            kc = client.Configuration.get_default_copy()
+            kc.connection_pool_maxsize = max(kc.connection_pool_maxsize or 4,
+                                             K8S_WRITE_CONCURRENCY + 4)
+            client.Configuration.set_default(kc)
+        self.core = core if core is not None else client.CoreV1Api()
+        self.apps = apps if apps is not None else client.AppsV1Api()
         self.config: dict[str, Any] = L.validate_config({})
         self.guards: dict[str, L.NodeGuard] = {}
         self.actions: collections.deque[dict[str, Any]] = collections.deque(maxlen=100)
@@ -102,7 +154,19 @@ class Controller:
         self.tick_errors = 0
         self.wake = asyncio.Event()
         self.cfg_lock = asyncio.Lock()
-        self.http: aiohttp.ClientSession | None = None
+        self.http: aiohttp.ClientSession | None = None  # loadgen
+        self.prom_http: aiohttp.ClientSession | None = None
+        self.token_fn = token_fn or TS.AdcToken()
+        self.io_sem = asyncio.Semaphore(K8S_WRITE_CONCURRENCY)
+        self.tracks: dict[str, L.NodeTrack] = {}
+        self.loadgen_ips: list[str] = []
+        self.ttft_snap: TS.TTFTSnapshot | None = None
+        self.ttft_source_ok = False
+        self.ttft_source_why: str | None = "not polled yet"
+        self.guard_sufficient = False
+        self.write_errors = 0
+        self.started_at = time.time()
+        self.last_loop: float = 0.0
 
     # -- bookkeeping -------------------------------------------------------
 
@@ -168,28 +232,6 @@ class Controller:
         self.wake.set()
         return new
 
-    # -- loadgen -----------------------------------------------------------
-
-    async def _fetch_stats(self, ip: str, window_s: float) -> dict[str, Any] | None:
-        url = f"http://{ip}:{LOADGEN_PORT}/stats"
-        try:
-            assert self.http is not None
-            async with self.http.get(url, params={"window_s": str(int(window_s))}) as r:
-                if r.status != 200:
-                    log.warning("loadgen %s: HTTP %s", ip, r.status)
-                    return None
-                return await r.json(content_type=None)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
-            log.warning("loadgen %s: %s", ip, e)
-            return None
-
-    async def poll_loadgen(self, pods, window_s: float) -> list[dict[str, Any]]:
-        ips = [p.status.pod_ip for p in pods
-               if p.metadata.namespace == NS_INF and _labels(p).get("app") == "loadgen"
-               and p.status and p.status.pod_ip and _ready(p.status.conditions)]
-        res = await asyncio.gather(*(self._fetch_stats(ip, window_s) for ip in ips))
-        return [r for r in res if isinstance(r, dict)]
-
     # -- k8s writes (sync; run via to_thread) --------------------------------
 
     def _patch_node_labels(self, node: str, labels: dict[str, str | None]) -> None:
@@ -240,6 +282,64 @@ class Controller:
     def _scale(self, ns: str, name: str, replicas: int) -> None:
         self.apps.patch_namespaced_deployment_scale(name, ns, {"spec": {"replicas": replicas}})
 
+    # -- TTFT source (background) ---------------------------------------------
+
+    async def poll_ttft(self) -> None:
+        """Refresh self.ttft_snap every LOOP_S, off the reconcile critical path."""
+        while True:
+            try:
+                self.ttft_snap = await TS.poll_once(
+                    self.config,
+                    loadgen_session=self.http, prom_session=self.prom_http,
+                    loadgen_ips=list(self.loadgen_ips), loadgen_port=LOADGEN_PORT,
+                    namespace=NS_INF, token_fn=self.token_fn, prom_endpoint=PROM_ENDPOINT)
+            except Exception:  # poll_once does not raise; belt and braces
+                log.exception("ttft poll failed")
+            await asyncio.sleep(LOOP_S)
+
+    # -- bounded parallel writes -------------------------------------------
+
+    async def _io(self, fn, *args, **kwargs):
+        async with self.io_sem:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+
+    async def _gather_writes(self, what: str, coros: list) -> None:
+        if not coros:
+            return
+        res = await asyncio.gather(*coros, return_exceptions=True)
+        errs = [r for r in res if isinstance(r, BaseException)]
+        for e in errs:
+            log.error("%s failed: %s: %s", what, type(e).__name__, e)
+        if errs:
+            self.write_errors += len(errs)
+            self.last_error = f"{what}: {len(errs)} failed, e.g. {type(errs[0]).__name__}: {errs[0]}"
+
+    async def _patch_labels_rec(self, node: str, patch: dict[str, str | None], why: str) -> None:
+        await self._io(self._patch_node_labels, node, patch)
+        self.record("labels", node, f"{json.dumps(patch, sort_keys=True)} ({why})")
+
+    async def _delete_rec(self, node: str, pod: str, kind: str, why: str) -> None:
+        if await self._io(self._delete_pod, NS_SVC, pod):
+            self.record(kind, node, f"deleted {NS_SVC}/{pod} ({why})")
+
+    async def _event(self, node: str, uid: str | None, a: L.GuardAction) -> None:
+        await self._io(self._node_event, node, uid, a.reason, a.message,
+                       "Evict" if a.kind == "block" else "Release")
+
+    async def _scale_service(self, svc: str, bf: tuple[int, int], ov: tuple[int, int],
+                             plan: L.ScalePlan) -> None:
+        new = {"backfill": (f"{svc}-backfill", bf[0], plan.backfill),
+               "overflow": (f"{svc}-overflow", ov[0], plan.overflow)}
+        for tier in plan.order:  # order matters within a service
+            dname, old, val = new[tier]
+            if val != old:
+                await self._io(self._scale, NS_SVC, dname, val)
+                self.record("scale", f"{NS_SVC}/{dname}", f"{old} -> {val}")
+
+    async def _scale_buffer(self, old: int, want: int) -> None:
+        await self._io(self._scale, NS_SYS, BUFFER_DEPLOYMENT, want)
+        self.record("scale", f"{NS_SYS}/{BUFFER_DEPLOYMENT}", f"{old} -> {want}")
+
     # -- one reconcile pass --------------------------------------------------
 
     async def tick(self) -> None:
@@ -247,209 +347,246 @@ class Controller:
             cfg = await asyncio.to_thread(self._read_config)
             self.config = cfg
         gcfg = L.GuardConfig.from_config(cfg)
+        demand = cfg["demand"]
+        grace = float(cfg["dehydrate_grace_s"])
+        reserve_m = L.parse_cpu(cfg.get("reserve_cpu_per_node", 0))
+
+        # -- reads, all in parallel -------------------------------------------
+        deploy_names = [(NS_SVC, f"{s}-{t}") for s in L.SERVICE_ORDER for t in ("backfill", "overflow")]
+        res = await asyncio.gather(
+            self._io(self.core.list_node),
+            self._io(self.core.list_pod_for_all_namespaces,
+                     field_selector="status.phase!=Succeeded,status.phase!=Failed"),
+            self._io(self._read_deploy, NS_SYS, BUFFER_DEPLOYMENT),
+            *(self._io(self._read_deploy, ns, nm) for ns, nm in deploy_names),
+        )
+        nodes, pods, buf = res[0].items, res[1].items, res[2]
+        deploys = dict(zip((nm for _, nm in deploy_names), res[3:]))
         now = time.time()
 
-        nodes_resp, pods_resp = await asyncio.gather(
-            asyncio.to_thread(self.core.list_node),
-            asyncio.to_thread(self.core.list_pod_for_all_namespaces,
-                              field_selector="status.phase!=Succeeded,status.phase!=Failed"),
-        )
-        nodes = nodes_resp.items
-        pods = pods_resp.items
-        stats = await self.poll_loadgen(pods, cfg["guard"]["window_s"])
-        ttft = L.summarize_ttft(stats, gcfg.min_requests)
-        self.ttft = ttft
-        if ttft.window_s is not None and ttft.window_s != cfg["guard"]["window_s"]:
-            log.debug("loadgen window %ss differs from guard.window_s %ss",
-                      ttft.window_s, cfg["guard"]["window_s"])
+        self.loadgen_ips = [p.status.pod_ip for p in pods
+                            if p.metadata.namespace == NS_INF and _labels(p).get("app") == "loadgen"
+                            and p.status and p.status.pod_ip and _ready(p.status.conditions)]
+        vllm_pod_node = {p.metadata.name: p.spec.node_name for p in pods
+                         if p.metadata.namespace == NS_INF and _labels(p).get("app") == "vllm"
+                         and p.spec.node_name}
 
-        g4 = [n for n in nodes if _labels(n).get("colo.role") == "g4"]
-        pods_by_node: dict[str, list] = collections.defaultdict(list)
+        ttft, source_ok, source_why = TS.snapshot_view(
+            self.ttft_snap, cfg, vllm_pod_node, gcfg.min_requests, now, TTFT_STALE_S)
+        self.ttft, self.ttft_source_ok, self.ttft_source_why = ttft, source_ok, source_why
+
+        g4 = sorted((n for n in nodes if _labels(n).get("colo.role") == "g4"),
+                    key=lambda n: n.metadata.name)
+        facts: dict[str, list[L.PodFacts]] = collections.defaultdict(list)
         for p in pods:
             if p.spec.node_name:
-                pods_by_node[p.spec.node_name].append(p)
+                facts[p.spec.node_name].append(_pod_facts(p))
+        nfacts = {n.metadata.name: _node_facts(n) for n in g4}
+        uids = {n.metadata.name: n.metadata.uid for n in g4}
 
-        # 3. guard (before allocation so slots reflect this tick's blocks)
-        for n in g4:
-            name = n.metadata.name
-            labels = _labels(n)
-            g = self.guards.get(name) or L.guard_from_labels(labels, now)
-            summ = ttft.nodes.get(name)
+        # -- guard, only on nodes with a vLLM pod ------------------------------
+        label_patches: dict[str, dict[str, str | None]] = collections.defaultdict(dict)
+        event_coros: list = []
+        evict_coros: list = []
+        signals: dict[str, str] = {}
+        elig = {nm: L.node_eligibility(nf, facts[nm]) for nm, nf in nfacts.items()}
+        for nm, nf in nfacts.items():
+            if not elig[nm].has_vllm:
+                # 4.4: no vLLM -> guard reset (labels cleared via plan_node), not evaluated
+                g = self.guards.get(nm)
+                if g is None or g.state is not L.GuardState.HEALTHY:
+                    self.guards[nm] = L.NodeGuard(changed_at=now)
+                signals[nm] = "idle"
+                continue
+            g = self.guards.get(nm) or L.guard_from_labels(nf.labels, now)
+            summ = ttft.nodes.get(nm) if source_ok else None
+            signals[nm] = L.guard_signal(summ, source_ok, gcfg)
             p99 = summ.p99_ms if summ else None
             reqs = summ.requests if summ else 0
-            has_mem_bf = any(
-                _is_backfill(p) and _labels(p).get("colo.class") == L.CLASS_MEMORY_HEAVY
-                for p in pods_by_node.get(name, [])
-            )
+            has_mem_bf = any(p.role == L.ROLE_BACKFILL and p.cls == L.CLASS_MEMORY_HEAVY
+                             and not p.terminating for p in facts[nm])
             g, acts = L.guard_step(g, p99, reqs, now, gcfg, has_memory_heavy=has_mem_bf)
-            self.guards[name] = g
+            self.guards[nm] = g
             for a in acts:
-                self.record(a.reason, name, a.message, classes=list(a.classes))
-                await asyncio.to_thread(self._node_event, name, n.metadata.uid, a.reason,
-                                        a.message, "Evict" if a.kind == "block" else "Release")
-            # reconcile labels to guard state
-            want = g.blocks
-            patch = {}
-            for cls, lbl in L.BLOCK_LABELS.items():
-                has = labels.get(lbl) == "true"
-                if cls in want and not has:
-                    patch[lbl] = "true"
-                elif cls not in want and lbl in labels:
-                    patch[lbl] = None
-            if patch:
-                await asyncio.to_thread(self._patch_node_labels, name, patch)
-                self.record("labels", name, json.dumps(patch, sort_keys=True))
-                for lbl, v in patch.items():
-                    labels[lbl] = v  # local view
-            # evict backfill pods of blocked classes (affinity is IgnoredDuringExecution)
-            for p in pods_by_node.get(name, []):
-                if _is_backfill(p) and _labels(p).get("colo.class") in want \
-                        and not p.metadata.deletion_timestamp:
-                    if await asyncio.to_thread(self._delete_pod, NS_SVC, p.metadata.name):
-                        self.record("evict", name, f"deleted {NS_SVC}/{p.metadata.name} "
-                                    f"(class {_labels(p).get('colo.class')})")
-        for gone in set(self.guards) - {n.metadata.name for n in g4}:
+                self.record(a.reason, nm, a.message, classes=list(a.classes))
+                event_coros.append(self._event(nm, uids[nm], a))
+            label_patches[nm].update(L.guard_label_patch(nf.labels, g.blocks))
+            # blocked-class backfill is evicted every tick (affinity is IgnoredDuringExecution)
+            for p in facts[nm]:
+                if p.role == L.ROLE_BACKFILL and p.cls in g.blocks and not p.terminating:
+                    evict_coros.append(self._delete_rec(nm, p.name, "evict", f"class {p.cls} blocked"))
+        for gone in set(self.guards) - set(nfacts):
             del self.guards[gone]
 
-        # 1. eligible nodes and spare capacity
-        reserve_m = L.parse_cpu(cfg.get("reserve_cpu_per_node", 0))
+        # -- per-node plan: colo.active, make-before-break dehydrate ------------
+        ready_bf_eligible: dict[str, int] = {}
+        for nm in nfacts:
+            if elig[nm].eligible:
+                blocks = self.guards[nm].blocks
+                for s, c in L.ready_backfill_by_service(
+                        p for p in facts[nm] if p.cls not in blocks).items():
+                    ready_bf_eligible[s] = ready_bf_eligible.get(s, 0) + c
+        overflow_ready = {s: (deploys[f"{s}-overflow"] or (0, 0))[1] for s in L.SERVICE_ORDER}
+        cover = L.drain_cover(demand, overflow_ready, ready_bf_eligible)
+
         caps: list[L.NodeCapacity] = []
         node_rows: list[dict[str, Any]] = []
-        for n in g4:
-            name = n.metadata.name
-            labels = _labels(n)
-            npods = pods_by_node.get(name, [])
-            has_vllm = any(p.metadata.namespace == NS_INF and _labels(p).get("app") == "vllm"
-                           and not p.metadata.deletion_timestamp for p in npods)
-            eligible = _ready(n.status.conditions) and has_vllm \
-                and not n.spec.unschedulable
-            # Reconcile colo.active so <svc>-backfill only schedules onto G4 nodes with an active vLLM pod,
-            # and immediately dehydrate backfill pods from G4 nodes whose vLLM replica scaled in.
-            if eligible and labels.get("colo.active") != "true":
-                await asyncio.to_thread(self._patch_node_labels, name, {"colo.active": "true"})
-                self.record("active", name, "colo.active=true (vllm present)")
-                labels["colo.active"] = "true"
-            elif not eligible and "colo.active" in labels:
-                await asyncio.to_thread(self._patch_node_labels, name, {"colo.active": None})
-                self.record("dehydrate", name, "removed colo.active (no vllm replica)")
-                labels.pop("colo.active", None)
-            if not has_vllm:
-                for p in npods:
-                    if _is_backfill(p) and not p.metadata.deletion_timestamp:
-                        if await asyncio.to_thread(self._delete_pod, NS_SVC, p.metadata.name):
-                            self.record("dehydrate-pod", name, f"deleted {NS_SVC}/{p.metadata.name} (no vllm on node)")
-            used_cpu = used_mem = 0
-            for p in npods:
-                if not _is_backfill(p):
-                    c, m = _pod_req(p)
-                    used_cpu += c
-                    used_mem += m
-            alloc = n.status.allocatable or {}
-            g = self.guards.get(name, L.NodeGuard())
-            cap = L.NodeCapacity(
-                name=name,
-                alloc_cpu_m=L.parse_cpu(alloc.get("cpu")),
-                used_cpu_m=used_cpu,
-                blocks=g.blocks,
-                alloc_mem=L.parse_mem(alloc.get("memory")),
-                used_mem=used_mem,
-                reserve_cpu_m=reserve_m,
-            )
-            if eligible:
+        dehydrate_coros: list = []
+        for nm, nf in nfacts.items():
+            plan = L.plan_node(nf, facts[nm], now, self.tracks.get(nm, L.NodeTrack()), cover, grace)
+            self.tracks[nm] = plan.track
+            if L.ACTIVE_LABEL in plan.label_patch:
+                self.record("active" if plan.eligible else "dehydrate", nm,
+                            "colo.active=true (vllm present)" if plan.eligible
+                            else f"removed colo.active ({plan.reason})")
+            label_patches[nm].update(plan.label_patch)
+            for pod in plan.delete_pods:
+                dehydrate_coros.append(self._delete_rec(nm, pod, "dehydrate-pod", plan.drain_reason or ""))
+            g = self.guards.get(nm, L.NodeGuard())
+            cap = L.node_capacity(nf, facts[nm], g.blocks, reserve_m)
+            if plan.eligible:
                 caps.append(cap)
-            summ = ttft.nodes.get(name)
+            summ = ttft.nodes.get(nm)
+            sig = signals.get(nm, "idle")
             node_rows.append({
-                "name": name,
-                "eligible": eligible,
-                "spare_cpu": round(cap.spare_cpu_m / 1000, 3) if eligible else 0,
-                "slots": L.node_slots(cap) if eligible else {s: 0 for s in L.SERVICE_ORDER},
+                "name": nm,
+                "eligible": plan.eligible,
+                "ineligible_reason": None if plan.eligible else plan.reason,
+                "has_vllm": plan.has_vllm,
+                "spare_cpu": round(cap.spare_cpu_m / 1000, 3) if plan.eligible else 0,
+                "slots": L.node_slots(cap) if plan.eligible else {s: 0 for s in L.SERVICE_ORDER},
                 "blocks": sorted(g.blocks),
                 "ttft_p99_ms": summ.p99_ms if summ else None,
                 "requests_in_window": summ.requests if summ else 0,
-                "guard_state": g.state.value,
+                "guard_state": (L.GUARD_SIGNAL_NONE if sig == L.GUARD_SIGNAL_NONE
+                                and g.state is L.GuardState.HEALTHY else g.state.value),
+                "guard_signal": sig,
+                "draining_pods": len(plan.draining),
+                "ineligible_for_s": (round(now - plan.track.ineligible_since, 1)
+                                     if plan.track.ineligible_since is not None else None),
             })
+        for gone in set(self.tracks) - set(nfacts):
+            del self.tracks[gone]
 
-        # 2. allocation + safe scale
-        alloc_res = L.allocate(cfg["demand"], caps)
+        # -- allocation + safe scale plan --------------------------------------
+        alloc_res = L.allocate(demand, caps)
         for row in node_rows:
             row["planned_backfill"] = alloc_res.placement.get(row["name"], {})
         svc_rows: dict[str, dict[str, int]] = {}
+        scale_coros: list = []
         for svc in L.SERVICE_ORDER:
-            bf_name, ov_name = f"{svc}-backfill", f"{svc}-overflow"
-            bf, ov = await asyncio.gather(asyncio.to_thread(self._read_deploy, NS_SVC, bf_name),
-                                          asyncio.to_thread(self._read_deploy, NS_SVC, ov_name))
-            row = {"demand": cfg["demand"][svc],
+            bf, ov = deploys[f"{svc}-backfill"], deploys[f"{svc}-overflow"]
+            row = {"demand": demand[svc],
                    "backfill_target": alloc_res.backfill[svc],
                    "overflow_target": alloc_res.overflow[svc]}
             if bf is None or ov is None:
-                log.warning("deployment missing: %s/%s or %s; skipping", NS_SVC, bf_name, ov_name)
+                log.warning("deployment missing: %s/%s-backfill or -overflow; skipping", NS_SVC, svc)
                 row.update(backfill_desired=bf[0] if bf else 0, backfill_ready=bf[1] if bf else 0,
                            overflow_desired=ov[0] if ov else 0, overflow_ready=ov[1] if ov else 0)
                 svc_rows[svc] = row
                 continue
             plan = L.plan_scale(bf[0], ov[0], bf[1], ov[1],
                                 alloc_res.backfill[svc], alloc_res.overflow[svc])
-            new = {"backfill": (bf_name, bf[0], plan.backfill),
-                   "overflow": (ov_name, ov[0], plan.overflow)}
-            for tier in plan.order:
-                dname, old, val = new[tier]
-                if val != old:
-                    await asyncio.to_thread(self._scale, NS_SVC, dname, val)
-                    self.record("scale", f"{NS_SVC}/{dname}", f"{old} -> {val}")
+            scale_coros.append(self._scale_service(svc, bf, ov, plan))
             row.update(backfill_desired=plan.backfill, backfill_ready=bf[1],
                        overflow_desired=plan.overflow, overflow_ready=ov[1])
             svc_rows[svc] = row
-
-        # 5. warm buffer
-        buf = await asyncio.to_thread(self._read_deploy, NS_SYS, BUFFER_DEPLOYMENT)
         want_buf = int(cfg["buffer_replicas"])
         if buf is None:
             log.warning("deployment %s/%s missing", NS_SYS, BUFFER_DEPLOYMENT)
             self.buffer_state = {"desired": None, "ready": None}
         else:
             if buf[0] != want_buf:
-                await asyncio.to_thread(self._scale, NS_SYS, BUFFER_DEPLOYMENT, want_buf)
-                self.record("scale", f"{NS_SYS}/{BUFFER_DEPLOYMENT}", f"{buf[0]} -> {want_buf}")
+                scale_coros.append(self._scale_buffer(buf[0], want_buf))
             self.buffer_state = {"desired": want_buf, "ready": buf[1]}
 
+        # -- writes: labels+events, then evictions, then scale, then dehydrate --
+        # Labels first so a blocked/inactive node takes no new backfill before pods
+        # are deleted; scale before dehydrate so a lowered backfill target is in
+        # place before its pods go (fewer Pending re-creations).
+        await self._gather_writes("label/event", [
+            self._patch_labels_rec(nm, p, "reconcile") for nm, p in label_patches.items() if p
+        ] + event_coros)
+        await self._gather_writes("guard evict", evict_coros)
+        await self._gather_writes("scale", scale_coros)
+        await self._gather_writes("dehydrate", dehydrate_coros)
+
+        evaluated = [s for s in signals.values() if s != "idle"]
+        self.guard_sufficient = bool(evaluated) and all(s == L.GUARD_SIGNAL_OK for s in evaluated)
         self.services_state = svc_rows
         self.nodes_state = node_rows
         self.last_tick = time.time()
-        self.last_error = None
 
     async def run(self) -> None:
         while True:
+            errors_before = self.write_errors
             try:
                 await self.tick()
+                if self.write_errors == errors_before:
+                    self.last_error = None
             except Exception as e:  # keep looping; surface on /state and /metrics
                 self.tick_errors += 1
                 self.last_error = f"{type(e).__name__}: {e}"
                 log.exception("tick failed")
+            self.last_loop = time.time()
             self.wake.clear()
             try:
                 await asyncio.wait_for(self.wake.wait(), timeout=LOOP_S)
             except asyncio.TimeoutError:
                 pass
 
+    def live(self, now: float | None = None) -> tuple[bool, str]:
+        """Liveness: the loop must have completed an iteration (good or failed)
+        within LIVENESS_STALE_S, after STARTUP_GRACE_S from process start."""
+        now = time.time() if now is None else now
+        ref = self.last_loop or self.started_at
+        if self.last_loop == 0 and now - self.started_at <= STARTUP_GRACE_S:
+            return True, "starting"
+        if now - ref > LIVENESS_STALE_S:
+            return False, f"reconcile loop stalled: last iteration {now - ref:.0f}s ago"
+        return True, "ok"
+
     # -- views -------------------------------------------------------------
 
     def cluster_p99(self) -> float | None:
-        return self.ttft.cluster.p99_ms if self.ttft else None
+        if not self.ttft_source_ok or self.ttft is None:
+            return None
+        return self.ttft.cluster.p99_ms
+
+    def guard_overall(self) -> str:
+        if not self.config["guard"]["enabled"]:
+            return L.GUARD_SIGNAL_DISABLED
+        return L.GUARD_SIGNAL_OK if self.guard_sufficient else L.GUARD_SIGNAL_NONE
+
+    def source_state(self, now: float | None = None) -> dict[str, Any]:
+        now = time.time() if now is None else now
+        snap = self.ttft_snap
+        return {
+            "type": self.config["ttft_source"]["type"],
+            "ok": self.ttft_source_ok,
+            "reason": self.ttft_source_why,
+            "age_s": round(now - snap.fetched_at, 1) if snap and snap.fetched_at else None,
+            "window_s": self.ttft.window_s if self.ttft and self.ttft_source_ok else None,
+        }
 
     def state(self) -> dict[str, Any]:
-        t = self.ttft
+        t = self.ttft if self.ttft_source_ok else None
         return {
             "config": self.config,
             "services": self.services_state,
             "nodes": self.nodes_state,
             "buffer": self.buffer_state,
+            "guard_state": self.guard_overall(),  # ok | no_signal | disabled
+            "guard_data_sufficient": self.guard_sufficient,
+            "ttft_source": self.source_state(),
             "cluster_ttft_p99_ms": self.cluster_p99(),
             "cluster_requests_in_window": t.cluster.requests if t else 0,
             "baseline_ttft_p99_ms": self.config["guard"].get("baseline_ttft_p99_ms"),
             "threshold_ttft_p99_ms": L.GuardConfig.from_config(self.config).threshold_ms,
-            "loadgen_window_s": t.window_s if t else None,
+            "loadgen_window_s": t.window_s if t else None,  # kept for the demo UI
             "events": list(self.actions),
             "last_tick": self.last_tick,
+            "last_loop": self.last_loop,
             "last_error": self.last_error,
         }
 
@@ -478,18 +615,32 @@ class Controller:
           [({"node": r["name"]}, r["spare_cpu"]) for r in n])
         g("colo_node_eligible", "1 if node is eligible for backfill",
           [({"node": r["name"]}, 1 if r["eligible"] else 0) for r in n])
+        g("colo_node_draining_pods", "backfill pods kept on an ineligible node until overflow is ready",
+          [({"node": r["name"]}, r["draining_pods"]) for r in n])
         g("colo_node_slots", "backfill slots per service on node",
           [({"node": r["name"], "service": sv}, c) for r in n for sv, c in r["slots"].items()])
         g("colo_node_block", "1 if class is blocked on node",
           [({"node": r["name"], "class": c}, 1 if c in r["blocks"] else 0)
            for r in n for c in L.CLASSES])
-        g("colo_node_ttft_p99_ms", "per-node TTFT p99 over loadgen window",
+        g("colo_node_ttft_p99_ms", "per-node TTFT p99 over the source window",
           [({"node": r["name"]}, r["ttft_p99_ms"]) for r in n])
         g("colo_node_requests_in_window", "TTFT samples in window",
           [({"node": r["name"]}, r["requests_in_window"]) for r in n])
+        states = [st.value for st in L.GuardState] + [L.GUARD_SIGNAL_NONE]
         g("colo_node_guard_state", "1 for the node's current guard state",
-          [({"node": r["name"], "state": st.value}, 1 if r["guard_state"] == st.value else 0)
-           for r in n for st in L.GuardState])
+          [({"node": r["name"], "state": st}, 1 if r["guard_state"] == st else 0)
+           for r in n for st in states])
+        g("colo_node_guard_data_sufficient", "1 if the guard had enough TTFT data for the node",
+          [({"node": r["name"]}, 1 if r["guard_signal"] == L.GUARD_SIGNAL_OK else 0)
+           for r in n if r["guard_signal"] != "idle"])
+        g("colo_guard_data_sufficient",
+          "1 if every G4 node with vLLM had enough TTFT data this tick; 0 = guard inert",
+          [({}, 1 if self.guard_sufficient else 0)])
+        snap = self.ttft_snap
+        g("colo_ttft_source_up", "1 if the configured TTFT source answered and is fresh",
+          [({"type": self.config["ttft_source"]["type"]}, 1 if self.ttft_source_ok else 0)])
+        g("colo_ttft_source_age_seconds", "age of the last TTFT fetch",
+          [({}, time.time() - snap.fetched_at if snap and snap.fetched_at else None)])
         g("colo_cluster_ttft_p99_ms", "cluster TTFT p99", [({}, self.cluster_p99())])
         g("colo_baseline_ttft_p99_ms", "guard baseline",
           [({}, self.config["guard"].get("baseline_ttft_p99_ms"))])
@@ -500,6 +651,7 @@ class Controller:
         g("colo_last_tick_timestamp_seconds", "unix time of last good tick",
           [({}, self.last_tick or None)])
         g("colo_tick_errors", "failed ticks since start", [({}, self.tick_errors)])
+        g("colo_write_errors", "failed k8s writes since start", [({}, self.write_errors)])
         return "\n".join(out) + "\n"
 
 
@@ -508,7 +660,7 @@ class Controller:
 # ---------------------------------------------------------------------------
 
 
-def make_app(ctl: Controller) -> web.Application:
+def make_app(ctl: Controller, start_loops: bool = True) -> web.Application:
     routes = web.RouteTableDef()
 
     @routes.get("/state")
@@ -517,7 +669,7 @@ def make_app(ctl: Controller) -> web.Application:
 
     @routes.get("/config")
     async def get_config(_: web.Request) -> web.Response:
-        return web.json_response(ctl.state().get("config", {}))
+        return web.json_response(ctl.config)
 
     @routes.post("/config")
     async def post_config(req: web.Request) -> web.Response:
@@ -532,14 +684,17 @@ def make_app(ctl: Controller) -> web.Application:
 
     @routes.post("/baseline")
     async def post_baseline(_: web.Request) -> web.Response:
-        t = ctl.ttft
+        t = ctl.ttft if ctl.ttft_source_ok else None
         if t is None or not t.cluster.sufficient or t.cluster.p99_ms is None:
             n = t.cluster.requests if t else 0
             need = ctl.config["guard"].get("min_requests", 200)
+            why = "" if ctl.ttft_source_ok else f" (ttft source: {ctl.ttft_source_why})"
             return web.json_response(
-                {"error": f"insufficient data: {n} requests in window, need {need}"}, status=400)
-        new = await ctl.update_config({"guard": {"baseline_ttft_p99_ms": t.cluster.p99_ms}})
-        return web.json_response({"baseline_ttft_p99_ms": t.cluster.p99_ms, "config": new})
+                {"error": f"insufficient data: {n} requests in window, need {need}{why}"},
+                status=400)
+        p99 = round(t.cluster.p99_ms, 3)
+        new = await ctl.update_config({"guard": {"baseline_ttft_p99_ms": p99}})
+        return web.json_response({"baseline_ttft_p99_ms": p99, "config": new})
 
     @routes.get("/metrics")
     async def metrics(_: web.Request) -> web.Response:
@@ -547,18 +702,28 @@ def make_app(ctl: Controller) -> web.Application:
 
     @routes.get("/healthz")
     async def healthz(_: web.Request) -> web.Response:
-        return web.json_response({"ok": True, "last_tick": ctl.last_tick,
-                                  "last_error": ctl.last_error})
+        ok, why = ctl.live()
+        return web.json_response({"ok": ok, "reason": why, "last_loop": ctl.last_loop,
+                                  "last_tick": ctl.last_tick, "last_error": ctl.last_error},
+                                 status=200 if ok else 503)
+
+    @routes.get("/readyz")
+    async def readyz(_: web.Request) -> web.Response:
+        return web.json_response({"ok": True, "last_tick": ctl.last_tick})
 
     app = web.Application()
     app.add_routes(routes)
 
     async def lifecycle(_: web.Application):
         ctl.http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=LOADGEN_TIMEOUT_S))
-        task = asyncio.create_task(ctl.run())
+        ctl.prom_http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=PROM_TIMEOUT_S))
+        tasks = [asyncio.create_task(ctl.run()), asyncio.create_task(ctl.poll_ttft())] \
+            if start_loops else []
         yield
-        task.cancel()
+        for t in tasks:
+            t.cancel()
         await ctl.http.close()
+        await ctl.prom_http.close()
 
     app.cleanup_ctx.append(lifecycle)
     return app

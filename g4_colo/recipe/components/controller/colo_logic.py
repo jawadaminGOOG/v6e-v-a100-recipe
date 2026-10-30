@@ -8,8 +8,9 @@ Sections:
   * config defaults, merge and validation
   * (a) spare-slot computation per eligible G4 node
   * (b) backfill / overflow allocation and the safe scale plan
-  * (c) TTFT histogram merge and p99
+  * (c) TTFT histogram merge and p99 (loadgen buckets and Prometheus buckets)
   * (d) per-node guard state machine
+  * (e) per-node planning: eligibility, colo.active, make-before-break dehydrate
 """
 
 from __future__ import annotations
@@ -133,8 +134,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "buffer_replicas": 1,
     # Addition: CPU (cores) kept free on each G4 node beyond non-backfill requests.
-    "reserve_cpu_per_node": 0,
+    # 2 keeps one 2-vCPU slot for the shared cpuset (DaemonSets, node agents).
+    "reserve_cpu_per_node": 2,
+    # Seconds a node may stay ineligible (e.g. vLLM Recreate rollout) before its
+    # remaining backfill pods are deleted even if overflow is not ready yet.
+    "dehydrate_grace_s": 60,
+    # Where the guard reads per-node TTFT from: loadgen /stats (demo), Google
+    # Managed Prometheus (production) or none (guard reports no_signal, never acts).
+    "ttft_source": {
+        "type": "loadgen",
+        "prometheus": {
+            "project": "",
+            "location": "global",
+            "query_window_s": 60,
+            "metric": "vllm:time_to_first_token_seconds",
+        },
+    },
+    # Optional upper bound on total requested CPU (cores) across all demand,
+    # e.g. the colo-svc ResourceQuota minus headroom. null = no check.
+    "max_total_cpu": None,
 }
+
+TTFT_SOURCE_TYPES: tuple[str, ...] = ("loadgen", "prometheus", "none")
 
 
 def deep_merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
@@ -179,7 +200,37 @@ def validate_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
     r = c["reserve_cpu_per_node"]
     if isinstance(r, bool) or not isinstance(r, (int, float)) or r < 0:
         raise ValueError("reserve_cpu_per_node must be >= 0")
+    d = c["dehydrate_grace_s"]
+    if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
+        raise ValueError("dehydrate_grace_s must be a number >= 0")
+    ts = c["ttft_source"]
+    if not isinstance(ts, Mapping) or ts.get("type") not in TTFT_SOURCE_TYPES:
+        raise ValueError(f"ttft_source.type must be one of {', '.join(TTFT_SOURCE_TYPES)}")
+    pr = ts.get("prometheus")
+    if not isinstance(pr, Mapping):
+        raise ValueError("ttft_source.prometheus must be an object")
+    if ts["type"] == "prometheus" and not (isinstance(pr.get("project"), str) and pr["project"]):
+        raise ValueError("ttft_source.prometheus.project is required when type is prometheus")
+    for key in ("location", "metric"):
+        if not isinstance(pr.get(key), str) or not pr[key]:
+            raise ValueError(f"ttft_source.prometheus.{key} must be a non-empty string")
+    w = pr.get("query_window_s")
+    if isinstance(w, bool) or not isinstance(w, (int, float)) or w < 10:
+        raise ValueError("ttft_source.prometheus.query_window_s must be a number >= 10")
+    mx = c["max_total_cpu"]
+    if mx is not None:
+        if isinstance(mx, bool) or not isinstance(mx, (int, float)) or mx <= 0:
+            raise ValueError("max_total_cpu must be > 0 or null")
+        total = demand_cpu_cores(demand)
+        if total > mx:
+            raise ValueError(f"demand needs {total:g} CPU, above max_total_cpu {mx:g}")
     return c
+
+
+def demand_cpu_cores(demand: Mapping[str, int],
+                     services: Mapping[str, ServiceSpec] = SERVICES) -> float:
+    """Total CPU (cores) requested if every demanded pod runs."""
+    return sum(int(demand.get(s, 0)) * services[s].cpu_m for s in services) / 1000
 
 
 # ---------------------------------------------------------------------------
@@ -311,11 +362,14 @@ def plan_scale(
     * A decrease of one tier is held until the other tier's *ready* pods cover
       the target total (total ready never drops on purpose). When the target
       total itself shrinks, the hold releases at once.
+    * A hold never keeps a tier above its own *ready* count: the hold exists to
+      keep serving pods alive, not to recreate pods that vanished externally
+      (dehydrate, eviction, preemption) and would only sit Pending.
     * Patch order: overflow first when the total grows, backfill first otherwise.
     """
     total = tgt_bf + tgt_ov
-    new_ov = tgt_ov if tgt_ov >= cur_ov else max(tgt_ov, min(cur_ov, total - ready_bf))
-    new_bf = tgt_bf if tgt_bf >= cur_bf else max(tgt_bf, min(cur_bf, total - ready_ov))
+    new_ov = tgt_ov if tgt_ov >= cur_ov else max(tgt_ov, min(cur_ov, ready_ov, total - ready_bf))
+    new_bf = tgt_bf if tgt_bf >= cur_bf else max(tgt_bf, min(cur_bf, ready_bf, total - ready_ov))
     growing = new_bf + new_ov > cur_bf + cur_ov
     order = ("overflow", "backfill") if growing else ("backfill", "overflow")
     return ScalePlan(new_bf, new_ov, order)
@@ -423,6 +477,113 @@ def summarize_ttft(stats: Iterable[Mapping[str, Any]], min_requests: int = 200) 
         cluster=summ(all_hists),
         window_s=window_s,
         bucket_ms=bucket_ms,
+        skipped=skipped,
+    )
+
+
+def parse_prom_vector(payload: Mapping[str, Any]) -> list[tuple[dict[str, str], float]]:
+    """Prometheus HTTP API instant-query JSON -> [(labels, value)].
+
+    Raises ValueError when the response is not a successful vector result.
+    Non-finite values (NaN from rate() on an idle series) become 0.
+    """
+    if not isinstance(payload, Mapping) or payload.get("status") != "success":
+        err = payload.get("error") if isinstance(payload, Mapping) else None
+        raise ValueError(f"prometheus query failed: {err or 'bad response'}")
+    data = payload.get("data") or {}
+    if data.get("resultType") != "vector":
+        raise ValueError(f"prometheus resultType {data.get('resultType')!r}, want vector")
+    out: list[tuple[dict[str, str], float]] = []
+    for s in data.get("result") or []:
+        try:
+            v = float(s["value"][1])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        out.append((dict(s.get("metric") or {}), v if math.isfinite(v) else 0.0))
+    return out
+
+
+def prom_bucket_quantile(buckets: Mapping[float, float], q: float) -> float | None:
+    """Prometheus histogram_quantile() over cumulative buckets {le: count}.
+
+    Same algorithm as PromQL: linear interpolation inside the bucket holding the
+    rank; lower edge of the first bucket is 0; a rank in +Inf returns the
+    largest finite upper bound. Returns None when the total is 0.
+    """
+    les = sorted(buckets)
+    if not les or not math.isinf(les[-1]):
+        return None
+    total = buckets[les[-1]]
+    if total <= 0:
+        return None
+    rank = q * total
+    prev_le, prev_c = 0.0, 0.0
+    for le in les:
+        c = buckets[le]
+        if c >= rank:
+            if math.isinf(le):
+                return prev_le
+            if c == prev_c or le <= 0:
+                return le
+            return prev_le + (le - prev_le) * (rank - prev_c) / (c - prev_c)
+        prev_le, prev_c = le, c
+    return prev_le
+
+
+def summarize_prom_ttft(
+    samples: Iterable[tuple[Mapping[str, str], float]],
+    pod_node: Mapping[str, str],
+    window_s: float,
+    min_requests: int = 200,
+) -> TTFTView:
+    """Per-node and cluster TTFT p99 from `sum by (pod, le)(rate(<metric>_bucket[w]))`.
+
+    `samples` values are per-second rates of cumulative bucket counters; requests
+    in the window = rate(+Inf) * window_s. Pods are mapped to nodes via `pod_node`
+    (current pod list); pods not in it count toward the cluster only. Buckets of
+    pods on the same node are summed before the quantile, as histogram_quantile
+    over `sum by (node, le)` would.
+    """
+    per_pod: dict[str, dict[float, float]] = {}
+    skipped = 0
+    for labels, v in samples:
+        pod, le = labels.get("pod"), labels.get("le")
+        try:
+            le_f = float(le)  # "+Inf" parses to inf
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        if not pod:
+            skipped += 1
+            continue
+        b = per_pod.setdefault(pod, {})
+        b[le_f] = b.get(le_f, 0.0) + max(0.0, v)
+
+    def merge(bs: Iterable[Mapping[float, float]]) -> dict[float, float]:
+        out: dict[float, float] = {}
+        for b in bs:
+            for le, c in b.items():
+                out[le] = out.get(le, 0.0) + c
+        return out
+
+    def summ(b: Mapping[float, float]) -> TTFTSummary:
+        n = int(round(b.get(math.inf, 0.0) * window_s))
+        ok = n >= min_requests
+        p = prom_bucket_quantile(b, 0.99) if ok else None
+        if p is None:
+            ok = False
+        return TTFTSummary(p * 1000 if p is not None else None, n, ok)
+
+    by_node: dict[str, list[dict[float, float]]] = {}
+    for pod, b in per_pod.items():
+        node = pod_node.get(pod)
+        if node:
+            by_node.setdefault(node, []).append(b)
+    return TTFTView(
+        nodes={n: summ(merge(bs)) for n, bs in by_node.items()},
+        cluster=summ(merge(per_pod.values())),
+        window_s=window_s,
+        bucket_ms=0.0,  # native Prometheus buckets, interpolated
         skipped=skipped,
     )
 
@@ -562,3 +723,213 @@ def guard_step(
             "release", released, "ColoGuardRelease",
             f"{desc}; healthy for {now - hs:.0f}s, releasing {', '.join(released)}")]
     return replace(g, breach_since=None, healthy_since=hs), []
+
+
+GUARD_SIGNAL_OK = "ok"
+GUARD_SIGNAL_NONE = "no_signal"
+GUARD_SIGNAL_DISABLED = "disabled"
+
+
+def guard_signal(summ: TTFTSummary | None, source_ok: bool, cfg: GuardConfig) -> str:
+    """Whether the guard can act on a node this tick.
+
+    "no_signal" means: TTFT source down, stale or `none`, too few samples, or no
+    baseline. guard_step makes no transition in that case (no block, no evict).
+    """
+    if not cfg.enabled:
+        return GUARD_SIGNAL_DISABLED
+    if not source_ok or summ is None or not summ.sufficient or summ.p99_ms is None \
+            or cfg.threshold_ms is None:
+        return GUARD_SIGNAL_NONE
+    return GUARD_SIGNAL_OK
+
+
+# ---------------------------------------------------------------------------
+# (e) Per-node planning
+# ---------------------------------------------------------------------------
+
+ACTIVE_LABEL = "colo.active"
+CA_TAINT = "ToBeDeletedByClusterAutoscaler"
+ROLE_VLLM = "vllm"
+ROLE_BACKFILL = "backfill"
+ROLE_OTHER = "other"
+
+
+@dataclass(frozen=True)
+class PodFacts:
+    """What node planning needs to know about one pod bound to a node."""
+
+    name: str
+    role: str = ROLE_OTHER  # ROLE_VLLM | ROLE_BACKFILL | ROLE_OTHER
+    service: str | None = None  # backfill: the `app` label (sandbox, toolcall, analytics)
+    cls: str | None = None  # backfill: colo.class
+    terminating: bool = False  # metadata.deletionTimestamp set
+    ready: bool = False
+    cpu_m: int = 0
+    mem: int = 0
+
+
+@dataclass(frozen=True)
+class NodeFacts:
+    name: str
+    labels: Mapping[str, str] = field(default_factory=dict)
+    ready: bool = True
+    unschedulable: bool = False
+    taint_keys: frozenset[str] = frozenset()
+    alloc_cpu_m: int = 0
+    alloc_mem: int = 0
+
+
+@dataclass(frozen=True)
+class Eligibility:
+    eligible: bool
+    has_vllm: bool
+    reason: str  # "ok" | "not-ready" | "cordoned" | "ca-scale-down" | "no-vllm"
+
+
+def node_eligibility(node: NodeFacts, pods: Iterable[PodFacts]) -> Eligibility:
+    """Eligible = Ready, schedulable, no CA deletion taint, and a non-terminating
+    vLLM pod bound to the node. The vLLM pod need not be Ready: backfill packs
+    while vLLM loads and compiles (startup can take minutes)."""
+    has_vllm = any(p.role == ROLE_VLLM and not p.terminating for p in pods)
+    if not node.ready:
+        reason = "not-ready"
+    elif node.unschedulable:
+        reason = "cordoned"
+    elif CA_TAINT in node.taint_keys:
+        reason = "ca-scale-down"
+    elif not has_vllm:
+        reason = "no-vllm"
+    else:
+        return Eligibility(True, True, "ok")
+    return Eligibility(False, has_vllm, reason)
+
+
+@dataclass(frozen=True)
+class NodeTrack:
+    """Controller memory per node across ticks (lost on restart, which only
+    restarts the dehydrate grace timer: the conservative direction)."""
+
+    ineligible_since: float | None = None
+
+
+@dataclass
+class NodePlan:
+    name: str
+    eligible: bool
+    has_vllm: bool
+    reason: str
+    label_patch: dict[str, str | None]  # merge-patch for metadata.labels (None = remove)
+    delete_pods: list[str]  # backfill pods to delete (dehydrate)
+    drain_reason: str | None  # why delete_pods is non-empty
+    draining: list[str]  # backfill pods kept for now on an ineligible node
+    reset_guard: bool  # no vLLM: guard state -> healthy, block labels cleared, guard skipped
+    track: NodeTrack
+
+
+def ready_backfill_by_service(pods: Iterable[PodFacts]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for p in pods:
+        if p.role == ROLE_BACKFILL and p.ready and not p.terminating and p.service:
+            out[p.service] = out.get(p.service, 0) + 1
+    return out
+
+
+def drain_cover(
+    demand: Mapping[str, int],
+    overflow_ready: Mapping[str, int],
+    ready_backfill_eligible: Mapping[str, int],
+) -> dict[str, bool]:
+    """Per service: True when ready overflow plus ready backfill on eligible
+    nodes already covers demand, so backfill on ineligible nodes can go."""
+    return {
+        s: int(overflow_ready.get(s, 0)) + int(ready_backfill_eligible.get(s, 0))
+        >= int(demand.get(s, 0))
+        for s in set(demand) | set(overflow_ready) | set(ready_backfill_eligible)
+    }
+
+
+def plan_node(
+    node: NodeFacts,
+    pods: Iterable[PodFacts],
+    now: float,
+    track: NodeTrack,
+    cover: Mapping[str, bool],
+    dehydrate_grace_s: float,
+) -> NodePlan:
+    """Decide colo.active, guard reset, and dehydrate deletes for one G4 node.
+
+    * Eligible: ensure colo.active=true; clear the ineligible timer.
+    * Ineligible: remove colo.active at once (stops new backfill placements; the
+      caller also drops the node from allocation so overflow scales up first).
+      Its remaining backfill pods are deleted, per service, only when
+        (a) cover[service] (overflow ready already covers that service), or
+        (b) the node has been ineligible for >= dehydrate_grace_s, or
+        (c) the node is cordoned or tainted ToBeDeletedByClusterAutoscaler.
+      A vLLM Recreate rollout that returns within the grace therefore deletes
+      nothing, and a GPU scale-in is make-before-break.
+    * No vLLM on the node: reset the guard and remove colo.block.* labels.
+    """
+    pods = list(pods)
+    el = node_eligibility(node, pods)
+    labels = node.labels or {}
+    patch: dict[str, str | None] = {}
+    if el.eligible and labels.get(ACTIVE_LABEL) != "true":
+        patch[ACTIVE_LABEL] = "true"
+    elif not el.eligible and ACTIVE_LABEL in labels:
+        patch[ACTIVE_LABEL] = None
+    reset_guard = not el.has_vllm
+    if reset_guard:
+        for lbl in BLOCK_LABELS.values():
+            if lbl in labels:
+                patch[lbl] = None
+
+    if el.eligible:
+        return NodePlan(node.name, True, True, el.reason, patch, [], None, [], False, NodeTrack())
+
+    since = track.ineligible_since if track.ineligible_since is not None else now
+    bf = sorted((p for p in pods if p.role == ROLE_BACKFILL and not p.terminating),
+                key=lambda p: p.name)
+    deletes: list[str] = []
+    reason: str | None = None
+    if bf:
+        if node.unschedulable:
+            reason, deletes = "cordoned", [p.name for p in bf]
+        elif CA_TAINT in node.taint_keys:
+            reason, deletes = "ca-scale-down", [p.name for p in bf]
+        elif now - since >= dehydrate_grace_s:
+            reason, deletes = f"ineligible ({el.reason}) for {now - since:.0f}s", [p.name for p in bf]
+        else:
+            deletes = [p.name for p in bf if p.service and cover.get(p.service, False)]
+            if deletes:
+                reason = "overflow ready covers demand"
+    keep = [p.name for p in bf if p.name not in set(deletes)]
+    return NodePlan(node.name, False, el.has_vllm, el.reason, patch, deletes, reason, keep,
+                    reset_guard, NodeTrack(since))
+
+
+def node_capacity(
+    node: NodeFacts,
+    pods: Iterable[PodFacts],
+    blocks: frozenset[str] = frozenset(),
+    reserve_cpu_m: int = 0,
+) -> NodeCapacity:
+    """Spare capacity: allocatable minus every non-backfill pod's requests."""
+    used_cpu = used_mem = 0
+    for p in pods:
+        if p.role != ROLE_BACKFILL:
+            used_cpu += p.cpu_m
+            used_mem += p.mem
+    return NodeCapacity(node.name, node.alloc_cpu_m, used_cpu, blocks,
+                        node.alloc_mem, used_mem, reserve_cpu_m)
+
+
+def guard_label_patch(labels: Mapping[str, str], blocks: frozenset[str]) -> dict[str, str | None]:
+    """Label merge-patch that makes colo.block.* match `blocks`."""
+    patch: dict[str, str | None] = {}
+    for cls, lbl in BLOCK_LABELS.items():
+        if cls in blocks and labels.get(lbl) != "true":
+            patch[lbl] = "true"
+        elif cls not in blocks and lbl in labels:
+            patch[lbl] = None
+    return patch
