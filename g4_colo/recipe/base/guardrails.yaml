@@ -65,9 +65,13 @@ spec:
     expression: >-
       object.spec.containers.exists(c, has(c.resources) && has(c.resources.limits)
         && 'nvidia.com/gpu' in c.resources.limits)
+  # Init containers count too: a Burstable or fractional-CPU init container makes the whole pod non-Guaranteed,
+  # so kubelet's static CPU manager gives no exclusive cores and the pod runs in the shared pool next to vLLM.
   - name: guaranteedIntegerCPU
     expression: >-
-      object.spec.containers.all(c, has(c.resources) && has(c.resources.requests) && has(c.resources.limits)
+      (object.spec.containers
+        + (has(object.spec.initContainers) ? object.spec.initContainers : [])).all(c,
+        has(c.resources) && has(c.resources.requests) && has(c.resources.limits)
         && 'cpu' in c.resources.requests && 'cpu' in c.resources.limits
         && 'memory' in c.resources.requests && 'memory' in c.resources.limits
         && c.resources.requests['cpu'] == c.resources.limits['cpu']

@@ -67,6 +67,15 @@ CASES = [
     ("reject: request != limit", pod("t4", "colo-svc", prio="colo-backfill", cpu_req="2", cpu_lim="4"), False),
     ("reject: GPU request outside inference", pod("t5", "colo-svc", prio="colo-backfill", gpu=True), False),
     ("accept: compliant backfill", pod("t6", "colo-svc", prio="colo-backfill"), True),
+    # --- init containers count toward Guaranteed QoS (a Burstable init container breaks exclusive cores) ---
+    ("reject: compliant backfill with a burstable init container",
+     pod("i1", "colo-svc", prio="colo-backfill", initContainers=[{
+         "name": "init", "image": "registry.k8s.io/pause:3.10",
+         "resources": {"requests": {"cpu": "500m", "memory": "128Mi"}, "limits": {"cpu": "1", "memory": "256Mi"}}}]), False),
+    ("accept: compliant backfill with a Guaranteed integer init container",
+     pod("i2", "colo-svc", prio="colo-backfill", initContainers=[{
+         "name": "init", "image": "registry.k8s.io/pause:3.10",
+         "resources": {"requests": {"cpu": "2", "memory": "1Gi"}, "limits": {"cpu": "2", "memory": "1Gi"}}}]), True),
     ("accept: GPU workload in inference", pod("t7", "inference", prio="gpu-serving", cpu_req="8", cpu_lim="8",
                                               mem_req="64Gi", mem_lim="64Gi", gpu=True), True),
     ("accept: non-G4 pod unaffected", pod("t8", "colo-svc", prio="colo-overflow", g4=False), True),
