@@ -38,6 +38,7 @@ def deploy(name, mode, cls, cpu, mem, bf_rtc, of_rtc, tier):
             nodeSelectorTerms:
             - matchExpressions:
               - {{key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}}
+              - {{key: colo.active, operator: In, values: ["true"]}}
               - {{key: colo.block.{cls}, operator: NotIn, values: ["true"]}}
       tolerations:
 {G4_TOL}"""

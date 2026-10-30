@@ -20,7 +20,7 @@ spec:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
       - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 5
       containers:
       - name: vllm
         image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai:v0.32.0
@@ -34,6 +34,8 @@ spec:
         env:
         - {name: VLLM_USE_DEEP_GEMM, value: "0"}
         - {name: HF_HOME, value: /hf}
+        - {name: VLLM_CACHE_ROOT, value: /hf/vllm_cache}
+        - {name: TORCHINDUCTOR_CACHE_DIR, value: /hf/inductor_cache}
         ports: [{name: http, containerPort: 8000}]
         # Guaranteed QoS + integer CPU => exclusive cores from the static CPU manager.
         resources:
@@ -41,11 +43,11 @@ spec:
           limits: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
         readinessProbe:
           httpGet: {path: /health, port: 8000}
-          periodSeconds: 5
+          periodSeconds: 2
           failureThreshold: 3
         startupProbe:
           httpGet: {path: /health, port: 8000}
-          periodSeconds: 5
+          periodSeconds: 2
           failureThreshold: 180
         volumeMounts:
         - {name: hf, mountPath: /hf}

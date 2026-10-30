@@ -23,6 +23,7 @@ spec:
             nodeSelectorTerms:
             - matchExpressions:
               - {key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}
+              - {key: colo.active, operator: In, values: ["true"]}
               - {key: colo.block.integer, operator: NotIn, values: ["true"]}
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
@@ -112,6 +113,7 @@ spec:
             nodeSelectorTerms:
             - matchExpressions:
               - {key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}
+              - {key: colo.active, operator: In, values: ["true"]}
               - {key: colo.block.integer, operator: NotIn, values: ["true"]}
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
@@ -187,6 +189,7 @@ spec:
             nodeSelectorTerms:
             - matchExpressions:
               - {key: cloud.google.com/compute-class, operator: In, values: [g4-gpu]}
+              - {key: colo.active, operator: In, values: ["true"]}
               - {key: colo.block.memory-heavy, operator: NotIn, values: ["true"]}
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}

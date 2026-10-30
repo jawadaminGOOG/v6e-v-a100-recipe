@@ -39,7 +39,7 @@ CM_NAME = os.environ.get("CONFIGMAP_NAME", "colo-config")
 CM_KEY = "config.json"
 BUFFER_DEPLOYMENT = os.environ.get("BUFFER_DEPLOYMENT", "colo-buffer")
 EVENT_NAMESPACE = os.environ.get("EVENT_NAMESPACE", "default")  # Node is cluster-scoped
-LOOP_S = float(os.environ.get("LOOP_S", "5"))
+LOOP_S = float(os.environ.get("LOOP_S", "2"))
 PORT = int(os.environ.get("PORT", "8080"))
 LOADGEN_PORT = int(os.environ.get("LOADGEN_PORT", "8080"))
 LOADGEN_TIMEOUT_S = float(os.environ.get("LOADGEN_TIMEOUT_S", "2"))
@@ -317,11 +317,27 @@ class Controller:
         node_rows: list[dict[str, Any]] = []
         for n in g4:
             name = n.metadata.name
+            labels = _labels(n)
             npods = pods_by_node.get(name, [])
             has_vllm = any(p.metadata.namespace == NS_INF and _labels(p).get("app") == "vllm"
                            and not p.metadata.deletion_timestamp for p in npods)
             eligible = _ready(n.status.conditions) and has_vllm \
                 and not n.spec.unschedulable
+            # Reconcile colo.active so <svc>-backfill only schedules onto G4 nodes with an active vLLM pod,
+            # and immediately dehydrate backfill pods from G4 nodes whose vLLM replica scaled in.
+            if eligible and labels.get("colo.active") != "true":
+                await asyncio.to_thread(self._patch_node_labels, name, {"colo.active": "true"})
+                self.record("active", name, "colo.active=true (vllm present)")
+                labels["colo.active"] = "true"
+            elif not eligible and "colo.active" in labels:
+                await asyncio.to_thread(self._patch_node_labels, name, {"colo.active": None})
+                self.record("dehydrate", name, "removed colo.active (no vllm replica)")
+                labels.pop("colo.active", None)
+            if not has_vllm:
+                for p in npods:
+                    if _is_backfill(p) and not p.metadata.deletion_timestamp:
+                        if await asyncio.to_thread(self._delete_pod, NS_SVC, p.metadata.name):
+                            self.record("dehydrate-pod", name, f"deleted {NS_SVC}/{p.metadata.name} (no vllm on node)")
             used_cpu = used_mem = 0
             for p in npods:
                 if not _is_backfill(p):

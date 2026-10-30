@@ -81,7 +81,7 @@ data:
   config.json: |
     {"demand": {"sandbox": 10, "toolcall": 9, "analytics": 0},
      "guard": {"enabled": true, "baseline_ttft_p99_ms": 20, "factor": 1.5, "cooldown_s": 45, "window_s": 30, "escalate_s": 0},
-     "buffer_replicas": 8}
+     "buffer_replicas": 1}
 ---
 apiVersion: apps/v1
 kind: Deployment
