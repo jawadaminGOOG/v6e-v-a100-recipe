@@ -59,7 +59,7 @@ kind: ResourceQuota
 metadata: {name: colo-svc-quota, namespace: colo-svc}
 spec:
   hard:
-    requests.cpu: "120"
+    requests.cpu: "180"
     limits.memory: 400Gi
     requests.nvidia.com/gpu: "0"
 ---
