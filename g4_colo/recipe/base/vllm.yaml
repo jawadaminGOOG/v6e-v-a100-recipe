@@ -25,9 +25,15 @@ spec:
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-      terminationGracePeriodSeconds: 5
+      # Drain on scale-in: the pod leaves Service endpoints (and loadgen discovery, 2 s) as soon as it is marked
+      # for deletion, but vLLM aborts in-flight streams on SIGTERM. preStop keeps it serving for 15 s so callers
+      # stop routing to it and in-flight requests finish; the grace period covers preStop plus vLLM shutdown.
+      terminationGracePeriodSeconds: 30
       containers:
       - name: vllm
+        lifecycle:
+          preStop:
+            exec: {command: ["sh", "-c", "sleep 15"]}
         # Public upstream image. Overlays may point this at a private mirror with kustomize `images:`.
         image: vllm/vllm-openai:v0.32.0
         imagePullPolicy: IfNotPresent
