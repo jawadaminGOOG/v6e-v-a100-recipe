@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -22,7 +23,8 @@ sys.path.insert(0, str(HERE.parents[1] / "demo"))
 from cluster import LiveBackend  # noqa: E402
 from state import build_state, parse_cpuset, summarize  # noqa: E402
 
-G4_POOL = "g4gpu-jawadamin"  # GKE truncates MIG names to 16 chars of nodepool name in TriggeredScaleUp events
+# GKE truncates MIG names to 16 chars of nodepool name in TriggeredScaleUp events. Defaults to the demo pool.
+G4_POOL = os.environ.get("G4_POOL_PREFIX", "g4gpu-jawadamin")
 
 
 def now() -> float:

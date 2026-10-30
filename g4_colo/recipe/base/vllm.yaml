@@ -19,11 +19,12 @@ spec:
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
       terminationGracePeriodSeconds: 5
       containers:
       - name: vllm
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai:v0.32.0
+        # Public upstream image. Overlays may point this at a private mirror with kustomize `images:`.
+        image: vllm/vllm-openai:v0.32.0
+        imagePullPolicy: IfNotPresent
         args:
         - --model=Qwen/Qwen3-1.7B-Base
         - --port=8000
@@ -53,6 +54,10 @@ spec:
         - {name: hf, mountPath: /hf}
         - {name: shm, mountPath: /dev/shm}
       volumes:
+      # HF weights + vLLM/Inductor compile cache on the node. This only helps when vLLM returns to a node it has
+      # already used (pod restart or reschedule). A node added by the autoscaler starts cold: weights download
+      # from Hugging Face and kernels compile again. For production, prefer a secondary boot disk, Hyperdisk ML
+      # or GCS FUSE for weights and cache. The compile-cache speedup is not measured.
       - {name: hf, hostPath: {path: /var/lib/colo/hf, type: DirectoryOrCreate}}
       - {name: shm, emptyDir: {medium: Memory, sizeLimit: 8Gi}}
 ---

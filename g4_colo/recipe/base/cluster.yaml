@@ -50,7 +50,8 @@ spec:
   #   - nodepools: [g4gpu-reservation-pool]   # CUD / reservation-backed pool
   #   - nodepools: [g4gpu-spot-pool]          # Spot pool (cheapest, preemptible)
   priorities:
-  - nodepools: [g4gpu-jawadamin-us-west8-1026]
+  # PLACEHOLDER: overlays set the real pool name from their colo-settings (see overlays/*/settings.yaml).
+  - nodepools: [your-g4-node-pool]
   whenUnsatisfiable: DoNotScaleUp
   # Remove an unneeded GPU node after 1 min (GKE minimum) and ignore expendable CPU utilization when consolidating GPU nodes.
   autoscalingPolicy: {consolidationDelayMinutes: 1, gpuConsolidationThreshold: 100}
@@ -59,10 +60,11 @@ apiVersion: cloud.google.com/v1
 kind: ComputeClass
 metadata: {name: n4d-cpu}
 spec:
-  # Manually created pool first (carries the static CPU manager config and gVisor).
+  # Manually created pool first (carries the static CPU manager config and GKE Sandbox / gVisor).
   # Add `- machineFamily: n4d` with nodePoolAutoCreation for automatic pools if desired.
   priorities:
-  - nodepools: [n4dcpu-jawadamin-us-west8-1026]
+  # PLACEHOLDER: overlays set the real pool name from their colo-settings (see overlays/*/settings.yaml).
+  - nodepools: [your-n4d-node-pool]
   whenUnsatisfiable: DoNotScaleUp
   # Remove an unneeded N4D node after 1 min instead of the default 10.
   autoscalingPolicy: {consolidationDelayMinutes: 1}

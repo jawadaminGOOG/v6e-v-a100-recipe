@@ -2,7 +2,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-- ../../base
+- ../demo   # demo images, node pools and settings; this overlay only changes demand and load
 patches:
 - target: {kind: ConfigMap, name: colo-config, namespace: colo-system}
   patch: |-

@@ -5,6 +5,8 @@ kind: ValidatingAdmissionPolicy
 metadata: {name: colo-g4-guard}
 spec:
   failurePolicy: Fail
+  # CREATE only: nodeSelector, affinity and nodeName cannot be changed on a running pod in a way that moves it,
+  # and tolerations added by UPDATE do not reschedule it.
   matchConstraints:
     resourceRules:
     - apiGroups: [""]
@@ -12,12 +14,37 @@ spec:
       operations: [CREATE]
       resources: [pods]
   variables:
-  - name: targetsG4
+  # A pod "targets G4" if any of these hold. The NoSchedule taint compute-class=g4-gpu is the only thing that keeps
+  # other pods off G4 nodes, so any toleration that matches it counts, including a keyless `operator: Exists`.
+  - name: toleratesG4
     expression: >-
-      (has(object.spec.tolerations) && object.spec.tolerations.exists(t,
-        has(t.key) && t.key == 'cloud.google.com/compute-class' && has(t.value) && t.value == 'g4-gpu'))
-      || (has(object.spec.nodeSelector) && 'cloud.google.com/compute-class' in object.spec.nodeSelector
-        && object.spec.nodeSelector['cloud.google.com/compute-class'] == 'g4-gpu')
+      has(object.spec.tolerations) && object.spec.tolerations.exists(t,
+        (!has(t.effect) || t.effect == '' || t.effect == 'NoSchedule')
+        && (((!has(t.key) || t.key == '') && has(t.operator) && t.operator == 'Exists')
+            || (has(t.key) && t.key == 'cloud.google.com/compute-class'
+                && ((has(t.operator) && t.operator == 'Exists') || (has(t.value) && t.value == 'g4-gpu')))))
+  - name: selectsG4
+    expression: >-
+      has(object.spec.nodeSelector) && (
+        ('cloud.google.com/compute-class' in object.spec.nodeSelector
+          && object.spec.nodeSelector['cloud.google.com/compute-class'] == 'g4-gpu')
+        || ('colo.role' in object.spec.nodeSelector && object.spec.nodeSelector['colo.role'] == 'g4')
+        || 'cloud.google.com/gke-accelerator' in object.spec.nodeSelector)
+  - name: affinesG4
+    expression: >-
+      has(object.spec.affinity) && has(object.spec.affinity.nodeAffinity)
+      && has(object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution)
+      && object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.exists(term,
+        has(term.matchExpressions) && term.matchExpressions.exists(e,
+          (e.key == 'cloud.google.com/compute-class' && e.operator == 'In' && has(e.values) && 'g4-gpu' in e.values)
+          || (e.key == 'colo.role' && e.operator == 'In' && has(e.values) && 'g4' in e.values)
+          || (e.key == 'cloud.google.com/gke-accelerator' && (e.operator == 'In' || e.operator == 'Exists'))))
+  # nodeName bypasses the scheduler and therefore the NoSchedule taint. The policy cannot see node labels, so any
+  # pod with nodeName set is treated as targeting G4 (system pods that use nodeName live in exempt namespaces).
+  - name: bindsNode
+    expression: has(object.spec.nodeName) && object.spec.nodeName != ''
+  - name: targetsG4
+    expression: variables.toleratesG4 || variables.selectsG4 || variables.affinesG4 || variables.bindsNode
   - name: wantsGPU
     expression: >-
       object.spec.containers.exists(c, has(c.resources) && has(c.resources.limits)
@@ -30,15 +57,34 @@ spec:
         && c.resources.requests['cpu'] == c.resources.limits['cpu']
         && c.resources.requests['memory'] == c.resources.limits['memory']
         && string(c.resources.requests['cpu']).matches('^[0-9]+$'))
+  # gVisor runs every sandboxed thread in the pod-level cgroup (all CPUs), outside the container cpuset the static
+  # CPU manager assigns, so a gVisor pod on G4 contends with vLLM's exclusive cores (wave-1 P6 probe: 20 -> 50 ms p99).
+  - name: usesGVisor
+    expression: has(object.spec.runtimeClassName) && object.spec.runtimeClassName.startsWith('gvisor')
+  # colo-system is not exempt as a namespace: only the node-agent DaemonSet (read-only per-node exporter, 50m
+  # Burstable, runs in the shared cpuset) may tolerate every taint there. The exemption keys on the pod's
+  # serviceAccountName rather than request.userInfo because DaemonSet pods are created by the daemon-set
+  # controller, not by the colo-system identity; only principals allowed to create pods in colo-system can set it.
+  - name: isNodeAgent
+    expression: >-
+      namespaceObject.metadata.name == 'colo-system' && has(object.spec.serviceAccountName)
+      && object.spec.serviceAccountName == 'colo-node-agent' && !variables.wantsGPU
   validations:
   - expression: >-
       !variables.targetsG4
+      || variables.isNodeAgent
       || (namespaceObject.metadata.name == 'inference' && variables.wantsGPU && variables.guaranteedIntegerCPU)
       || (has(object.spec.priorityClassName) && object.spec.priorityClassName == 'colo-backfill'
           && !variables.wantsGPU && variables.guaranteedIntegerCPU)
     messageExpression: >-
-      'pods targeting G4 nodes must be the GPU workload (namespace inference, GPU, Guaranteed integer CPU) or '
-      + 'expendable backfill (priorityClassName colo-backfill, no GPU, integer CPU, requests == limits)'
+      'pods targeting G4 nodes (g4-gpu toleration incl. keyless Exists, compute-class/colo.role/gke-accelerator '
+      + 'selector or affinity, or nodeName) must be the GPU workload (namespace inference, GPU, Guaranteed integer '
+      + 'CPU) or expendable backfill (priorityClassName colo-backfill, no GPU, integer CPU, requests == limits)'
+    reason: Forbidden
+  - expression: "!variables.targetsG4 || variables.isNodeAgent || !variables.usesGVisor"
+    message: >-
+      pods targeting G4 nodes must not use runtimeClassName gvisor: gVisor bypasses the static CPU manager's
+      container cpuset and contends with vLLM's exclusive cores
     reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -47,12 +93,15 @@ metadata: {name: colo-g4-guard}
 spec:
   policyName: colo-g4-guard
   validationActions: [Deny]
+  # GKE system namespaces only. Their DaemonSets tolerate every taint and must keep running on G4 nodes.
+  # If you run your own all-tolerating DaemonSets (logging, security agents), add their namespace here.
   matchResources:
     namespaceSelector:
       matchExpressions:
       - key: kubernetes.io/metadata.name
         operator: NotIn
-        values: [kube-system, gmp-system, gke-managed-system, colo-system, gke-gmp-system, kube-node-lease]
+        values: [kube-system, gmp-system, gke-gmp-system, gmp-public, kube-node-lease, gke-managed-system,
+                 gke-managed-networking-dra-driver, gke-managed-volumepopulator]
 ---
 apiVersion: v1
 kind: ResourceQuota
@@ -77,7 +126,8 @@ spec:
     - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
     ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
 ---
-# vLLM accepts traffic only from the load generator (and Managed Prometheus scrapes).
+# vLLM accepts traffic only from the load generator, Managed Prometheus scrapes and colo-system.
+# production-template replaces the loadgen rule with your gateway / client namespace.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: vllm-ingress, namespace: inference}

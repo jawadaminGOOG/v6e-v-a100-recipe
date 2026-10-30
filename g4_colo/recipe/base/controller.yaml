@@ -78,10 +78,22 @@ apiVersion: v1
 kind: ConfigMap
 metadata: {name: colo-config, namespace: colo-system}
 data:
+  # Recipe defaults. Keys left out fall back to DEFAULT_CONFIG in components/controller/colo_logic.py.
+  # - guard.baseline_ttft_p99_ms null: the guard stays inert until you set a baseline (POST /baseline after a
+  #   solo run, or edit this value). A hardcoded baseline is only valid for one model + shape + prompt mix.
+  # - max_total_cpu = colo-svc-quota requests.cpu (180) - one G4 node's backfill (18 pods x 2 vCPU = 36), so
+  #   make-before-break shifts never hit the quota. Raise both together.
+  # - ttft_source loadgen: the guard reads per-node TTFT from inference/loadgen (demo). production-template
+  #   switches to Managed Prometheus.
   config.json: |
     {"demand": {"sandbox": 10, "toolcall": 9, "analytics": 0},
-     "guard": {"enabled": true, "baseline_ttft_p99_ms": 20, "factor": 1.5, "cooldown_s": 45, "window_s": 30, "escalate_s": 0},
-     "buffer_replicas": 1}
+     "guard": {"enabled": true, "baseline_ttft_p99_ms": null, "factor": 1.5, "cooldown_s": 600, "window_s": 30,
+               "escalate_s": 60, "min_requests": 200},
+     "buffer_replicas": 1,
+     "reserve_cpu_per_node": 2,
+     "dehydrate_grace_s": 60,
+     "max_total_cpu": 144,
+     "ttft_source": {"type": "loadgen"}}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -93,16 +105,39 @@ spec:
     metadata: {labels: {app: colo-controller}}
     spec:
       serviceAccountName: colo-controller
+      # GKE admits system-cluster-critical outside kube-system only with a matching ResourceQuota
+      # (colo-critical-pods below).
+      priorityClassName: system-cluster-critical
       nodeSelector: {colo.role: loadgen}
       containers:
       - name: controller
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-controller:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-controller:v0.2.0
+        imagePullPolicy: IfNotPresent
         ports: [{name: http, containerPort: 8080}]
         resources:
           requests: {cpu: 200m, memory: 256Mi}
           limits: {memory: 512Mi}
-        readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 5}
+        env:
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        readinessProbe: {httpGet: {path: /readyz, port: 8080}, periodSeconds: 5}
+        # /healthz returns 503 when the reconcile loop has not finished an iteration for 5 x LOOP_S (after a 60 s
+        # startup grace in the controller), so a wedged loop is restarted.
+        livenessProbe:
+          httpGet: {path: /healthz, port: 8080}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+---
+# Allows system-cluster-critical pods (the controller) in colo-system; GKE rejects them without this quota.
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: colo-critical-pods, namespace: colo-system}
+spec:
+  hard: {pods: "4"}
+  scopeSelector:
+    matchExpressions:
+    - {operator: In, scopeName: PriorityClass, values: [system-cluster-critical]}
 ---
 apiVersion: monitoring.googleapis.com/v1
 kind: PodMonitoring
@@ -133,8 +168,8 @@ spec:
       tolerations: [{operator: Exists}]
       containers:
       - name: agent
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-node-agent:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - name: NODE_NAME
           valueFrom: {fieldRef: {fieldPath: spec.nodeName}}

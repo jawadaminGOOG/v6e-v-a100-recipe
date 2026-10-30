@@ -1,10 +1,12 @@
-# Builds and pushes the colo-at-scale component images.
+# Builds and pushes the colo-at-scale component images. _REGISTRY is required (the build fails with an
+# invalid image reference if it is left empty); _TAG must match newTag in your overlay's `images:`.
 #   gcloud builds submit g4_colo/recipe/components \
 #     --config g4_colo/recipe/components/cloudbuild.yaml \
-#     --project northam-ce-mlai-tpu --region us-west8 --substitutions _TAG=v1
+#     --project "$PROJECT" --region "$REGION" \
+#     --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.0
 substitutions:
-  _REGISTRY: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026
-  _TAG: latest
+  _REGISTRY: ""
+  _TAG: v0.2.0
 options:
   dynamicSubstitutions: true
   logging: CLOUD_LOGGING_ONLY

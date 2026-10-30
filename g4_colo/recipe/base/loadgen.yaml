@@ -30,8 +30,8 @@ spec:
       nodeSelector: {colo.role: loadgen}
       containers:
       - name: loadgen
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-loadgen:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: VLLM_NAMESPACE, value: inference}
         - {name: VLLM_LABEL, value: app=vllm}

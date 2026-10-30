@@ -98,7 +98,7 @@ spec:
         effect: "NoSchedule"
       containers:
       - image: gcr.io/gke-release/custom-metrics-stackdriver-adapter:v0.16.12-gke.0
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         name: pod-custom-metrics-stackdriver-adapter
         command:
         - /adapter

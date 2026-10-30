@@ -7,7 +7,7 @@ metadata:
   namespace: colo-svc
   labels: {app: sandbox, colo.tier: backfill, colo.class: integer}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {matchLabels: {app: sandbox, colo.tier: backfill}}
   template:
     metadata:
@@ -28,12 +28,11 @@ spec:
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-worker:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: sandbox}
         ports: [{name: metrics, containerPort: 9100}]
@@ -56,7 +55,7 @@ metadata:
   namespace: colo-svc
   labels: {app: sandbox, colo.tier: overflow, colo.class: integer}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {matchLabels: {app: sandbox, colo.tier: overflow}}
   template:
     metadata:
@@ -73,8 +72,8 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-worker:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: sandbox}
         - {name: NPROC, value: "2"}
@@ -98,7 +97,7 @@ metadata:
   namespace: colo-svc
   labels: {app: toolcall, colo.tier: backfill, colo.class: integer}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {matchLabels: {app: toolcall, colo.tier: backfill}}
   template:
     metadata:
@@ -118,12 +117,11 @@ spec:
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-worker:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: toolcall}
         ports: [{name: metrics, containerPort: 9100}]
@@ -140,7 +138,7 @@ metadata:
   namespace: colo-svc
   labels: {app: toolcall, colo.tier: overflow, colo.class: integer}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {matchLabels: {app: toolcall, colo.tier: overflow}}
   template:
     metadata:
@@ -156,8 +154,8 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-worker:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: toolcall}
         ports: [{name: metrics, containerPort: 9100}]
@@ -174,7 +172,7 @@ metadata:
   namespace: colo-svc
   labels: {app: analytics, colo.tier: backfill, colo.class: memory-heavy}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {matchLabels: {app: analytics, colo.tier: backfill}}
   template:
     metadata:
@@ -194,12 +192,11 @@ spec:
       tolerations:
       - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
       - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-worker:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: analytics}
         - {name: ARRAY_MB, value: "1500"}
@@ -217,7 +214,7 @@ metadata:
   namespace: colo-svc
   labels: {app: analytics, colo.tier: overflow, colo.class: memory-heavy}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {matchLabels: {app: analytics, colo.tier: overflow}}
   template:
     metadata:
@@ -233,8 +230,8 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker:latest
-        imagePullPolicy: Always
+        image: colo-registry.invalid/colo-worker:v0.2.0
+        imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: analytics}
         - {name: ARRAY_MB, value: "1500"}
@@ -249,7 +246,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata: {name: colo-buffer, namespace: colo-system, labels: {app: colo-buffer}}
 spec:
-  replicas: 1
+  # No `replicas:` field: colo-controller scales this to buffer_replicas (re-applying must not reset it).
   selector: {matchLabels: {app: colo-buffer}}
   template:
     metadata: {labels: {app: colo-buffer}}

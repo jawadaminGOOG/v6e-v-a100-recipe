@@ -1,24 +1,26 @@
 # G4 Co-Location at Scale on GKE — Production Recipe
 
-This directory contains the Kubernetes plumbing to run CPU services on the spare cores of `g4-standard-48` GPU serving nodes across a fleet without ever letting CPU demand scale out GPU nodes or degrade GPU inference tail latency.
+This directory contains the Kubernetes plumbing to run CPU services on the spare cores of `g4-standard-48` GPU serving nodes across a fleet, without letting CPU demand scale out GPU nodes and with a guard on GPU inference tail latency.
 
 It builds on the single-node co-location benchmark in [`../../g4-colo-readme.md`](../../g4-colo-readme.md), where an 8 vCPU / 64 GiB / 1× RTX PRO 6000 vLLM slice (`--api-server-count=4`) leaves **~39 allocatable vCPUs** per `g4-standard-48` node free for integer CPU services.
+
+**Adopting it:** copy `overlays/production-template`, then set your values in that directory only: `images:` in `kustomization.yaml` (registry, tag), `settings.yaml` (node pool names, model), and the `colo-config` and `vllm-ingress` patches in `kustomization.yaml` (TTFT source project, demand, gateway namespace). `base/` holds no project, registry or pool names: it uses the placeholder registry `colo-registry.invalid` and the pool names `your-g4-node-pool` / `your-n4d-node-pool`.
 
 ---
 
 ## 1. Architecture: Backfill + Overflow
 
-Each co-located CPU service runs as **two Kubernetes Deployments** behind a single ClusterIP `Service` (`selector: {app: <svc>}`), balanced continuously by `colo-controller`:
+Each co-located CPU service runs as **two Kubernetes Deployments** behind a single ClusterIP `Service` (`selector: {app: <svc>}`), balanced by `colo-controller`:
 
 ```
                        ┌─────────────────────────────────────────────────┐
                        │ g4-gpu ComputeClass (g4-standard-48 + RTX 6000) │
                        │  kubelet cpuManagerPolicy: static               │
    GPU traffic ──────► │  • vllm (8 CPU, 64Gi, 1 GPU, prio +1,000,000)   │
-    (HPA 700 rps/pod)  │  • <svc>-backfill (2 CPU Guaranteed, prio -100) │ ◄── Spare cores only;
+    (HPA 700 rps/pod)  │  • <svc>-backfill (2 CPU Guaranteed, prio -100) │ ◄── Only on nodes labelled colo.active=true;
                        └───────────────────────┬─────────────────────────┘     CA expendable (< -10),
-                                               │                               NEVER adds a G4 node
-                            demand > G4 slots  │  or TTFT p99 > 1.5× baseline
+                                               │                               never adds a G4 node
+                            demand > G4 slots  │  or guard eviction
                                                ▼  (ColoGuardEvict)
                        ┌─────────────────────────────────────────────────┐
                        │ n4d-cpu ComputeClass (n4d-standard-16, multi-z) │
@@ -27,15 +29,23 @@ Each co-located CPU service runs as **two Kubernetes Deployments** behind a sing
                        └─────────────────────────────────────────────────┘
 ```
 
-### Why Five Primitives Are Required Together
+### Why five primitives are required together
 
-| Requirement | Kubernetes Primitive | Manifest |
+| Requirement | Kubernetes primitive | Manifest |
 |---|---|---|
 | **GPU cores stay physically isolated** | Kubelet `cpuManagerPolicy: static` + Guaranteed QoS + integer CPU requests (`cpu == limit`) | [`infra/kubelet-config.yaml`](infra/kubelet-config.yaml), [`base/vllm.yaml`](base/vllm.yaml) |
 | **CPU demand never scales out GPU nodes** | `PriorityClass` `colo-backfill` (`value: -100`, below GKE Cluster Autoscaler's `-10` expendable cutoff) + `safe-to-evict: "true"` | [`base/cluster.yaml`](base/cluster.yaml), [`base/colo-services.yaml`](base/colo-services.yaml) |
-| **Ordered GPU & CPU capacity tiers** | Custom `ComputeClass` `g4-gpu` (reservation → Spot → on-demand) and `n4d-cpu` (`whenUnsatisfiable: DoNotScaleUp`, `consolidationDelayMinutes: 5`) | [`base/cluster.yaml`](base/cluster.yaml), [`overlays/production-template/kustomization.yaml`](overlays/production-template/kustomization.yaml) |
-| **Zero-drop G4 scale-in** | `colo-buffer` (`value: -5`, `terminationGracePeriodSeconds: 0`) holds warm N4D slots (`>= -10` triggers N4D scale-up; preempted in <1 s by `colo-overflow` at `0`) | [`base/colo-services.yaml`](base/colo-services.yaml), [`base/controller.yaml`](base/controller.yaml) |
+| **Ordered GPU & CPU capacity tiers** | Custom `ComputeClass` `g4-gpu` (reservation → Spot → on-demand in production-template) and `n4d-cpu` (`whenUnsatisfiable: DoNotScaleUp`, `consolidationDelayMinutes: 1`, the GKE minimum) | [`base/cluster.yaml`](base/cluster.yaml), [`overlays/production-template/kustomization.yaml`](overlays/production-template/kustomization.yaml) |
+| **CPU capacity kept during G4 scale-in** | Controller make-before-break dehydrate (section 3) + `colo-buffer` pause pods (`value: -5`, `terminationGracePeriodSeconds: 0`) holding warm N4D slots that `colo-overflow` (`0`) preempts | [`base/colo-services.yaml`](base/colo-services.yaml), [`base/controller.yaml`](base/controller.yaml) |
 | **Cluster-enforced tenant guardrails** | `ValidatingAdmissionPolicy` `colo-g4-guard` + `ResourceQuota` + `NetworkPolicy` | [`base/guardrails.yaml`](base/guardrails.yaml) |
+
+### `colo.active`: backfill only lands where vLLM runs
+
+Backfill Deployments carry a required node affinity on `colo.active In ["true"]`. The controller sets `colo.active=true` on a `colo.role=g4` node when the node is Ready, not cordoned, has no `ToBeDeletedByClusterAutoscaler` taint, and has a non-terminating vLLM pod bound to it. The vLLM pod does not need to be Ready, so backfill packs while vLLM loads and compiles. A G4 node held only by `--min-nodes 1`, or one still booting, gets no backfill.
+
+### Admission policy `colo-g4-guard`
+
+A pod **targets G4** if it tolerates the `cloud.google.com/compute-class=g4-gpu:NoSchedule` taint (including a keyless `operator: Exists`), selects or requires (node affinity) `cloud.google.com/compute-class=g4-gpu`, `colo.role=g4` or `cloud.google.com/gke-accelerator`, or sets `spec.nodeName`. Such a pod must be either the GPU workload (namespace `inference`, GPU, Guaranteed integer CPU) or expendable backfill (`priorityClassName: colo-backfill`, no GPU, integer CPU, `requests == limits`), and must not use `runtimeClassName: gvisor` (section 2). The binding exempts only GKE system namespaces, whose DaemonSets tolerate every taint. In `colo-system` only pods running as service account `colo-node-agent` are exempt. If you run your own all-tolerating DaemonSets (logging, security agents), add their namespace to the binding. The policy matches pod CREATE only.
 
 ---
 
@@ -46,23 +56,54 @@ During live validation on GKE Standard (`v1.35.8-gke.1796000`, `containerd 2.1.7
 - **Root cause:** Under CRI, kubelet creates the pod sandbox (`RunPodSandboxRequest`) in the **pod-level cgroup** (`cpuset.cpus = 0-47`) and writes exclusive `cpuset` allocations only to **container sub-cgroups** (`CreateContainerRequest`). Under `gvisor`, all application threads execute inside the `runsc-sandbox` sentry process in the pod-level cgroup (`0-47`), and gVisor's virtualized `cgroup2fs` exposes all 48 host CPUs.
 - **Measured impact:** Even 1 `gvisor` pod (2 vCPU request, assigned `5,29` in `cpu_manager_state`) drove vLLM's exclusive cores (`1-4,25-28`) to **52–64% busy**; 9 `gvisor` pods pushed vLLM TTFT p99 from **20 ms → 50 ms (2.5×)**. Running the identical `sandbox` workload under default `runc` kept container processes strictly inside their assigned 2-core cpusets and held vLLM TTFT p99 at **20–22 ms (1.0–1.1×)**.
 - **Recipe configuration:**
-  - **`sandbox-backfill` (on shared G4 GPU nodes):** Uses default `runc` so kubelet exclusive cpusets are kernel-enforced, hardened with `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`, `seccompProfile: RuntimeDefault`, and `NetworkPolicy` blocking all egress except DNS and `toolcall`.
+  - **`sandbox-backfill` (on shared G4 GPU nodes):** Uses default `runc` so kubelet exclusive cpusets are kernel-enforced, hardened with `runAsNonRoot: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`, `seccompProfile: RuntimeDefault`, and `NetworkPolicy` blocking all egress except DNS and `toolcall`. The admission policy rejects gVisor on any G4-targeting pod.
   - **`sandbox-overflow` (on dedicated N4D CPU nodes):** Uses `runtimeClassName: gvisor` with `NPROC=2` (no co-located GPU serving loop on N4D).
+  - **G4 node pool:** created **without** `--sandbox type=gvisor` ([`infra/create-node-pools.sh`](infra/create-node-pools.sh)), so G4 pods need no gVisor toleration. The demo cluster's G4 pool predates this change; `overlays/demo` adds the toleration back for it.
 
 ---
 
-## 3. Latency Guard (`colo-controller`)
+## 3. Controller loop, scale-in and latency guard (`colo-controller`)
 
+The controller reconciles every 2 s (`LOOP_S`). Each loop it reads `colo-config`, lists nodes and pods, sets `colo.active`, runs the guard, splits each service's demand into backfill (G4 spare slots) and overflow (N4D), and scales `colo-buffer`. Full detail: [`components/controller/README.md`](components/controller/README.md).
+
+### Spare slots and reserve
+Spare CPU on a G4 node = allocatable − requests of every non-backfill pod − `reserve_cpu_per_node` (2 cores, one 2-vCPU slot left for the shared cpuset used by DaemonSets and node agents). Wave 1 measured **19 two-vCPU slots** per node with no reserve (`.agents/wave-1/logs/g1g3.verdict.json`); with the 2-core reserve the expected count is 18 (not measured).
+
+### G4 scale-in: make-before-break dehydrate
+When a G4 node loses its vLLM pod (HPA scale-in, rollout, crash), or is cordoned or marked for deletion by Cluster Autoscaler:
+1. The controller removes `colo.active` at once, so no new backfill lands there, and drops the node from allocation, so overflow on N4D is scaled up first.
+2. It deletes the node's remaining backfill pods, per service, only when ready overflow plus ready backfill on eligible nodes covers that service's demand, or after `dehydrate_grace_s` (60 s), or at once if the node is cordoned or carries the Cluster Autoscaler deletion taint.
+3. A vLLM `Recreate` rollout that brings vLLM back within the grace deletes nothing.
+
+Within a service the scale plan never lowers one tier until the other tier's ready pods cover the target. This make-before-break dehydrate is new in wave 2; its live behaviour is **not measured yet** (wave-2 gate clause 5b). The wave-1 scale-in run kept sandbox ready ≥ demand in 100% of 213 samples with the buffer set to 15 replicas, but predates both `colo.active` gating and this change (`.agents/wave-1/logs/g1g3.verdict.json`).
+
+### Latency guard
 CPU cgroups bound core count and RAM capacity, **not** L3 cache or memory-bus bandwidth. Memory-bandwidth-heavy workloads (e.g., 3D stencil sweeps, large-array analytics) contend with CPU→GPU host transfers even on disjoint physical cores.
 
 1. Each CPU service Deployment carries `colo.class: integer` (`sandbox`, `toolcall`) or `colo.class: memory-heavy` (`analytics`).
-2. `colo-controller` merges sliding 30 s per-node TTFT histograms every 5 s:
-   - If a G4 node's TTFT p99 exceeds `factor × baseline_ttft_p99_ms` (default `1.5×` with `>= 200` requests in window), it emits a Kubernetes `Event` (`reason: ColoGuardEvict`), labels the node `colo.block.memory-heavy=true`, deletes `memory-heavy` backfill pods on that node, and shifts their replicas to `n4d-cpu` overflow before shrinking backfill.
-   - Backfill pods carry required node affinity `colo.block.<class> NotIn ["true"]`, preventing the scheduler from placing evicted pods back onto a guarded G4 node.
-   - If TTFT p99 remains above threshold `escalate_s` (60 s) after evicting `memory-heavy`, the guard escalates to `colo.block.integer=true`.
-   - After `cooldown_s` (600 s) of healthy TTFT p99, `ColoGuardRelease` clears the block label.
+2. Each loop the controller takes per-node TTFT p99 over a 30 s window (`window_s`) from the configured TTFT source, on nodes that have a vLLM pod:
+   - The guard only reacts when the breaching node has memory-heavy backfill. If p99 exceeds `factor × baseline_ttft_p99_ms` (1.5×, with at least 200 requests in the window) and memory-heavy backfill is present, it emits a `ColoGuardEvict` Event, labels the node `colo.block.memory-heavy=true` and deletes memory-heavy backfill pods on that node. A breach with only integer backfill (or none) is ignored.
+   - Guard evictions are immediate (TTFT first). Overflow is raised in the same loop, so capacity for the evicted pods dips for one N4D pod start.
+   - Backfill pods carry required node affinity `colo.block.<class> NotIn ["true"]`, so evicted pods do not return to a guarded node.
+   - If p99 is still above threshold `escalate_s` after the memory-heavy block, the guard escalates to `colo.block.integer=true` and evicts integer backfill too. The recipe default is 60 s; `escalate_s: 0` disables escalation (integer backfill is then never evicted). The demo overlay uses 0.
+   - After `cooldown_s` of healthy p99 (600 s by default, 45 s in the demo overlay), `ColoGuardRelease` clears the block labels.
+3. **No signal fails safe.** With no baseline (`baseline_ttft_p99_ms: null`, the base and production default), too few samples, or a TTFT source that is down, stale or `none`, the guard makes no transition, blocks nothing and evicts nothing. `/state` reports `guard_state: "no_signal"` and `/metrics` reports `colo_guard_data_sufficient 0`. Alert on that metric. Set the baseline after a solo run with `POST /baseline` (same source as the guard) or in `colo-config`.
 
-> **Production metric source:** In the demo overlay, per-pod TTFT histograms come from `inference/loadgen`. In production (where `loadgen` is omitted), point the guard at your inference gateway's per-backend streaming TTFT histogram or Prometheus `vllm:time_to_first_token_seconds_bucket` (when running `--api-server-count=1` or once upstream multi-API-server Prometheus histogram aggregation is enabled).
+Measured in wave 1 (`.agents/wave-1/logs/g4.verdict.json`, baseline 18 ms): integer backfill kept p99 at 22 ms or below (threshold 27 ms) and the guard took no action; with memory-heavy backfill and the guard off, median p99 was 36 ms; with the guard on, it evicted within 7 s and p99 was back to 18 ms within 35 s.
+
+### Production: TTFT source and IAM
+- `overlays/demo` reads per-node TTFT histograms from `inference/loadgen` (`ttft_source.type: loadgen`).
+- `overlays/production-template` reads `vllm:time_to_first_token_seconds` from Google Cloud Managed Service for Prometheus (`ttft_source.type: prometheus`), scraped by the `inference/vllm` PodMonitoring in `base/vllm.yaml` (keep it). Set `ttft_source.prometheus.project` in the template. With `--api-server-count=4`, vLLM exposes one combined TTFT histogram per pod. Its buckets are coarse near 20–40 ms (`le` 0.02, 0.04), so p99 is interpolated; take the baseline from the same source.
+- The controller's Kubernetes service account `colo-system/colo-controller` needs `roles/monitoring.viewer` through Workload Identity, and egress to `monitoring.googleapis.com:443`. `infra/create-node-pools.sh` grants it:
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
+gcloud projects add-iam-policy-binding "$PROJECT" --role=roles/monitoring.viewer --condition=None \
+  --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${PROJECT}.svc.id.goog/subject/ns/colo-system/sa/colo-controller"
+```
+
+### When the controller is down
+Placement freezes: Deployment replica counts stay as they are, the guard stops, and `colo.active` labels persist. A node that loses vLLM while the controller is down keeps `colo.active=true`, so new backfill can still land there until the controller returns. The admission policy and the `-100` priority still apply. A liveness probe on `/healthz` restarts a controller whose loop has not finished an iteration for 10 s (5 × `LOOP_S`, after a 60 s start-up grace). Also alert on `time() - colo_last_tick_timestamp_seconds`.
 
 ---
 
@@ -72,27 +113,30 @@ CPU cgroups bound core count and RAM capacity, **not** L3 cache or memory-bus ba
 g4_colo/recipe/
 ├── infra/
 │   ├── kubelet-config.yaml        # cpuManagerPolicy: static
-│   └── create-node-pools.sh       # G4 GPU pool, multi-zone N4D CPU pool, Cloud NAT, Workload Identity
-├── base/
+│   └── create-node-pools.sh       # G4 GPU pool, multi-zone N4D CPU pool, Cloud NAT, Workload Identity (env vars required)
+├── base/                          # Environment-neutral; placeholder registry and pool names; do not apply directly
 │   ├── cluster.yaml               # Namespaces, PriorityClasses, g4-gpu & n4d-cpu ComputeClasses
 │   ├── guardrails.yaml            # ValidatingAdmissionPolicy, ResourceQuota, NetworkPolicies
 │   ├── custom-metrics-adapter.yaml# Stackdriver custom metrics adapter for Managed Prometheus HPA
 │   ├── vllm.yaml                  # 8 vCPU / 64Gi / 1 GPU vLLM + PodMonitoring + 700 rps/pod HPA
 │   ├── colo-services.yaml         # Generated backfill/overflow Deployments + colo-buffer + PodMonitoring
-│   ├── gen_colo_services.py       # Generator keeping backfill & overflow specs symmetric
-│   ├── controller.yaml            # colo-controller Deployment + RBAC + ConfigMap + colo-node-agent DaemonSet
+│   ├── gen_colo_services.py       # Generator for colo-services.yaml (edit this, then re-run it)
+│   ├── controller.yaml            # colo-controller Deployment + RBAC + colo-config + colo-node-agent DaemonSet
 │   └── loadgen.yaml               # Open-loop streaming Poisson load generator (demo only)
 ├── overlays/
-│   ├── demo/                      # Live demo overlay applied to g4cluster-jawadamin-us-west8-0726
-│   └── production-template/       # Drops loadgen, enables Reservation -> Spot -> On-Demand G4 priority tiers
+│   ├── demo/                      # The wave-1/2 demo cluster: concrete registry, pools, demo guard settings
+│   ├── production-template/       # Start here: no loadgen, Prometheus TTFT source, G4 reservation -> Spot -> on-demand
+│   └── scenario-*/                # Demo scenarios on top of overlays/demo (demand and load only)
 ├── components/
 │   ├── controller/                # Pure decision logic (colo_logic.py) + K8s reconcile loop (controller.py)
 │   ├── node-agent/                # Read-only /var/lib/kubelet/cpu_manager_state + /proc/stat exporter
 │   ├── worker/                    # Synthetic sandbox, toolcall, and memory-bandwidth analytics workers
 │   ├── loadgen/                   # Streaming OpenAI client with per-pod 2 ms TTFT histograms
-│   └── cloudbuild.yaml            # Builds and pushes all four component images
+│   └── cloudbuild.yaml            # Builds and pushes the four component images (_REGISTRY required)
+├── scripts/
+│   └── check_readme.py            # Fails if this README's defaults differ from the manifests and code
 └── tests/
-    ├── admission_cases.py         # Server-side dry-run verification of ValidatingAdmissionPolicy + ResourceQuota
+    ├── admission_cases.py         # Server-side dry-run of the admission policy (incl. bypass cases) + quota
     ├── netpol_check.py            # Live verification of G4 exclusive cpusets + sandbox NetworkPolicy isolation
     └── gate.py                    # End-to-end autoscaling, CPU spill, scale-in, and latency-guard verifier
 ```
@@ -101,41 +145,88 @@ g4_colo/recipe/
 
 ## 5. Deploy & Verify
 
-### Step 1: Create Node Pools and IAM Bindings
-Edit project/cluster/zone variables in [`infra/create-node-pools.sh`](infra/create-node-pools.sh) and run once on a GKE Standard cluster (`>= 1.32` with Managed Prometheus enabled):
+### Step 1: Create node pools and IAM bindings
+On a GKE Standard cluster (`>= 1.32`, Managed Prometheus enabled). The script refuses to run without these variables:
 
 ```bash
-bash g4_colo/recipe/infra/create-node-pools.sh
+PROJECT=my-project CLUSTER=my-cluster REGION=us-central1 SUFFIX=prod \
+G4_ZONES=us-central1-a N4D_ZONES=us-central1-a,us-central1-b \
+  bash g4_colo/recipe/infra/create-node-pools.sh
 ```
 
-### Step 2: Build Component Images
+It prints the pool names to copy into `overlays/<yours>/settings.yaml`. Set `CREATE_LOADGEN_POOL=1` only for the demo.
+
+### Step 2: Build component images
 ```bash
 gcloud builds submit g4_colo/recipe/components \
   --config g4_colo/recipe/components/cloudbuild.yaml \
-  --project "$PROJECT" \
-  --substitutions _TAG=latest
+  --project "$PROJECT" --region "$REGION" \
+  --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.0
 ```
 
-### Step 3: Apply the Kustomize Overlay
+Images are pinned (`v0.2.0`) with `imagePullPolicy: IfNotPresent`. vLLM uses the public `vllm/vllm-openai:v0.32.0`; map it to a mirror in `images:` if you have one.
+
+### Step 3: Configure and apply an overlay
 ```bash
-# Demo stack (includes synthetic loadgen):
-kubectl kustomize g4_colo/recipe/overlays/demo | head -n 30
-kubectl apply -k g4_colo/recipe/overlays/demo
+cp -r g4_colo/recipe/overlays/production-template g4_colo/recipe/overlays/prod
+# edit overlays/prod/kustomization.yaml (images, colo-config, vllm-ingress) and overlays/prod/settings.yaml
+kubectl kustomize g4_colo/recipe/overlays/prod      # review
+kubectl apply -k g4_colo/recipe/overlays/prod
 
-# Production template (after replacing pool/image names in overlays/production-template/kustomization.yaml):
-kubectl kustomize g4_colo/recipe/overlays/production-template
+# Demo stack (includes synthetic loadgen):
+kubectl apply -k g4_colo/recipe/overlays/demo
 ```
 
-### Step 4: Verify Guardrails & Live Behavior
+### Step 4: Verify guardrails and the README
 ```bash
 python3 g4_colo/recipe/tests/admission_cases.py
 python3 g4_colo/recipe/tests/netpol_check.py
+python3 g4_colo/recipe/scripts/check_readme.py
 ```
 
-### Sizing `buffer_replicas` for Zero-Drop G4 Scale-In
-One `g4-standard-48` node with an 8-vCPU vLLM pod provides ~39 spare vCPUs (**19 two-vCPU backfill slots**).
-- **Minimal cost (`buffer_replicas: 1`, default in `base/`):** Keeps 1 `n4d-standard-16` node warm (~7 two-vCPU slots); overflow above 7 pods waits ~60–90 s for Cluster Autoscaler to add N4D nodes.
-- **Zero-drop `N-1` G4 scale-in (`buffer_replicas: 15`):** Keeps 30 vCPUs (~3 `n4d-standard-16` nodes = 21 two-vCPU slots) warm at `priority: -5`, absorbing the simultaneous drain of an entire G4 node's backfill pods in `< 10 s`.
+### Sizing the quota (`max_total_cpu`)
+Make-before-break briefly runs a moved pod in both tiers. Size `colo-svc-quota` `requests.cpu` to at least max total demand × 2 vCPU + one G4 node's backfill (18 pods × 2 vCPU = 36 vCPU). The recipe ships `requests.cpu: "180"` and `max_total_cpu: 144` (= 180 − 36), so the controller rejects any demand above 72 pods total (`POST /config` returns 400, an edited ConfigMap is ignored and the last good config kept) instead of letting ReplicaSets hit the quota. Raise both together.
 
-### Multi-Zone G4 Guidance
-Where G4 capacity spans multiple zones in a region, list all G4 zones in `--node-locations` on your reservation, Spot, and on-demand G4 node pools and set `--location-policy=ANY` so Cluster Autoscaler places new `vllm` replicas into whichever zone currently has free G4 capacity. Both `<svc>-backfill` and `n4d-cpu` overflow operate across zones automatically.
+### Sizing `buffer_replicas`
+- **Cost floor:** with `buffer_replicas: 1` (the default), one `n4d-standard-16` node stays up 24×7 to hold the warm buffer pod. Set the buffer to 0 replicas for cost-first deployments, accepting that overflow then waits for Cluster Autoscaler to add an N4D node (not measured; the old 60–90 s estimate has no log behind it).
+- **Absorbing a whole G4 node:** size the buffer to one G4 node's backfill (18 pods) so that a scale-in's overflow lands on warm N4D capacity. Wave 1 ran scale-in with the buffer at 15 replicas (see section 3). How fast a buffer pod is preempted and an overflow pod becomes Ready is not measured.
+
+### vLLM compile and weight cache
+`base/vllm.yaml` keeps Hugging Face weights and the vLLM/Inductor compile cache on hostPath `/var/lib/colo/hf`. This helps only when vLLM returns to a node it has already used (pod restart or reschedule). A new node added by the autoscaler starts cold: it downloads weights and compiles again, which is the main scale-out case. The speedup is not measured. For production, prefer a secondary boot disk, Hyperdisk ML or GCS FUSE for weights and cache.
+
+### Measured scale-out timings (wave 1)
+From `.agents/wave-1/logs/g1g3.verdict.json` (before `colo.active` gating and the 2 s loop): the HPA asked for a second vLLM replica 70.2 s after load rose from 300 to 1200 rps; backfill filled 17 of 19 slots on the new node 11 s after vLLM became Ready; the HPA removed the replica 110.6 s after load fell, and Cluster Autoscaler removed the extra G4 node 436 s later.
+
+### Multi-zone G4 guidance
+Where G4 capacity spans multiple zones in a region, list all G4 zones in `--node-locations` on your reservation, Spot, and on-demand G4 node pools and set `--location-policy=ANY` so Cluster Autoscaler places new `vllm` replicas into whichever zone has free G4 capacity. Both `<svc>-backfill` and `n4d-cpu` overflow operate across zones.
+
+---
+
+## 6. Defaults
+
+Checked by [`scripts/check_readme.py`](scripts/check_readme.py) against `DEFAULT_CONFIG` in `components/controller/colo_logic.py`, `LOOP_S` in `controller.py`, the `colo-config` ConfigMap in `base/` and each overlay, and the manifests. "Code" is what the controller uses for a key left out of `colo-config`; "—" = not applicable.
+
+<!-- defaults-table:start -->
+| Setting | Code | base | demo | production-template |
+|---|---|---|---|---|
+| `loop period (s)` | 2 | 2 | 2 | 2 |
+| `guard.enabled` | true | true | true | true |
+| `guard.baseline_ttft_p99_ms` | 60 | null | 20 | null |
+| `guard.factor` | 1.5 | 1.5 | 1.5 | 1.5 |
+| `guard.window_s` | 30 | 30 | 30 | 30 |
+| `guard.min_requests` | 200 | 200 | 200 | 200 |
+| `guard.cooldown_s` | 600 | 600 | 45 | 600 |
+| `guard.escalate_s` | 60 | 60 | 0 | 60 |
+| `buffer_replicas` | 1 | 1 | 1 | 1 |
+| `reserve_cpu_per_node` | 2 | 2 | 2 | 2 |
+| `dehydrate_grace_s` | 60 | 60 | 60 | 60 |
+| `max_total_cpu` | null | 144 | 144 | 144 |
+| `ttft_source.type` | loadgen | loadgen | loadgen | prometheus |
+| `colo-svc-quota requests.cpu` | — | 180 | 180 | 180 |
+| `consolidationDelayMinutes g4-gpu` | — | 1 | 1 | 1 |
+| `consolidationDelayMinutes n4d-cpu` | — | 1 | 1 | 1 |
+| `vLLM HPA target (rps/replica)` | — | 700 | 700 | 700 |
+| `vLLM HPA maxReplicas` | — | 2 | 2 | 8 |
+<!-- defaults-table:end -->
+
+The demo overlay's guard values are tuned for a presenter: a measured 20 ms baseline for Qwen3-1.7B on this shape, a 45 s cooldown so scenarios finish quickly, and escalation off so the demo shows memory-heavy eviction only.

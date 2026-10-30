@@ -1,0 +1,11 @@
+# Production settings: edit these values (and the `images:` block in kustomization.yaml) for your environment.
+# local-config: kustomize reads this ConfigMap for `replacements` and never emits it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: colo-settings
+  annotations: {config.kubernetes.io/local-config: "true"}
+data:
+  g4NodePool: your-g4-ondemand-pool    # REPLACE: on-demand G4 pool (G4_POOL in infra/create-node-pools.sh)
+  n4dNodePool: your-n4d-pool           # REPLACE: N4D overflow pool (N4D_POOL in infra/create-node-pools.sh)
+  model: Qwen/Qwen3-1.7B-Base          # REPLACE: Hugging Face model id served by vLLM (--model)

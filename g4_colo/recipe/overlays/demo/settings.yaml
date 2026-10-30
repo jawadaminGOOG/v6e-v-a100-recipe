@@ -1,0 +1,12 @@
+# Demo settings: the single place for this overlay's environment values that are not images.
+# Images (registry + tag) are set in kustomization.yaml `images:`.
+# local-config: kustomize reads this ConfigMap for `replacements` and never emits it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: colo-settings
+  annotations: {config.kubernetes.io/local-config: "true"}
+data:
+  g4NodePool: g4gpu-jawadamin-us-west8-1026     # ComputeClass g4-gpu on-demand pool
+  n4dNodePool: n4dcpu-jawadamin-us-west8-1026   # ComputeClass n4d-cpu pool
+  model: Qwen/Qwen3-1.7B-Base                   # vLLM --model and loadgen MODEL

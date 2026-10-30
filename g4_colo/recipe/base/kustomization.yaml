@@ -1,3 +1,7 @@
+# Base: environment-neutral. Do not apply directly. Images point at the placeholder registry
+# `colo-registry.invalid` and ComputeClasses at `your-g4-node-pool` / `your-n4d-node-pool`.
+# Overlays set registry, image tags, node pool names and the model in one place
+# (overlays/<name>/kustomization.yaml `images:` + overlays/<name>/settings.yaml).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -8,12 +12,3 @@ resources:
 - controller.yaml
 - colo-services.yaml
 - guardrails.yaml
-images:
-- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
-  newTag: latest
-- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen
-  newTag: latest
-- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-controller
-  newTag: latest
-- name: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
-  newTag: latest

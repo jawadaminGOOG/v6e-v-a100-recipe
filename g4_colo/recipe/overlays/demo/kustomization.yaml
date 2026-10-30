@@ -1,6 +1,76 @@
-# Demo overlay: the full stack exactly as validated, including the synthetic load generator.
+# Demo overlay: the full stack as run on the wave-1/2 demo cluster, including the synthetic load generator.
 #   kubectl apply -k g4_colo/recipe/overlays/demo
+#
+# Everything environment-specific for the demo lives in this file (images) and settings.yaml (node pools, model).
+# Demo-only choices, all documented in ../../README.md:
+#   - colo-config guard uses a measured 20 ms baseline for Qwen3-1.7B on this shape, a 45 s cooldown so the
+#     scenarios finish in a presenter's time box, and escalate_s 0 (integer backfill is never evicted; the demo
+#     shows memory-heavy eviction only). production-template ships escalate_s 60 / cooldown_s 600 / no baseline.
+#   - The demo G4 pool was created with GKE Sandbox before finding 1.16, so it still carries the
+#     sandbox.gke.io/runtime=gvisor taint; G4 pods here tolerate it. New pools from infra/create-node-pools.sh
+#     do not have this taint.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - ../../base
+- settings.yaml
+images:
+- name: colo-registry.invalid/colo-worker
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
+  newTag: v0.2.0
+- name: colo-registry.invalid/colo-loadgen
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen
+  newTag: v0.2.0
+- name: colo-registry.invalid/colo-controller
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-controller
+  newTag: v0.2.0
+- name: colo-registry.invalid/colo-node-agent
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
+  newTag: v0.2.0
+# Private mirror of the public vllm/vllm-openai image (same tag).
+- name: vllm/vllm-openai
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai
+  newTag: v0.32.0
+patches:
+- target: {kind: ConfigMap, name: colo-config, namespace: colo-system}
+  patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata: {name: colo-config, namespace: colo-system}
+    data:
+      config.json: |
+        {"demand": {"sandbox": 10, "toolcall": 9, "analytics": 0},
+         "guard": {"enabled": true, "baseline_ttft_p99_ms": 20, "factor": 1.5, "cooldown_s": 45, "window_s": 30,
+                   "escalate_s": 0, "min_requests": 200},
+         "buffer_replicas": 1,
+         "reserve_cpu_per_node": 2,
+         "dehydrate_grace_s": 60,
+         "max_total_cpu": 144,
+         "ttft_source": {"type": "loadgen"}}
+# Demo G4 pool still has the GKE Sandbox taint (see header).
+- target: {kind: Deployment, labelSelector: colo.tier=backfill}
+  patch: |-
+    - op: add
+      path: /spec/template/spec/tolerations/-
+      value: {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
+- target: {kind: Deployment, name: vllm, namespace: inference}
+  patch: |-
+    - op: add
+      path: /spec/template/spec/tolerations/-
+      value: {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
+replacements:
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4NodePool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.n4dNodePool}
+  targets:
+  - select: {kind: ComputeClass, name: n4d-cpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.model}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.containers.[name=vllm].args.0']
+    options: {delimiter: "=", index: 1}
+  - select: {kind: Deployment, name: loadgen}
+    fieldPaths: ['spec.template.spec.containers.[name=loadgen].env.[name=MODEL].value']

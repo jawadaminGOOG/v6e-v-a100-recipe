@@ -5,7 +5,10 @@ Kept as a generator so the six Deployments stay identical except for tier-specif
 """
 from pathlib import Path
 
-REG = "us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026"
+# Placeholder registry (the reserved .invalid TLD never resolves, so an unedited image never pulls from a
+# public registry by accident). Overlays set the real registry and tag with kustomize `images:`.
+REG = "colo-registry.invalid"
+TAG = "v0.2.0"
 # P6 live probe on GKE v1.35.8: under runtimeClassName=gvisor, runsc-sandbox executes in the pod-level
 # cgroup (cpuset 0-47) rather than the container sub-cgroup pinned by kubelet's static CPU manager,
 # driving vLLM's exclusive cores (1-4,25-28) to 52-84% busy and TTFT p99 from 20 ms to 50 ms (2.5x).
@@ -21,9 +24,10 @@ SERVICES = [
     ("toolcall", "toolcall", "integer", 2, "2Gi", None, None),
     ("analytics", "analytics", "memory-heavy", 2, "6Gi", None, None),
 ]
+# The G4 pool is created without GKE Sandbox (infra/create-node-pools.sh), so G4 pods need no gVisor toleration.
+# A cluster whose G4 pool still has `--sandbox type=gvisor` adds it back in its overlay (see overlays/demo).
 G4_TOL = """      - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
-      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
-      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}"""
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}"""
 N4D_TOL = """      - {key: cloud.google.com/compute-class, operator: Equal, value: n4d-cpu, effect: NoSchedule}
       - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}"""
 
@@ -73,7 +77,7 @@ metadata:
   namespace: colo-svc
   labels: {{app: {name}, colo.tier: {tier}, colo.class: {cls}}}
 spec:
-  replicas: 0
+  # No `replicas:` field: colo-controller owns the replica count (re-applying must not reset it).
   selector: {{matchLabels: {{app: {name}, colo.tier: {tier}}}}}
   template:
     metadata:
@@ -85,8 +89,8 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: {REG}/colo-worker:latest
-        imagePullPolicy: Always
+        image: {REG}/colo-worker:{TAG}
+        imagePullPolicy: IfNotPresent
         env:
         - {{name: MODE, value: {mode}}}
 {extra_env}        ports: [{{name: metrics, containerPort: 9100}}]
@@ -102,11 +106,13 @@ def main():
     for s in SERVICES:
         for tier in ("backfill", "overflow"):
             docs.append(deploy(*s, tier))
+    # Warm N4D buffer. With buffer_replicas >= 1 it keeps one n4d-standard-16 node up 24x7 (a cost floor);
+    # set buffer_replicas: 0 in colo-config for cost-first deployments.
     docs.append(f"""apiVersion: apps/v1
 kind: Deployment
 metadata: {{name: colo-buffer, namespace: colo-system, labels: {{app: colo-buffer}}}}
 spec:
-  replicas: 1
+  # No `replicas:` field: colo-controller scales this to buffer_replicas (re-applying must not reset it).
   selector: {{matchLabels: {{app: colo-buffer}}}}
   template:
     metadata: {{labels: {{app: colo-buffer}}}}
