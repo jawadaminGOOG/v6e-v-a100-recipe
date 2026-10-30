@@ -326,3 +326,116 @@ figcaption { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.3rem; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* G4 core maps scale to the space their row actually has (not the viewport), so the three L3
+   domains always stay on one line: zoom, a side panel or a narrow window shrinks tiles instead of
+   wrapping the third L3 box onto its own line. 24 tiles + 3 L3 boxes (padding, border, gaps) ≈ 124px. */
+.nrow { grid-template-columns: var(--name-w) minmax(0, 1fr); }
+.nrow > .map { container-type: inline-size; min-width: 0; }
+.nrow .cmap { flex-wrap: nowrap; }
+.nrow .cmap, .nrow .flat {
+  --tile: clamp(12px, calc((100cqw - 124px) / 24), 48px);
+  --tile-h: calc(var(--tile) * 1.46);
+}
+.nrow .flat { max-width: 100%; }
+
+/* ------------------------------------------------------------ one pane of glass
+   The live state (header, story, controls, every node, lanes) fits the viewport with no scrolling
+   at 1440x900 and up. The pane is exactly one viewport tall; the body row takes what is left, and
+   G4 tiles take their height from what is left in #nodes (a size container), divided by the number
+   of G4 rows, and their width from their own row (cqw). The three expanders sit in the last row;
+   opening one lets the pane grow and the page scroll. */
+:root { font-size: 14px; --name-w: 64px; --gap: 10px; }
+@media (max-width: 1600px), (max-height: 940px) { :root { font-size: 13px; } }
+body { line-height: 1.3; }
+/* flex, not grid: hidden or empty rows (alerts, scenario banner) must not shift the track that grows */
+.pane { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.pane > .body { flex: 1 1 0; }
+.pane:has(details[open]) { height: auto; min-height: 100dvh; overflow: visible; }
+.top { padding: 0.5rem 1rem 0.4rem; }
+.top h1 { font-size: 1.2rem; }
+.top .lede { font-size: 0.88rem; }
+.alerts { padding: 0 1rem 0.4rem; }
+.alert { padding: 0.35rem 0.8rem; font-size: 0.9rem; }
+
+/* story */
+.story { margin: 0 1rem; }
+.stmt { padding: 8px 16px 10px; }
+.say { font-size: 0.85rem; }
+.big { font-size: 2.15rem; }
+.big small { font-size: 0.9rem; }
+.gpu .big { font-size: 1.85rem; }
+.lim { font-size: 0.8rem; }
+.vis-bar { margin-top: 0.4rem; height: 0.6rem; }
+.vis-nodes { margin-top: 0.4rem; min-height: 1.05rem; }
+.vis-nodes i { width: 1.05rem; height: 1.05rem; }
+.vis-key { font-size: 0.7rem; margin-top: 0.2rem; }
+svg.spark { height: 40px; }
+
+/* body */
+.body { padding: var(--gap) 1rem; grid-template-columns: 14.5rem minmax(0, 1fr); align-items: stretch; min-height: 0; }
+.rail { position: static; padding: 0.7rem 0.9rem; gap: 0.8rem; align-content: start; overflow: hidden; }
+fieldset { gap: 0.85rem; }
+.grp { gap: 0.4rem; }
+h3 { font-size: 0.72rem; }
+.field label { font-size: 0.92rem; }
+.field output { font-size: 1rem; }
+.spill { min-height: 0.95rem; font-size: 0.76rem; }
+.guard-row label { font-size: 0.9rem; }
+.guard-row small { font-size: 0.74rem; }
+details.more { padding-top: 0.55rem; font-size: 0.82rem; }
+
+/* stage: banner, heading, nodes (fills), lanes */
+.stage { padding: 0.6rem 0.9rem 0.7rem; gap: 0.5rem; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.stage > .nodes { flex: 1 1 0; }
+.stage > :not(.nodes) { flex: none; }
+.stage-h h2 { font-size: 0.95rem; }
+.legend { font-size: 0.74rem; gap: 0.2rem 0.7rem; }
+.banner { padding: 0.35rem 0.8rem; gap: 0.3rem; }
+.nodes {
+  container-type: size; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: 6px;
+  --g4n: 2; --ghost: 0; --n4dn: 1;
+  /* height available to one G4 tile row: what is left after the N4D line, the ghost row,
+     and each G4 row's L3 header, padding and borders (26 px) plus gaps, split over 2 rows per node */
+  --th-budget: calc((100cqh - var(--n4dn) * 78px - var(--ghost) * 30px - var(--g4n) * 32px) / (2 * var(--g4n)));
+}
+.nname { gap: 0.2rem; }
+.nname b { font-size: 0.9rem; }
+.flag { font-size: 0.66rem; }
+.nrow { gap: 0.6rem; }
+.nrow .cmap, .nrow .flat {
+  --tile: clamp(12px, min(calc((100cqw - 124px) / 24), calc(var(--th-budget) * 1.5)), 60px);
+  --tile-h: clamp(14px, min(calc(var(--tile) * 1.8), var(--th-budget)), 108px);
+}
+.nrow .cmap { gap: 6px; width: max-content; max-width: 100%; } /* breach outline hugs the 3 L3 boxes */
+.llc { padding: 3px 5px 4px; }
+.llc-h { font-size: 0.62rem; margin-bottom: 2px; line-height: 1.1; }
+.tiles { gap: 2px; }
+.cpu .lt { top: 2px; }
+.ghost { margin-left: calc(var(--name-w) + 0.6rem); padding: 0.25rem 0.7rem; font-size: 0.8rem; flex: none; }
+.n4d-line { padding-top: 6px; gap: 0.6rem; flex: none; }
+.n4ds { gap: 0.8rem; flex-wrap: nowrap; }
+.n4d-one { gap: 0.1rem; }
+.n4d-one .t { font-size: 0.7rem; }
+/* N4D tiles share one row however many N4D nodes there are (JS sets --n4dc) */
+.n4d-one .tiles, .n4d-one .flat { --tile: clamp(7px, calc((100cqw - var(--name-w) - 20px - var(--n4dc, 4) * 44px) / (8 * var(--n4dc, 4))), 22px); --tile-h: 20px; }
+
+/* lanes */
+.lanes { padding-top: 0.45rem; gap: 0.2rem 0.6rem; grid-template-columns: var(--name-w) minmax(0, 1.5fr) minmax(0, 1fr); }
+.lanes .zh { font-size: 0.7rem; }
+.lane-n { font-size: 0.82rem; }
+.zone { min-height: 22px; padding: 2px; gap: 2px; }
+.pod { width: 16px; height: 16px; border-radius: 3px; }
+
+/* expanders: one compact row at the bottom of the pane */
+.details { padding: 0 1rem 0.5rem; display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; }
+.details > details { padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+.details > details[open] { flex: 1 1 100%; order: -1; }
+.details .foot { padding: 0.35rem 0; margin-left: auto; font-size: 0.72rem; }
+
+@media (max-width: 900px) {
+  .pane { height: auto; overflow: visible; }
+  .nodes { container-type: inline-size; }
+  .nrow .cmap, .nrow .flat { --tile-h: calc(var(--tile) * 1.35); }
+}

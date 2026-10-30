@@ -361,6 +361,7 @@ function flatCells(n) {
   let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(n.sys_cpu || 0);
   while (reserved-- > 0 && cells.length < cap) cells.push({ app: "system", pending: false });
   while (cells.length < cap) cells.push({ app: "free", pending: false });
+  cells.length = Math.min(cells.length, cap); // never draw more cells than the node has vCPUs
   const cols = Math.max(1, Math.ceil(cap / 2)); // two rows, like the hyperthread pairs of the core map
   return `<div class="flat" style="--cols:${cols}" role="img" aria-label="vCPU requests (node agent not reporting${n.ready ? "" : "; node starting"})">${cells.map((c) => `<i class="cpu a-${c.app}${c.pending ? " pending" : ""}"><i class="fill"></i><b class="lt">${TAG[c.app] || ""}</b></i>`).join("")}</div>`;
 }
@@ -447,6 +448,11 @@ function renderNodes(s) {
     [...wrap.children].slice(n4d.length).forEach((x) => x.remove());
     want.push(line);
   }
+  // The CSS sizes G4 tile height from the space left in #nodes, divided by the rows it must hold.
+  root.style.setProperty("--g4n", String(Math.max(1, g4.length)));
+  root.style.setProperty("--ghost", want.some((el) => el.classList.contains("ghost")) ? "1" : "0");
+  root.style.setProperty("--n4dn", n4d.length ? "1" : "0");
+  root.style.setProperty("--n4dc", String(Math.max(1, n4d.length)));
   if (!want.length) { root.innerHTML = `<p class="empty">No G4 or N4D nodes reported yet.</p>`; return; }
   root.querySelector(".empty")?.remove();
   want.forEach((el, i) => { if (root.children[i] !== el) root.insertBefore(el, root.children[i] || null); });
