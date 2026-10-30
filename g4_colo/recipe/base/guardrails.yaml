@@ -5,14 +5,30 @@ kind: ValidatingAdmissionPolicy
 metadata: {name: colo-g4-guard}
 spec:
   failurePolicy: Fail
-  # CREATE only: nodeSelector, affinity and nodeName cannot be changed on a running pod in a way that moves it,
-  # and tolerations added by UPDATE do not reschedule it.
+  # CREATE and UPDATE. Tolerations can be appended to any pod, and a Pending pod with schedulingGates can gain a
+  # nodeSelector or affinity and then drop its gates, so a pod admitted as "not G4" could otherwise be turned into
+  # one before it is scheduled. Bound pods cannot move, so UPDATE checks on them only matter for new tolerations.
+  # (pods/binding is not matched; only scheduler-level principals hold it.)
   matchConstraints:
     resourceRules:
     - apiGroups: [""]
       apiVersions: [v1]
-      operations: [CREATE]
+      operations: [CREATE, UPDATE]
       resources: [pods]
+  # On UPDATE, evaluate only when a placement field changes (tolerations, nodeSelector, affinity, schedulingGates),
+  # so label/annotation updates on existing pods are never blocked.
+  matchConditions:
+  - name: create-or-placement-change
+    expression: >-
+      request.operation == 'CREATE'
+      || has(object.spec.tolerations) != has(oldObject.spec.tolerations)
+      || (has(object.spec.tolerations) && object.spec.tolerations != oldObject.spec.tolerations)
+      || has(object.spec.nodeSelector) != has(oldObject.spec.nodeSelector)
+      || (has(object.spec.nodeSelector) && object.spec.nodeSelector != oldObject.spec.nodeSelector)
+      || has(object.spec.affinity) != has(oldObject.spec.affinity)
+      || (has(object.spec.affinity) && object.spec.affinity != oldObject.spec.affinity)
+      || has(object.spec.schedulingGates) != has(oldObject.spec.schedulingGates)
+      || (has(object.spec.schedulingGates) && object.spec.schedulingGates != oldObject.spec.schedulingGates)
   variables:
   # A pod "targets G4" if any of these hold. The NoSchedule taint compute-class=g4-gpu is the only thing that keeps
   # other pods off G4 nodes, so any toleration that matches it counts, including a keyless `operator: Exists`.

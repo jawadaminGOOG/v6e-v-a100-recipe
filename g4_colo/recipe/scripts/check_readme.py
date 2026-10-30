@@ -7,7 +7,7 @@ Sources of truth (stdlib only, no cluster access):
   - components/controller/controller.py   LOOP_S default (and a LOOP_S env override in base/controller.yaml, if any)
   - components/controller/colo_logic.py   DEFAULT_CONFIG (code defaults)
   - base/controller.yaml                  colo-config config.json (base)
-  - overlays/demo, overlays/production-template kustomization.yaml   colo-config patches
+  - overlays/demo, overlays/production-template settings.yaml   colo-config (coloConfig)
   - base/guardrails.yaml                  colo-svc-quota requests.cpu
   - base/cluster.yaml                     ComputeClass consolidationDelayMinutes
   - base/vllm.yaml (+ production patch)   HPA target and maxReplicas
@@ -66,11 +66,11 @@ def loop_s() -> float:
     return float(env.group(1) if env else m.group(1))
 
 
-def config_json_block(text: str, where: str) -> dict:
-    """The `config.json: |` literal block (first one) parsed as JSON."""
-    m = re.search(r"^(\s*)config\.json:\s*\|\s*\n", text, re.M)
+def config_json_block(text: str, where: str, key: str = "config.json") -> dict:
+    """The `<key>: |` YAML literal block (first one) parsed as JSON."""
+    m = re.search(r"^(\s*)" + re.escape(key) + r":\s*\|\s*\n", text, re.M)
     if not m:
-        raise SystemExit(f"no config.json block in {where}")
+        raise SystemExit(f"no {key} block in {where}")
     lines = text[m.end():].splitlines()
     indent = None
     body = []
@@ -121,9 +121,11 @@ def compute_rows() -> dict[str, dict[str, str]]:
     eff = {
         "code": code,
         "base": deep_merge(code, config_json_block(read("base/controller.yaml"), "base/controller.yaml")),
-        "demo": deep_merge(code, config_json_block(read("overlays/demo/kustomization.yaml"), "overlays/demo")),
+        "demo": deep_merge(code, config_json_block(read("overlays/demo/settings.yaml"), "overlays/demo/settings.yaml",
+                                                   "coloConfig")),
         "production-template": deep_merge(code, config_json_block(
-            read("overlays/production-template/kustomization.yaml"), "overlays/production-template")),
+            read("overlays/production-template/settings.yaml"), "overlays/production-template/settings.yaml",
+            "coloConfig")),
     }
     rows: dict[str, dict[str, str]] = {}
     ls = fmt(loop_s())

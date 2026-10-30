@@ -2,11 +2,11 @@
 #   kubectl kustomize g4_colo/recipe/overlays/production-template   # review
 #   kubectl apply -k g4_colo/recipe/overlays/production-template     # after editing
 #
-# Everything you set lives in two files in this directory:
-#   - kustomization.yaml `images:`  registry + tag for the four colo images (and optionally a vLLM mirror)
-#   - settings.yaml                 node pool names and the served model
-#   - kustomization.yaml patch 6    colo-config: TTFT source project, demand, guard (one JSON document)
-#   - kustomization.yaml patch 5    vllm-ingress: the namespace your gateway / clients run in
+# Everything you set lives in:
+#   - settings.yaml                 node pools, model, gateway namespace, colo-config (TTFT project, demand, guard)
+#   - kustomization.yaml `images:`  registry + tag for the colo images (and optionally a vLLM mirror)
+#   - infra/create-node-pools.sh    env vars (PROJECT, CLUSTER, REGION, SUFFIX, zones)
+# Nothing below `images:` needs editing.
 #
 # Differences from the demo overlay:
 #   1. No synthetic load generator: real clients call the vLLM Service.
@@ -18,7 +18,7 @@
 #   5. vLLM accepts traffic from your gateway namespace instead of loadgen.
 #   6. The latency guard reads per-node TTFT from Google Cloud Managed Service for Prometheus
 #      (vllm:time_to_first_token_seconds, scraped by the vllm PodMonitoring) and ships production defaults:
-#      escalate_s 60, cooldown_s 600, no baseline (set one after a solo run: POST /baseline or edit the JSON).
+#      escalate_s 60, cooldown_s 600, no baseline (set one after a solo run: POST /baseline or edit settings.yaml).
 #      Until a baseline is set, or when Prometheus returns too few samples, the guard reports "no_signal"
 #      (metric colo_guard_data_sufficient 0) and never blocks or evicts. Alert on that metric.
 #      The controller's KSA needs roles/monitoring.viewer; see README "Production: TTFT source and IAM".
@@ -30,16 +30,16 @@ resources:
 images:
 - name: colo-registry.invalid/colo-worker
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-worker            # REPLACE
-  newTag: v0.2.0
+  newTag: v0.2.2
 - name: colo-registry.invalid/colo-loadgen   # unused here (loadgen is removed); kept so all images map in one place
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-loadgen           # REPLACE
-  newTag: v0.2.0
+  newTag: v0.2.2
 - name: colo-registry.invalid/colo-controller
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-controller        # REPLACE
-  newTag: v0.2.0
+  newTag: v0.2.2
 - name: colo-registry.invalid/colo-node-agent
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-node-agent        # REPLACE
-  newTag: v0.2.0
+  newTag: v0.2.2
 # vLLM uses the public vllm/vllm-openai image from base. To use a private mirror, uncomment:
 # - name: vllm/vllm-openai
 #   newName: us-docker.pkg.dev/your-project-id/your-repository/vllm-openai
@@ -76,55 +76,53 @@ patches:
   patch: |-
     - op: remove
       path: /spec/template/spec/nodeSelector
-# 3. Capacity tiers for G4. The on-demand pool name comes from settings.yaml (replacements below).
+# 3. Capacity tiers for G4 (reservation -> Spot -> on-demand). Pool names come from settings.yaml.
 - target: {kind: ComputeClass, name: g4-gpu}
   patch: |-
     - op: replace
       path: /spec/priorities
       value:
-      - nodepools: [your-g4-reservation-pool]   # REPLACE: pool bound to a G4 reservation / CUD (or delete)
-      - nodepools: [your-g4-spot-pool]          # REPLACE: Spot pool, needs PREEMPTIBLE GPU quota (or delete)
-      - nodepools: [your-g4-ondemand-pool]      # set from settings.yaml g4NodePool
+      - nodepools: [set-from-settings]
+      - nodepools: [set-from-settings]
+      - nodepools: [set-from-settings]
 # 4. More vLLM replicas.
 - target: {kind: HorizontalPodAutoscaler, name: vllm, namespace: inference}
   patch: |-
     - op: replace
       path: /spec/maxReplicas
       value: 8
-# 5. vLLM ingress: replace the loadgen rule with your gateway / client namespace. Keep gmp-system (metrics
-#    scrapes) and colo-system (controller). Narrow further with a podSelector next to the namespaceSelector.
+# 5. vLLM ingress: replace the loadgen rule with the gateway namespace from settings.yaml. Keep gmp-system
+#    (metrics scrapes) and colo-system (controller). Narrow further with a podSelector next to the namespaceSelector.
 - target: {kind: NetworkPolicy, name: vllm-ingress, namespace: inference}
   patch: |-
     - op: replace
       path: /spec/ingress/0
       value:
         from:
-        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: your-gateway-namespace}}   # REPLACE
+        - namespaceSelector:
+            matchExpressions: [{key: kubernetes.io/metadata.name, operator: In, values: [set-from-settings]}]
         ports: [{protocol: TCP, port: 8000}]
-# 6. colo-config: production guard defaults and the Prometheus TTFT source.
-#    REPLACE PROJECT_ID with the project that holds the cluster's Managed Prometheus data.
-#    REPLACE demand with your per-service replica counts (total x 2 vCPU must stay <= max_total_cpu).
-- target: {kind: ConfigMap, name: colo-config, namespace: colo-system}
-  patch: |-
-    apiVersion: v1
-    kind: ConfigMap
-    metadata: {name: colo-config, namespace: colo-system}
-    data:
-      config.json: |
-        {"demand": {"sandbox": 0, "toolcall": 0, "analytics": 0},
-         "guard": {"enabled": true, "baseline_ttft_p99_ms": null, "factor": 1.5, "cooldown_s": 600, "window_s": 30,
-                   "escalate_s": 60, "min_requests": 200},
-         "buffer_replicas": 1,
-         "reserve_cpu_per_node": 2,
-         "dehydrate_grace_s": 60,
-         "max_total_cpu": 144,
-         "ttft_source": {"type": "prometheus",
-                         "prometheus": {"project": "PROJECT_ID", "location": "global", "query_window_s": 60}}}
 replacements:
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4ReservationPool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4SpotPool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.1.nodepools.0]
 - source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4NodePool}
   targets:
   - select: {kind: ComputeClass, name: g4-gpu}
     fieldPaths: [spec.priorities.2.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.gatewayNamespace}
+  targets:
+  - select: {kind: NetworkPolicy, name: vllm-ingress}
+    fieldPaths: [spec.ingress.0.from.0.namespaceSelector.matchExpressions.0.values.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.coloConfig}
+  targets:
+  - select: {kind: ConfigMap, name: colo-config}
+    fieldPaths: ['data.[config.json]']
 - source: {kind: ConfigMap, name: colo-settings, fieldPath: data.n4dNodePool}
   targets:
   - select: {kind: ComputeClass, name: n4d-cpu}

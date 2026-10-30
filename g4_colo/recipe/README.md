@@ -4,7 +4,7 @@ This directory contains the Kubernetes plumbing to run CPU services on the spare
 
 It builds on the single-node co-location benchmark in [`../../g4-colo-readme.md`](../../g4-colo-readme.md), where an 8 vCPU / 64 GiB / 1× RTX PRO 6000 vLLM slice (`--api-server-count=4`) leaves **~39 allocatable vCPUs** per `g4-standard-48` node free for integer CPU services.
 
-**Adopting it:** copy `overlays/production-template`, then set your values in that directory only: `images:` in `kustomization.yaml` (registry, tag), `settings.yaml` (node pool names, model), and the `colo-config` and `vllm-ingress` patches in `kustomization.yaml` (TTFT source project, demand, gateway namespace). `base/` holds no project, registry or pool names: it uses the placeholder registry `colo-registry.invalid` and the pool names `your-g4-node-pool` / `your-n4d-node-pool`.
+**Adopting it:** copy `overlays/production-template` and edit two things in it: `settings.yaml` (G4 reservation / Spot / on-demand and N4D pool names, model, gateway namespace, and the controller config with TTFT project, cluster name and demand) and `images:` in `kustomization.yaml` (registry, tag). The node pools come from the env vars of `infra/create-node-pools.sh`. kustomize `replacements` copy the settings into the manifests; nothing else needs editing. `base/` holds no project, registry or pool names: it uses the placeholder registry `colo-registry.invalid` and the pool names `your-g4-node-pool` / `your-n4d-node-pool`.
 
 ---
 
@@ -45,7 +45,7 @@ Backfill Deployments carry a required node affinity on `colo.active In ["true"]`
 
 ### Admission policy `colo-g4-guard`
 
-A pod **targets G4** if it tolerates the `cloud.google.com/compute-class=g4-gpu:NoSchedule` taint (including a keyless `operator: Exists`), selects or requires (node affinity) `cloud.google.com/compute-class=g4-gpu`, `colo.role=g4` or `cloud.google.com/gke-accelerator`, or sets `spec.nodeName`. Such a pod must be either the GPU workload (namespace `inference`, GPU, Guaranteed integer CPU) or expendable backfill (`priorityClassName: colo-backfill`, no GPU, integer CPU, `requests == limits`), and must not use `runtimeClassName: gvisor` (section 2). The binding exempts only GKE system namespaces, whose DaemonSets tolerate every taint. In `colo-system` only pods running as service account `colo-node-agent` are exempt. If you run your own all-tolerating DaemonSets (logging, security agents), add their namespace to the binding. The policy matches pod CREATE only.
+A pod **targets G4** if it tolerates the `cloud.google.com/compute-class=g4-gpu:NoSchedule` taint (including a keyless `operator: Exists`), selects or requires (node affinity) `cloud.google.com/compute-class=g4-gpu`, `colo.role=g4` or `cloud.google.com/gke-accelerator`, or sets `spec.nodeName`. Such a pod must be either the GPU workload (namespace `inference`, GPU, Guaranteed integer CPU) or expendable backfill (`priorityClassName: colo-backfill`, no GPU, integer CPU, `requests == limits`), and must not use `runtimeClassName: gvisor` (section 2). The binding exempts only GKE system namespaces, whose DaemonSets tolerate every taint. In `colo-system` only pods running as service account `colo-node-agent` are exempt. If you run your own all-tolerating DaemonSets (logging, security agents), add their namespace to the binding. The policy matches pod CREATE and UPDATE. On UPDATE it is evaluated only when tolerations, nodeSelector, affinity or schedulingGates change, which closes the "create gated, then add a G4 toleration and selector, then drop the gate" bypass without blocking label or annotation updates.
 
 ---
 
@@ -93,7 +93,7 @@ Measured in wave 1 (`.agents/wave-1/logs/g4.verdict.json`, baseline 18 ms): inte
 
 ### Production: TTFT source and IAM
 - `overlays/demo` reads per-node TTFT histograms from `inference/loadgen` (`ttft_source.type: loadgen`).
-- `overlays/production-template` reads `vllm:time_to_first_token_seconds` from Google Cloud Managed Service for Prometheus (`ttft_source.type: prometheus`), scraped by the `inference/vllm` PodMonitoring in `base/vllm.yaml` (keep it). Set `ttft_source.prometheus.project` in the template. With `--api-server-count=4`, vLLM exposes one combined TTFT histogram per pod. Its buckets are coarse near 20–40 ms (`le` 0.02, 0.04), so p99 is interpolated; take the baseline from the same source.
+- `overlays/production-template` reads `vllm:time_to_first_token_seconds` from Google Cloud Managed Service for Prometheus (`ttft_source.type: prometheus`), scraped by the `inference/vllm` PodMonitoring in `base/vllm.yaml` (keep it). Set `ttft_source.prometheus.project` and `ttft_source.prometheus.cluster` in the template's `settings.yaml` (`coloConfig`); `cluster` keeps other clusters' vLLM pods in the same project out of the p99 and the baseline. With `--api-server-count=4`, vLLM exposes one combined TTFT histogram per pod. Its buckets are coarse near 20–40 ms (`le` 0.02, 0.04), so p99 is interpolated; take the baseline from the same source.
 - The controller's Kubernetes service account `colo-system/colo-controller` needs `roles/monitoring.viewer` through Workload Identity, and egress to `monitoring.googleapis.com:443`. `infra/create-node-pools.sh` grants it:
 
 ```bash
@@ -161,15 +161,15 @@ It prints the pool names to copy into `overlays/<yours>/settings.yaml`. Set `CRE
 gcloud builds submit g4_colo/recipe/components \
   --config g4_colo/recipe/components/cloudbuild.yaml \
   --project "$PROJECT" --region "$REGION" \
-  --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.0
+  --substitutions _REGISTRY="$REGION-docker.pkg.dev/$PROJECT/$REPOSITORY",_TAG=v0.2.2
 ```
 
-Images are pinned (`v0.2.0`) with `imagePullPolicy: IfNotPresent`. vLLM uses the public `vllm/vllm-openai:v0.32.0`; map it to a mirror in `images:` if you have one.
+Images are pinned (`v0.2.2`) with `imagePullPolicy: IfNotPresent`. vLLM uses the public `vllm/vllm-openai:v0.32.0`; map it to a mirror in `images:` if you have one.
 
 ### Step 3: Configure and apply an overlay
 ```bash
 cp -r g4_colo/recipe/overlays/production-template g4_colo/recipe/overlays/prod
-# edit overlays/prod/kustomization.yaml (images, colo-config, vllm-ingress) and overlays/prod/settings.yaml
+# edit overlays/prod/settings.yaml (pools, model, gateway namespace, coloConfig) and `images:` in overlays/prod/kustomization.yaml
 kubectl kustomize g4_colo/recipe/overlays/prod      # review
 kubectl apply -k g4_colo/recipe/overlays/prod
 

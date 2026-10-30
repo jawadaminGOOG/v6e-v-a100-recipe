@@ -9,7 +9,11 @@ Two groups of cases, each PASS when the API server's decision matches the expect
      gVisor on G4 backfill, colo-system pods other than the node agent).
   2. Manifest pods: every Deployment / DaemonSet pod template rendered from the overlay must be admitted, so a
      tightened policy never blocks the recipe's own workloads.
-Nothing is created: every request uses `kubectl create --dry-run=server`.
+  3. UPDATE cases (review N2): dry-run JSON patches on pods that already run (overflow, backfill, vLLM): appending a
+     G4-matching toleration to a non-compliant pod is denied, harmless updates still pass.
+  4. With --live-gated only: the gated-then-updated bypass. Creates ONE real scheduling-gated pause pod in colo-svc
+     (it never schedules), dry-run patches it, then deletes it.
+Except for --live-gated, nothing is created: every request uses --dry-run=server.
 """
 import argparse
 import copy
@@ -133,26 +137,112 @@ def manifest_cases(overlay):
     return cases
 
 
+def first_pod(ns, selector):
+    r = subprocess.run(["kubectl", "get", "pods", "-n", ns, "-l", selector, "--field-selector=status.phase=Running",
+                        "-o", "jsonpath={.items[0].metadata.name}"], text=True, capture_output=True)
+    return r.stdout.strip() or None
+
+
+def patch_case(desc, ns, pod_name, ops, want):
+    """A dry-run JSON patch (an UPDATE) of an existing pod."""
+    return ("patch", desc, (ns, pod_name, ops), want)
+
+
+TOL_APPEND = lambda tol: [{"op": "add", "path": "/spec/tolerations/-", "value": tol}]  # noqa: E731
+
+
+def update_cases():
+    out = []
+    ov = first_pod("colo-svc", "colo.tier=overflow")
+    bf = first_pod("colo-svc", "colo.tier=backfill")
+    vl = first_pod("inference", "app=vllm")
+    if ov:
+        out.append(patch_case("UPDATE reject: append keyless Exists toleration to a running overflow pod",
+                              "colo-svc", ov, TOL_APPEND(KEYLESS), False))
+        out.append(patch_case("UPDATE reject: append g4-gpu toleration to a running overflow pod",
+                              "colo-svc", ov, TOL_APPEND(G4_TOL), False))
+        out.append(patch_case("UPDATE accept: label change on a running overflow pod",
+                              "colo-svc", ov, [{"op": "add", "path": "/metadata/labels/colo.test", "value": "x"}], True))
+    if bf:
+        out.append(patch_case("UPDATE accept: pod-deletion-cost annotation on a running backfill pod", "colo-svc", bf,
+                              [{"op": "add", "path": "/metadata/annotations/controller.kubernetes.io~1pod-deletion-cost",
+                                "value": "-10"}], True))
+        out.append(patch_case("UPDATE accept: append unrelated toleration to compliant backfill", "colo-svc", bf,
+                              TOL_APPEND({"key": "example.com/x", "operator": "Exists", "effect": "NoSchedule"}), True))
+    if vl:
+        out.append(patch_case("UPDATE accept: append unrelated toleration to vLLM", "inference", vl,
+                              TOL_APPEND({"key": "example.com/x", "operator": "Exists", "effect": "NoSchedule"}), True))
+    if not (ov and bf and vl):
+        print("NOTE: some UPDATE cases skipped (no Running overflow/backfill/vLLM pod found)")
+    return out
+
+
+GATED = pod("gated-bypass", "colo-svc", g4=False, cpu_req="500m", cpu_lim=None, mem_req="256Mi", mem_lim="256Mi",
+            schedulingGates=[{"name": "colo.test/hold"}])
+del GATED["spec"]["containers"][0]["resources"]["limits"]["cpu"]
+
+
+def run_patch(ns, name, ops):
+    return subprocess.run(["kubectl", "patch", "pod", "-n", ns, name, "--dry-run=server", "--type=json", "-p",
+                           json.dumps(ops), "-o", "name"], text=True, capture_output=True)
+
+
+def gated_cases():
+    """Real gated pod (never schedules); returns patch cases and a cleanup function."""
+    r = subprocess.run(["kubectl", "create", "-o", "name", "-f", "-"], input=json.dumps(GATED), text=True,
+                       capture_output=True)
+    if r.returncode != 0:
+        print(f"FAIL  could not create the gated test pod: {(r.stderr or r.stdout).strip()[:200]}")
+        return [], lambda: None
+    bypass = [{"op": "add", "path": "/spec/tolerations/-", "value": KEYLESS},
+              {"op": "add", "path": "/spec/nodeSelector", "value": {"colo.role": "g4"}}]
+    cases = [
+        patch_case("UPDATE reject: gated pod gains keyless Exists + nodeSelector colo.role=g4", "colo-svc",
+                   "gated-bypass", bypass, False),
+        patch_case("UPDATE reject: gated pod gains affinity compute-class=g4-gpu", "colo-svc", "gated-bypass",
+                   [{"op": "add", "path": "/spec/affinity",
+                     "value": affinity("cloud.google.com/compute-class", ["g4-gpu"])}], False),
+        patch_case("UPDATE accept: gated pod drops its gate without G4 targeting", "colo-svc", "gated-bypass",
+                   [{"op": "remove", "path": "/spec/schedulingGates"}], True),
+    ]
+    cleanup = lambda: subprocess.run(["kubectl", "delete", "pod", "-n", "colo-svc", "gated-bypass", "--wait=false"],  # noqa: E731
+                                     capture_output=True)
+    return cases, cleanup
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--overlay", default=str(HERE.parent / "overlays" / "demo"))
     ap.add_argument("--no-manifests", action="store_true")
+    ap.add_argument("--live-gated", action="store_true",
+                    help="create one real scheduling-gated pod in colo-svc for the N2 bypass case, then delete it")
     a = ap.parse_args()
-    cases = list(CASES)
+    cases = [("create",) + c for c in CASES]
     if not a.no_manifests:
-        cases += manifest_cases(a.overlay)
+        cases += [("create",) + c for c in manifest_cases(a.overlay)]
+    cases += update_cases()
+    cleanup = lambda: None  # noqa: E731
+    if a.live_gated:
+        g, cleanup = gated_cases()
+        cases += g
     ok = True
     fails = 0
-    for desc, obj, want in cases:
-        r = subprocess.run(["kubectl", "create", "--dry-run=server", "-o", "name", "-f", "-"], input=json.dumps(obj),
-                           text=True, capture_output=True)
-        got = r.returncode == 0
-        text = (r.stderr or r.stdout).strip()
-        msg = text.splitlines()[-1] if text else ""
-        res = "PASS" if got == want else "FAIL"
-        ok &= got == want
-        fails += got != want
-        print(f"{res}  {desc}  -> {'admitted' if got else 'denied'}  {msg[:200]}")
+    try:
+        for kind, desc, obj, want in cases:
+            if kind == "create":
+                r = subprocess.run(["kubectl", "create", "--dry-run=server", "-o", "name", "-f", "-"],
+                                   input=json.dumps(obj), text=True, capture_output=True)
+            else:
+                r = run_patch(*obj)
+            got = r.returncode == 0
+            text = (r.stderr or r.stdout).strip()
+            msg = text.splitlines()[-1] if text else ""
+            res = "PASS" if got == want else "FAIL"
+            ok &= got == want
+            fails += got != want
+            print(f"{res}  {desc}  -> {'admitted' if got else 'denied'}  {msg[:200]}")
+    finally:
+        cleanup()
     print(f"{len(cases) - fails}/{len(cases)} PASS")
     sys.exit(0 if ok else 1)
 

@@ -10,3 +10,14 @@ data:
   g4NodePool: g4gpu-jawadamin-us-west8-1026     # ComputeClass g4-gpu on-demand pool
   n4dNodePool: n4dcpu-jawadamin-us-west8-1026   # ComputeClass n4d-cpu pool
   model: Qwen/Qwen3-1.7B-Base                   # vLLM --model and loadgen MODEL
+  # colo-controller config (ConfigMap colo-system/colo-config, key config.json). Demo guard values: see
+  # kustomization.yaml header.
+  coloConfig: |
+    {"demand": {"sandbox": 10, "toolcall": 9, "analytics": 0},
+     "guard": {"enabled": true, "baseline_ttft_p99_ms": 20, "factor": 1.5, "cooldown_s": 45, "window_s": 30,
+               "escalate_s": 0, "min_requests": 200},
+     "buffer_replicas": 1,
+     "reserve_cpu_per_node": 2,
+     "dehydrate_grace_s": 60,
+     "max_total_cpu": 144,
+     "ttft_source": {"type": "loadgen"}}

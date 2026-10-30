@@ -1,11 +1,38 @@
-# Production settings: edit these values (and the `images:` block in kustomization.yaml) for your environment.
-# local-config: kustomize reads this ConfigMap for `replacements` and never emits it.
+# Production settings: the one file to edit (plus `images:` in kustomization.yaml and the env vars of
+# infra/create-node-pools.sh). kustomize copies these values into the manifests with `replacements`.
+# local-config: kustomize reads this ConfigMap and never emits it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: colo-settings
   annotations: {config.kubernetes.io/local-config: "true"}
 data:
-  g4NodePool: your-g4-ondemand-pool    # REPLACE: on-demand G4 pool (G4_POOL in infra/create-node-pools.sh)
-  n4dNodePool: your-n4d-pool           # REPLACE: N4D overflow pool (N4D_POOL in infra/create-node-pools.sh)
-  model: Qwen/Qwen3-1.7B-Base          # REPLACE: Hugging Face model id served by vLLM (--model)
+  # Node pools (printed by infra/create-node-pools.sh). The g4-gpu ComputeClass tries them in this order;
+  # a pool that does not exist is skipped by the autoscaler.
+  g4ReservationPool: your-g4-reservation-pool   # REPLACE: pool bound to a G4 reservation / CUD
+  g4SpotPool: your-g4-spot-pool                 # REPLACE: Spot pool (needs PREEMPTIBLE GPU quota)
+  g4NodePool: your-g4-ondemand-pool             # REPLACE: on-demand G4 pool (G4_POOL)
+  n4dNodePool: your-n4d-pool                    # REPLACE: N4D overflow pool (N4D_POOL)
+  # Hugging Face model id served by vLLM (--model).
+  model: Qwen/Qwen3-1.7B-Base                   # REPLACE
+  # Namespace your inference gateway / clients run in; the only one (besides metrics and the controller)
+  # allowed to reach vLLM on :8000.
+  gatewayNamespace: your-gateway-namespace      # REPLACE
+  # colo-controller config (becomes ConfigMap colo-system/colo-config, key config.json). REPLACE:
+  #   - ttft_source.prometheus.project: project holding the cluster's Managed Prometheus data
+  #   - ttft_source.prometheus.cluster: this GKE cluster's name (restricts TTFT and POST /baseline to this
+  #     cluster's vLLM pods when several clusters share the project)
+  #   - demand: replicas per CPU service (total x 2 vCPU must stay <= max_total_cpu)
+  # Guard: production defaults; baseline null keeps the guard in no_signal (never blocks or evicts) until you
+  # set it after a solo run (POST /baseline on the controller, or edit it here).
+  coloConfig: |
+    {"demand": {"sandbox": 0, "toolcall": 0, "analytics": 0},
+     "guard": {"enabled": true, "baseline_ttft_p99_ms": null, "factor": 1.5, "cooldown_s": 600, "window_s": 30,
+               "escalate_s": 60, "min_requests": 200},
+     "buffer_replicas": 1,
+     "reserve_cpu_per_node": 2,
+     "dehydrate_grace_s": 60,
+     "max_total_cpu": 144,
+     "ttft_source": {"type": "prometheus",
+                     "prometheus": {"project": "PROJECT_ID", "cluster": "CLUSTER_NAME", "location": "global",
+                                    "query_window_s": 60}}}

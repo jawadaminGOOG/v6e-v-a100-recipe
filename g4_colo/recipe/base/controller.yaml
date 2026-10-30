@@ -35,7 +35,8 @@ rules:
   verbs: [get, list, watch, patch, update]
 - apiGroups: [""]
   resources: [pods]
-  verbs: [get, list, watch, delete]
+  # patch: controller.kubernetes.io/pod-deletion-cost on drained backfill pods, so ReplicaSet scale-down picks them.
+  verbs: [get, list, watch, delete, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -111,7 +112,7 @@ spec:
       nodeSelector: {colo.role: loadgen}
       containers:
       - name: controller
-        image: colo-registry.invalid/colo-controller:v0.2.0
+        image: colo-registry.invalid/colo-controller:v0.2.2
         imagePullPolicy: IfNotPresent
         ports: [{name: http, containerPort: 8080}]
         resources:
@@ -165,10 +166,16 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             - matchExpressions: [{key: colo.role, operator: In, values: [g4, n4d]}]
-      tolerations: [{operator: Exists}]
+      # Only the colo node taints. Not a keyless `operator: Exists`: that also tolerates the Cluster Autoscaler's
+      # ToBeDeletedByClusterAutoscaler taint, so agent pods were scheduled onto N4D nodes CA was already deleting
+      # and showed as Running but unreachable until the Node object went away (wave-2 live finding).
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Exists, effect: NoSchedule}
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      - {key: sandbox.gke.io/runtime, operator: Exists, effect: NoSchedule}
       containers:
       - name: agent
-        image: colo-registry.invalid/colo-node-agent:v0.2.0
+        image: colo-registry.invalid/colo-node-agent:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - name: NODE_NAME

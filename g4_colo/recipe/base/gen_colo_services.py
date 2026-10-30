@@ -8,7 +8,7 @@ from pathlib import Path
 # Placeholder registry (the reserved .invalid TLD never resolves, so an unedited image never pulls from a
 # public registry by accident). Overlays set the real registry and tag with kustomize `images:`.
 REG = "colo-registry.invalid"
-TAG = "v0.2.0"
+TAG = "v0.2.2"
 # P6 live probe on GKE v1.35.8: under runtimeClassName=gvisor, runsc-sandbox executes in the pod-level
 # cgroup (cpuset 0-47) rather than the container sub-cgroup pinned by kubelet's static CPU manager,
 # driving vLLM's exclusive cores (1-4,25-28) to 52-84% busy and TTFT p99 from 20 ms to 50 ms (2.5x).

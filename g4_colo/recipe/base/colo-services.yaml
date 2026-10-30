@@ -31,7 +31,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: colo-registry.invalid/colo-worker:v0.2.0
+        image: colo-registry.invalid/colo-worker:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: sandbox}
@@ -72,7 +72,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: colo-registry.invalid/colo-worker:v0.2.0
+        image: colo-registry.invalid/colo-worker:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: sandbox}
@@ -120,7 +120,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: colo-registry.invalid/colo-worker:v0.2.0
+        image: colo-registry.invalid/colo-worker:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: toolcall}
@@ -154,7 +154,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: colo-registry.invalid/colo-worker:v0.2.0
+        image: colo-registry.invalid/colo-worker:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: toolcall}
@@ -195,7 +195,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: colo-registry.invalid/colo-worker:v0.2.0
+        image: colo-registry.invalid/colo-worker:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: analytics}
@@ -230,7 +230,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: worker
-        image: colo-registry.invalid/colo-worker:v0.2.0
+        image: colo-registry.invalid/colo-worker:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: MODE, value: analytics}

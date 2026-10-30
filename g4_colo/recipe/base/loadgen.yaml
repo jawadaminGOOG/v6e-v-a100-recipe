@@ -30,7 +30,7 @@ spec:
       nodeSelector: {colo.role: loadgen}
       containers:
       - name: loadgen
-        image: colo-registry.invalid/colo-loadgen:v0.2.0
+        image: colo-registry.invalid/colo-loadgen:v0.2.2
         imagePullPolicy: IfNotPresent
         env:
         - {name: VLLM_NAMESPACE, value: inference}
