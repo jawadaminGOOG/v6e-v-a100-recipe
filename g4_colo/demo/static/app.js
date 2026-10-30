@@ -15,7 +15,8 @@ const LETTER = { v: "V", i: "I", m: "M", b: "B", s: "", idle: "" };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const num = (v, d = 0) => (v === null || v === undefined || Number.isNaN(+v) ? "–" : Number(v).toFixed(d));
-const money = (v) => (v === null || v === undefined ? "–" : `$${Number(v).toFixed(2)}`);
+// Round half-up in cents first: toFixed(2) alone renders 0.305 as "0.30" (binary float).
+const money = (v) => (v === null || v === undefined ? "–" : `$${(Math.round(Number(v) * 100 + 1e-6) / 100).toFixed(2)}`);
 const hhmmss = (t) => new Date(t).toLocaleTimeString([], { hour12: false });
 
 const history = [];
@@ -105,7 +106,7 @@ function renderConn() {
   else if (session.net) { cls = "bad"; text = "Offline"; }
   else if (session.server) { cls = "bad"; text = "Backend error"; }
   else if (age !== null && age > STALE_MS) { cls = "bad"; text = "Stale"; }
-  else if (age !== null) { cls = "ok"; text = last && last.mode === "mock" ? "Live (mock)" : "Live"; }
+  else if (age !== null) { cls = "ok"; text = last && last.mode === "mock" ? "Mock data" : "Live"; }
   $("conn-pill").className = `pill status ${cls}`;
   if (connKey !== text) { $("conn").textContent = text; connKey = text; } // announce transitions only
   $("conn-age").textContent = age !== null ? `${Math.max(0, Math.round(age / 1000))} s ago` : "";
@@ -136,13 +137,37 @@ function setPresenter(on) {
   document.documentElement.classList.toggle("presenter", on);
   $("presenter").setAttribute("aria-pressed", String(on));
   try { localStorage.setItem("colo-presenter", on ? "1" : "0"); } catch (_) { /* private mode */ }
-  Object.values(charts).forEach((c) => c && c.resize && c.resize());
+  applyChartFonts(on);
+}
+// Chart.js draws text on canvas, so CSS rem scaling does not reach it; set sizes explicitly.
+function applyChartFonts(on) {
+  if (typeof Chart === "undefined") return;
+  const size = on ? 16 : 12;
+  try {
+    Chart.defaults.font.size = size;
+    for (const c of Object.values(charts)) {
+      const o = c.options;
+      o.plugins.legend.labels.font = { size };
+      o.plugins.legend.labels.boxWidth = on ? 20 : 14;
+      for (const ax of Object.values(o.scales || {})) {
+        ax.ticks = { ...(ax.ticks || {}), font: { size } };
+        if (ax.title) ax.title.font = { size };
+      }
+      c.resize();
+      c.update("none");
+    }
+  } catch (e) { console.error("chart font update failed", e); }
 }
 $("presenter").addEventListener("click", () => setPresenter(!document.documentElement.classList.contains("presenter")));
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
   const map = { 1: "gpu-scale-out", 2: "gpu-scale-in", 3: "cpu-scale-out", 4: "guard-integer-vs-memory" };
-  if (map[e.key]) startScenario(map[e.key]);
+  if (map[e.key]) {
+    const btn = document.querySelector(`[data-scenario="${map[e.key]}"]`);
+    if (!btn || btn.disabled) return;
+    const where = last && last.mode === "mock" ? "the simulator" : "the live cluster (it can add or remove nodes)";
+    if (window.confirm(`Start scenario ${e.key}: ${btn.querySelector("b").textContent}?\nThis changes ${where}.`)) startScenario(map[e.key]);
+  }
   else if (e.key === "p" || e.key === "P") setPresenter(!document.documentElement.classList.contains("presenter"));
 });
 
@@ -164,17 +189,18 @@ function renderStory(s) {
   const st = s.story || {};
   const cf = (s.cost || {}).counterfactual || {};
   $("h-slice").textContent = num(st.gpu_slice_vcpu);
-  const g4n = (s.counts || {}).g4_ready || 0;
-  $("h-slice-note").textContent = `reserved for vLLM on each G4 node (${g4n} ${g4n === 1 ? "node" : "nodes"})`;
+  const g4n = (s.counts || {}).g4_ready || 0, g4all = (s.counts || {}).g4 || 0;
+  const starting = g4all - g4n;
+  $("h-slice-note").textContent = `reserved for vLLM on each G4 node (${g4n} ready${starting > 0 ? `, ${starting} starting` : ""})`;
   $("h-reclaim").textContent = num(st.reclaimed_vcpu);
   $("h-reclaim-note").textContent = st.reclaimed_pct_of_spare !== null && st.reclaimed_pct_of_spare !== undefined
     ? `${num(st.reclaimed_pct_of_spare)}% of spare G4 cores · ${st.reclaimed_pods} CPU pods` : "no spare G4 cores yet";
-  $("h-overflow").textContent = num(st.overflow_pods);
+  $("h-overflow").textContent = num(st.overflow_vcpu);
   const n4d = st.n4d_nodes || 0;
-  $("h-overflow-note").textContent = `${num(st.overflow_vcpu)} vCPU on ${n4d} N4D ${n4d === 1 ? "node" : "nodes"}${n4d && !st.overflow_pods ? " (warm buffer only)" : ""}`;
+  $("h-overflow-note").textContent = `${num(st.overflow_pods)} CPU pods on ${n4d} N4D ${n4d === 1 ? "node" : "nodes"}${n4d && !st.overflow_pods ? " (warm buffer only)" : ""}`;
   $("h-saved").textContent = money(st.saved_per_hour);
-  $("h-saved-note").textContent = cf.n4d_nodes !== undefined
-    ? `${cf.n4d_nodes} fewer n4d-standard-16 · ${num(st.saved_pct)}% of the all-N4D bill` : "";
+  $("h-saved-note").textContent = cf.saved_nodes !== undefined
+    ? `${cf.saved_nodes} fewer n4d-standard-16 · ${num(st.saved_pct)}% of the bill without colo` : "";
 
   const total = st.g4_alloc_vcpu || 0;
   const segs = [
@@ -182,7 +208,7 @@ function renderStory(s) {
     ["i", "Reclaimed", st.reclaimed_vcpu],
     ["b", "Warm buffer", st.g4_buffer_vcpu],
     ["s", "System", st.g4_system_vcpu],
-    ["idle", "Idle", st.g4_idle_vcpu],
+    ["idle", "Free", st.g4_idle_vcpu],
   ].filter(([, , v]) => v > 0.05);
   $("budget-total").textContent = total ? `${num(total)} allocatable vCPU on ${g4n} G4 ${g4n === 1 ? "node" : "nodes"}` : "no Ready G4 node";
   $("budget-bar").innerHTML = segs.map(([k, label, v]) => `<span class="seg-${k}" style="flex-grow:${v}" title="${esc(label)} ${num(v, 1)} vCPU">${v / (total || 1) > 0.07 ? `${esc(label)} ${num(v)}` : ""}</span>`).join("");
@@ -191,17 +217,23 @@ function renderStory(s) {
 }
 
 /* ------------------------------------------------------------------ nodes */
+// One cell per vCPU. Shared-pool cells are split into system/reserved (kubelet reserve = ncpu - allocatable,
+// plus daemonset requests) drawn grey, and free, so the map agrees with the budget bar and "% of spare".
 function nodeCells(n) {
+  let cells;
   if (n.cpus && n.cpus.length) {
-    return n.cpus.map((c) => ({ k: CAT[c.cat] || "idle", pending: false })).sort((a, b) => CAT_ORDER[a.k] - CAT_ORDER[b.k]);
+    cells = n.cpus.map((c) => ({ k: c.cat === "system" ? "s" : CAT[c.cat] || "idle", pending: false }));
+  } else {
+    cells = [];
+    for (const p of n.pods || []) {
+      const k = CAT[p.cat] || "s";
+      for (let i = 0; i < Math.max(1, Math.round(p.cpu || 0)); i++) cells.push({ k, pending: !p.ready });
+    }
+    const cap = n.ncpu || Math.round(n.alloc_cpu || 0);
+    while (cells.length < cap) cells.push({ k: "idle", pending: false });
   }
-  const cells = [];
-  for (const p of n.pods || []) {
-    const k = CAT[p.cat] || "s";
-    for (let i = 0; i < Math.max(1, Math.round(p.cpu || 0)); i++) cells.push({ k, pending: !p.ready });
-  }
-  const cap = n.ncpu || Math.round(n.alloc_cpu || 0);
-  while (cells.length < cap) cells.push({ k: "idle", pending: false });
+  let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(n.sys_cpu || 0);
+  for (let i = cells.length - 1; i >= 0 && reserved > 0; i--) if (cells[i].k === "idle") { cells[i].k = "s"; reserved--; }
   return cells.sort((a, b) => CAT_ORDER[a.k] - CAT_ORDER[b.k]);
 }
 
@@ -235,10 +267,10 @@ function renderNodes(s) {
     (n.blocks || []).forEach((b) => chips.push(`<span class="chip bad">guard: no ${esc(b)}</span>`));
     const label = n.role === "g4" ? `G4 #${idx.g4}` : `N4D #${idx.n4d}`;
     const type = n.instance_type || (n.role === "g4" ? "g4-standard-48" : "n4d-standard-16");
-    const aria = `${label}, ${type}: ${cnt.v} vCPU vLLM, ${cnt.i} integer, ${cnt.m} memory-heavy, ${cnt.b} buffer, ${cnt.s + cnt.idle} system or idle`;
+    const aria = `${label}, ${type}: ${cnt.v} vCPU vLLM, ${cnt.i} integer, ${cnt.m} memory-heavy, ${cnt.b} buffer, ${cnt.s} system or reserved, ${cnt.idle} free`;
     const slots = cells.map((c) => `<i class="cell ${c.k}${c.pending ? " pending" : ""}">${LETTER[c.k]}</i>`).join("");
     const sum = n.role === "g4"
-      ? `<span><b>${cnt.v}</b> vCPU vLLM</span><span><b>${pods.i}</b> integer pods</span><span><b>${pods.m}</b> memory-heavy pods</span>${n.achieved_rps ? `<span><b>${num(n.achieved_rps)}</b> rps</span>` : ""}`
+      ? `<span><b>${cnt.v}</b> vCPU vLLM</span><span><b>${pods.i}</b> integer pods</span><span><b>${pods.m}</b> memory-heavy pods</span><span><b>${cnt.idle}</b> vCPU free</span>${n.achieved_rps ? `<span><b>${num(n.achieved_rps)}</b> rps</span>` : ""}`
       : `<span><b>${pods.i + pods.m}</b> overflow pods</span><span><b>${cnt.b}</b> vCPU warm buffer</span><span><b>${cnt.idle}</b> vCPU free</span>`;
     const ev = evictedUntil[n.name] && evictedUntil[n.name] > Date.now();
     return `<div class="node ${n.role}${breach ? " breach" : ""}${ev ? " evicted" : ""}">` +
@@ -326,8 +358,8 @@ function renderEvents(s) {
 function renderMethod(s) {
   const c = s.cost || {}, cf = c.counterfactual || {}, p = c.prices || {};
   $("method").innerHTML = [
-    `<b>Saved vs all-N4D</b>: the CPU pods now running on G4 spare cores (${cf.pods ?? "–"} pods, ${num(cf.vcpu, 1)} vCPU, ${num(cf.mem_gib, 1)} GiB requested) are packed first-fit-decreasing onto n4d-standard-16 nodes (${num(cf.node_cpu, 2)} vCPU, ${num(cf.node_mem_gib, 1)} GiB usable each). That needs ${cf.n4d_nodes ?? "–"} nodes at ${money(p.n4d16_hr)}/hr = ${money(cf.per_hour)}/hr. Colo avoids those nodes because the G4 node is already paid for.`,
-    `<b>Fleet now</b>: ${(s.counts || {}).g4 || 0} G4 × ${money(p.g4_hr)} + ${(s.counts || {}).n4d || 0} N4D × ${money(p.n4d16_hr)} = ${money(c.per_hour)}/hr; all-N4D counterfactual ${money(cf.fleet_per_hour)}/hr.`,
+    `<b>Saved vs CPU on N4D</b>: without colo, every CPU pod running now (${cf.pods ?? "–"} pods: G4 backfill plus N4D overflow; ${num(cf.vcpu, 1)} vCPU, ${num(cf.mem_gib, 1)} GiB requested) would run on N4D. Packed first-fit-decreasing onto n4d-standard-16 nodes (${num(cf.node_cpu, 2)} vCPU, ${num(cf.node_mem_gib, 1)} GiB usable each after daemonsets) they need ${cf.n4d_nodes ?? "–"} nodes. ${cf.n4d_nodes_now ?? "–"} N4D nodes run today, so colo saves ${cf.saved_nodes ?? "–"} × ${money(p.n4d16_hr)}/hr = ${money(cf.saved_per_hour)}/hr. Free room on running N4D nodes is counted, and the warm buffer is treated as free.`,
+    `<b>Fleet now</b>: ${(s.counts || {}).g4 || 0} G4 × ${money(p.g4_hr)} + ${(s.counts || {}).n4d || 0} N4D × ${money(p.n4d16_hr)} = ${money(c.per_hour)}/hr. Without colo: same G4 + ${cf.n4d_nodes ?? "–"} N4D = ${money(cf.fleet_per_hour)}/hr.`,
     `<b>Reclaimed</b>: CPU requests of Running backfill pods on Ready G4 nodes. <b>Spare</b>: G4 allocatable minus vLLM and system-pod requests.`,
     `<b>Prices</b> are list unit prices set in the demo config (DEMO_PRICE_*), not a quote.`,
   ].map((x) => `<li>${x}</li>`).join("");
@@ -360,7 +392,7 @@ function initCharts() {
     mk("c-rps", "req/s", [ds("achieved", COL.v), ds("target", COL.faint, { borderDash: [5, 4], stepped: true, borderWidth: 1.5 })]);
     mk("c-scale", "count", [ds("vLLM ready", COL.v, { stepped: true }), ds("G4 nodes", COL.ink, { stepped: true, borderDash: [5, 4] }), ds("N4D nodes", COL.n4d, { stepped: true })], { ticks: { stepSize: 1 } });
     mk("c-svc", "pods", [ds("on G4 (reclaimed)", COL.i, { stepped: true }), ds("on N4D (overflow)", COL.n4d, { stepped: true, borderDash: [5, 4] })]);
-    mk("c-cost", "$/hr", [ds("fleet now", COL.v, { stepped: true }), ds("all-N4D", COL.faint, { stepped: true, borderDash: [5, 4] })]);
+    mk("c-cost", "$/hr", [ds("with colo", COL.v, { stepped: true }), ds("without colo", COL.faint, { stepped: true, borderDash: [5, 4] })]);
   } catch (e) {
     console.error("chart init failed", e);
   }
@@ -410,7 +442,6 @@ async function poll() {
     const s = await fetchJSON("/api/state");
     last = s; lastGoodAt = Date.now();
     session = { auth: false, net: null, server: null };
-    $("mode").hidden = s.mode !== "mock";
     $("accel").hidden = !(s.demo && s.demo.accelerator_active);
     const parts = [
       ["story", renderStory], ["controls", syncControls], ["evictions", trackEvictions], ["nodes", renderNodes],
@@ -430,11 +461,11 @@ async function poll() {
   }
 }
 
+initCharts();
 try {
   const q = new URLSearchParams(location.search).get("presenter");
   if (q === "1" || (q === null && localStorage.getItem("colo-presenter") === "1")) setPresenter(true);
 } catch (_) { /* ignore */ }
-initCharts();
 document.querySelectorAll("details").forEach((d) => d.addEventListener("toggle", () => { if (last) { renderTopology(last); renderCharts(); } }));
 poll();
 setInterval(poll, POLL_MS);

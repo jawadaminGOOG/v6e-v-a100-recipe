@@ -34,8 +34,9 @@ DEMO_MOCK=1 python -m uvicorn app:app --port 8088  # synthetic cluster, no GKE n
 ```
 
 Open http://localhost:8088. Add `?presenter=1` (or press `P`) for 1.35x type on a projector; keys `1`-`4` start
-the scenarios. The top strip states the story: GPU slice | vCPUs reclaimed on G4 (% of spare) | CPU pods on N4D
-overflow | $/hr saved vs an all-N4D cluster. The per-L3 tile map, history charts, events and the cost method are
+the scenarios (after a confirm). The top strip states the story: GPU slice | vCPUs reclaimed on G4 (% of spare) | CPU pods on N4D
+overflow (vCPU) | $/hr saved vs running the same CPU pods on N4D without colo (counts free room on the N4D
+nodes already running). The per-L3 tile map, history charts, events and the cost method are
 behind the expanders below the fold.
 
 Environment variables:
@@ -115,7 +116,14 @@ The JSON output contains the step log, labelled observations (`observe` steps) a
   excluded. "Reclaimed" = CPU and memory requests of Running backfill pods on G4 nodes, valued at $0.0131/vCPU-hr
   and $0.00149/GiB-hr.
 
-## Hosting notes (Cloud Run)
+## Hosting notes
+
+* **In-cluster copy** (`k8s.yaml`): the Service is `ClusterIP` on purpose. The app has no auth of its own and can
+  change the cluster, so it is not exposed to the VPC. Reach it with
+  `kubectl -n colo-system port-forward svc/colo-demo 8088:80` and open http://localhost:8088.
+* **Shareable copy**: the Cloud Run service behind IAP.
+
+### Cloud Run
 
 * Run **one instance** (`--max-instances=1`): the scenario runner, the state cache and the accelerator restore
   live in process memory, so a second instance would show "idle" mid-scenario and allow a second concurrent run.

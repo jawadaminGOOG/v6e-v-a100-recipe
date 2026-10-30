@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>G4 colo: CPU services on spare GPU-node cores</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='7' height='7' rx='1.5' fill='%232a3170'/%3E%3Crect x='9' width='7' height='7' rx='1.5' fill='%230f6b63'/%3E%3Crect y='9' width='7' height='7' rx='1.5' fill='%230f6b63'/%3E%3Crect x='9' y='9' width='7' height='7' rx='1.5' fill='%230f6b63'/%3E%3C/svg%3E">
   <link rel="preload" href="/static/fonts/plex-sans-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
   <!-- Bundled locally: the page must render on venue Wi-Fi with no CDN. -->
@@ -20,7 +21,6 @@
   </div>
   <div class="top-right">
     <span id="accel" class="pill warn" hidden title="The demo set the vLLM HPA minReplicas to 2 so scale-out shows in seconds. It is reset to 1 when the rate drops, when a scenario ends, and on shutdown.">Demo accelerator on: HPA min 2</span>
-    <span id="mode" class="pill" hidden>Mock data</span>
     <span class="pill status" id="conn-pill"><i class="dot" aria-hidden="true"></i><span id="conn" role="status" aria-live="polite">Connecting</span><span id="conn-age" class="age" aria-hidden="true"></span></span>
     <button id="presenter" class="btn ghost" type="button" aria-pressed="false" title="Larger type for projectors (P)">Presenter view</button>
   </div>
@@ -43,13 +43,13 @@
     </div>
     <div class="metric">
       <span class="m-label">Overflow on N4D</span>
-      <span class="m-value"><span id="h-overflow">–</span><small> pods</small></span>
+      <span class="m-value"><span id="h-overflow">–</span><small> vCPU</small></span>
       <span class="m-note" id="h-overflow-note">CPU pods that did not fit on G4</span>
     </div>
     <div class="metric save">
-      <span class="m-label">Saved vs all-N4D</span>
+      <span class="m-label">Saved vs CPU on N4D</span>
       <span class="m-value"><span id="h-saved">–</span><small>/hr</small></span>
-      <span class="m-note" id="h-saved-note">N4D nodes you would otherwise rent</span>
+      <span class="m-note" id="h-saved-note">N4D nodes you would rent without colo</span>
     </div>
     <div class="budget" aria-hidden="false">
       <div class="budget-head">
@@ -85,7 +85,8 @@
           <li><i class="cell i" aria-hidden="true">I</i>Integer CPU service</li>
           <li><i class="cell m" aria-hidden="true">M</i>Memory-heavy CPU service</li>
           <li><i class="cell b" aria-hidden="true">B</i>Warm buffer</li>
-          <li><i class="cell s" aria-hidden="true"></i>System / idle</li>
+          <li><i class="cell s" aria-hidden="true"></i>System / reserved</li>
+          <li><i class="cell idle" aria-hidden="true"></i>Free</li>
         </ul>
       </div>
       <div id="nodes" class="nodes"></div>
@@ -156,7 +157,7 @@
         <figure><figcaption>Requests per second: achieved vs target</figcaption><div class="chart-box"><canvas id="c-rps" role="img" aria-label="Achieved vs target requests per second"></canvas></div></figure>
         <figure><figcaption>vLLM replicas and nodes</figcaption><div class="chart-box"><canvas id="c-scale" role="img" aria-label="vLLM replicas, G4 and N4D node counts"></canvas></div></figure>
         <figure><figcaption>CPU pods on G4 vs N4D</figcaption><div class="chart-box"><canvas id="c-svc" role="img" aria-label="CPU pods on G4 backfill vs N4D overflow"></canvas></div></figure>
-        <figure><figcaption>Cost per hour: actual vs all-N4D</figcaption><div class="chart-box"><canvas id="c-cost" role="img" aria-label="Fleet cost per hour vs all-N4D counterfactual"></canvas></div></figure>
+        <figure><figcaption>Cost per hour: with colo vs CPU on N4D</figcaption><div class="chart-box"><canvas id="c-cost" role="img" aria-label="Fleet cost per hour with colo vs without colo"></canvas></div></figure>
       </div>
     </details>
     <details class="panel">

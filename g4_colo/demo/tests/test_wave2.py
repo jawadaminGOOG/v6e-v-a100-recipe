@@ -84,11 +84,12 @@ def test_build_state_story_and_counterfactual():
     assert s["reclaimed_pct_of_spare"] == pytest.approx(round(100 * 24 / 37.5, 1))
     assert s["overflow_pods"] == 3 and s["overflow_vcpu"] == 6
     cf = st["cost"]["counterfactual"]
-    # usable per N4D node = 15.89 - 0.89 = 15 vCPU -> 7 x 2-vCPU pods per node -> 12 pods need 2 nodes
+    # usable per N4D node = 15.89 - 0.89 = 15 vCPU -> 7 x 2-vCPU pods per node;
+    # 12 backfill + 3 overflow = 15 pods need 3 N4D nodes; 1 is running -> 2 saved
     assert cf["node_cpu"] == pytest.approx(15.0)
-    assert cf["n4d_nodes"] == 2
+    assert cf["n4d_nodes"] == 3 and cf["saved_nodes"] == 2
     assert st["cost"]["saved_per_hour"] == pytest.approx(2 * PRICE_N4D16_HR)
-    assert cf["fleet_per_hour"] == pytest.approx(st["cost"]["per_hour"] + 2 * PRICE_N4D16_HR, abs=1e-3)
+    assert cf["fleet_per_hour"] == pytest.approx(st["cost"]["g4_per_hour"] + 3 * PRICE_N4D16_HR, abs=1e-3)
     assert s["saved_per_hour"] == cf["saved_per_hour"]
     m = summarize(st)
     assert m["saved_per_hour"] == cf["saved_per_hour"]
@@ -327,3 +328,41 @@ def test_events_scoped_and_cached():
     assert len(seen) == 1  # second call within TTL is served from cache
     assert seen[0]["limit"] == cluster.EVENTS_LIMIT <= 200
     assert "reason!=FailedScheduling" in seen[0]["field_selector"]
+
+
+def _live_like(n4d_nodes: int, overflow: int, buffer_on_first: bool = False):
+    nodes = [_node("g4a", "g4", 46, 176), _node("g4b", "g4", 46, 176)]
+    pods = []
+    for i in range(n4d_nodes):
+        nodes.append(_node(f"n4d{i}", "n4d", 15.89, 57))
+        pods.append(_pod(f"ds-{i}", f"n4d{i}", 0.56, 1, ns="kube-system", tier=None, cls=None, app="ds"))
+    for i in range(36):
+        pods.append(_pod(f"bf-{i}", "g4a" if i < 18 else "g4b", 2, 3))
+    for i in range(overflow):
+        pods.append(_pod(f"of-{i}", "n4d0", 2, 3, tier="overflow"))
+    if buffer_on_first:
+        pods.append(_pod("colo-buffer-x", "n4d1", 2, 1, ns="colo-system", tier=None, cls=None, app="colo-buffer"))
+    return build_state({"nodes": nodes, "pods": pods})
+
+
+def test_counterfactual_counts_existing_n4d_capacity():
+    # Review M1 (live shape): 3 N4D nodes (2 empty, 1 with 2 overflow pods) + 36 backfill pods on G4.
+    # All-CPU-on-N4D needs pack(38 x 2 vCPU onto 15.33) = 6 nodes; 3 run today -> 3 saved (old code said 6).
+    st = _live_like(3, 2)
+    cf = st["cost"]["counterfactual"]
+    assert cf["n4d_nodes"] == 6 and cf["saved_nodes"] == 3
+    assert st["story"]["saved_per_hour"] == pytest.approx(3 * PRICE_N4D16_HR)
+    # 2 empty N4D nodes + 36 backfill: 6 needed - 2 running = 4 saved (old code: 6)
+    assert _live_like(2, 0)["cost"]["counterfactual"]["saved_nodes"] == 4
+
+
+def test_counterfactual_ignores_buffer_and_uses_min_overhead():
+    st = _live_like(3, 2, buffer_on_first=True)
+    cf = st["cost"]["counterfactual"]
+    assert cf["node_cpu"] == pytest.approx(15.89 - 0.56)  # buffer's 2 vCPU are not daemonset overhead
+    assert cf["saved_nodes"] == 3
+
+
+def test_buffer_deployment_read_from_colo_system():
+    st = build_state({"nodes": [], "pods": [], "deployments": [{"namespace": "colo-system", "name": "colo-buffer", "replicas": 2, "ready": 1}]})
+    assert st["buffer"] == {"desired": 2, "ready": 1}

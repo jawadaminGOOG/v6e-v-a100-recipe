@@ -84,7 +84,7 @@ roleRef:
   name: colo-demo
 ---
 # colo-system: controller /state, /config, /baseline and node-agent /cpus through the pod proxy;
-# the colo-config ConfigMap as a fallback when the controller is down.
+# the colo-config ConfigMap as a fallback when the controller is down; the colo-buffer Deployment.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -94,6 +94,9 @@ rules:
 - apiGroups: [""]
   resources: [pods/proxy]
   verbs: [get, create]
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get, list, watch]
 - apiGroups: [""]
   resources: [configmaps]
   resourceNames: [colo-config]
@@ -164,8 +167,8 @@ spec:
         colo.role: loadgen
       containers:
       - name: demo
-        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-demo:latest
-        imagePullPolicy: Always
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-demo:v0.2.3
+        imagePullPolicy: IfNotPresent
         ports:
         - name: http
           containerPort: 8088
@@ -182,10 +185,11 @@ metadata:
   name: colo-demo
   namespace: colo-system
   labels: {app: colo-demo}
-  annotations:
-    networking.gke.io/load-balancer-type: "Internal"
+# ClusterIP only: the app has no auth of its own and can drive the cluster, so it must not be reachable
+# from the VPC. Access it with `kubectl -n colo-system port-forward svc/colo-demo 8088:80`; the shareable
+# path is the Cloud Run service behind IAP.
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: colo-demo
   ports:

@@ -441,7 +441,7 @@ class MockBackend:
             labels = {"app": p["app"], "colo.tier": p["tier"], "colo.class": SERVICES[p["app"]]}
             pods.append(self._pod(p["name"], p["uid"], "colo-svc", labels, p["node"], p["ready_at"], cpu, mem, f"colo-{p['tier']}"))
         for p in self.buffer_pods:
-            pods.append(self._pod(p["name"], p["uid"], "colo-svc", {"app": "colo-buffer"}, p["node"], p["ready_at"], 2, 1, "colo-buffer"))
+            pods.append(self._pod(p["name"], p["uid"], "colo-system", {"app": "colo-buffer"}, p["node"], p["ready_at"], 2, 1, "colo-buffer"))
         pods.append(self._pod("colo-controller-5d7f8c9b6-k2x8q", _sfx(32), "colo-system", {"app": "colo-controller"}, lg_node, now - 3600, 0.2, 0.25, None))
 
         def dep(ns, name, replicas, ready):
@@ -451,7 +451,7 @@ class MockBackend:
         deployments = [
             dep("inference", "vllm", self.hpa_desired, sum(1 for v in self.vllm if ready_pod(v))),
             dep("inference", "loadgen", LOADGEN_REPLICAS, LOADGEN_REPLICAS),
-            dep("colo-svc", "colo-buffer", self.buffer_replicas, sum(1 for p in self.buffer_pods if ready_pod(p))),
+            dep("colo-system", "colo-buffer", self.buffer_replicas, sum(1 for p in self.buffer_pods if ready_pod(p))),
         ]
         for svc in SERVICES:
             for tier in ("backfill", "overflow"):

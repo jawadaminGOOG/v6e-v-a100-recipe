@@ -266,7 +266,7 @@ N4D_ALLOC_MEM_GIB_DEFAULT = float(os.environ.get("DEMO_N4D_ALLOC_MEM_GIB", "57.0
 
 def counterfactual_n4d(pods: list[dict], cap_cpu: float, cap_mem_gib: float, overhead_cpu: float = 0.0,
                        overhead_mem_gib: float = 0.0, price_hr: float = PRICE_N4D16_HR) -> dict:
-    """N4D nodes an all-N4D cluster would need to host `pods` (the backfill pods now on G4).
+    """N4D nodes needed to host `pods` (all running CPU pods) if they ran on N4D without colo.
 
     First-fit-decreasing bin packing of each pod's (cpu, mem) requests onto n4d-standard-16
     allocatable, minus the per-node daemonset overhead observed on real N4D nodes. A pod
@@ -359,6 +359,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
     cost_g4 = 0.0
     cost_n4d = 0.0
     backfill_on_g4: list[dict] = []
+    overflow_on_n4d: list[dict] = []
     g4_alloc = g4_vllm = g4_sys = g4_buffer = 0.0
     vllm_slices: list[float] = []
     overflow_pods = 0
@@ -377,8 +378,9 @@ def build_state(raw: dict, mode: str = "live") -> dict:
         alloc = n.get("allocatable") or {}
         node_pods = []
         for p in pods_by_node.get(n["name"], []):
-            if p.get("namespace") not in ("inference", "colo-svc"):
-                # system / agent pods are not drawn as blocks (they live in the shared CPU pool)
+            if p.get("namespace") not in ("inference", "colo-svc") and pod_category(p) != "buffer":
+                # system / agent pods are not drawn as blocks (they live in the shared CPU pool);
+                # the warm buffer (colo-system in the recipe) is drawn.
                 continue
             pl = p.get("labels") or {}
             node_pods.append(
@@ -394,18 +396,21 @@ def build_state(raw: dict, mode: str = "live") -> dict:
                     "ready": bool(p.get("ready")),
                 }
             )
-            if role == "g4" and pl.get("colo.tier") == "backfill" and p.get("phase") == "Running":
+            if role == "g4" and n.get("ready") and pl.get("colo.tier") == "backfill" and p.get("phase") == "Running":
                 reclaimed_vcpu += p.get("cpu_req", 0.0)
                 reclaimed_mem += p.get("mem_req_gib", 0.0)
                 backfill_on_g4.append(p)
             if role == "n4d" and pl.get("colo.tier") == "overflow" and p.get("phase") == "Running":
                 overflow_pods += 1
                 overflow_vcpu += p.get("cpu_req", 0.0)
+                overflow_on_n4d.append(p)
 
         # vCPU budget of this node: what the GPU slice, system pods and colo pods use.
         node_all = pods_by_node.get(n["name"], [])
-        sys_cpu = sum(p.get("cpu_req", 0.0) for p in node_all if p.get("namespace") not in ("inference", "colo-svc"))
-        sys_mem = sum(p.get("mem_req_gib", 0.0) for p in node_all if p.get("namespace") not in ("inference", "colo-svc"))
+        # System = daemonsets/agents; the warm buffer is preemptible capacity, not overhead.
+        sys_pods = [p for p in node_all if p.get("namespace") not in ("inference", "colo-svc") and pod_category(p) != "buffer"]
+        sys_cpu = sum(p.get("cpu_req", 0.0) for p in sys_pods)
+        sys_mem = sum(p.get("mem_req_gib", 0.0) for p in sys_pods)
         if role == "g4" and n.get("ready"):
             g4_alloc += parse_cpu(alloc.get("cpu"))
             g4_sys += sys_cpu
@@ -476,6 +481,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
                 "mem_used_gib": agent.get("mem_used_gib"),
                 "pods": sorted(node_pods, key=lambda p: ({"vllm": 0, "integer": 1, "memory": 2, "buffer": 3}.get(p["cat"], 4), p["name"])),
                 "blocks": blocks,
+                "sys_cpu": round(sys_cpu, 2),  # daemonset/agent requests (shared pool, not exclusive)
                 "ttft_p99_ms": lgn.get("ttft_p99_ms"),
                 "ttft_p50_ms": lgn.get("ttft_p50_ms"),
                 "achieved_rps": lgn.get("achieved_rps"),
@@ -526,21 +532,30 @@ def build_state(raw: dict, mode: str = "live") -> dict:
                 "ready": d.get("ready", sum(1 for p in tp if p.get("ready"))) if d else sum(1 for p in tp if p.get("ready")),
             }
         services[svc] = entry
-    buf = deps.get(("colo-svc", "colo-buffer")) or {}
+    buf = deps.get(("colo-system", "colo-buffer")) or deps.get(("colo-svc", "colo-buffer")) or {}
 
     events = sorted(raw.get("events") or [], key=lambda e: e.get("time") or "", reverse=True)[:50]
 
     reclaimed_value = reclaimed_vcpu * PRICE_VCPU_HR + reclaimed_mem * PRICE_GIB_HR
 
+    # Counterfactual "CPU on N4D, no colo": every CPU pod now running (backfill on G4 + overflow on N4D)
+    # packed onto N4D. Savings = N4D nodes that world needs beyond the N4D nodes running today.
+    cf_pods = backfill_on_g4 + overflow_on_n4d
     if n4d_caps:
-        cap = n4d_caps[0]
-        cf = counterfactual_n4d(backfill_on_g4, cap[0], cap[1], cap[2], cap[3])
+        # Least daemonset overhead seen on a Ready N4D node (the buffer is excluded above).
+        cap = min(n4d_caps, key=lambda c: (c[2], c[3]))
+        cf = counterfactual_n4d(cf_pods, cap[0], cap[1], cap[2], cap[3])
     else:
-        cf = counterfactual_n4d(backfill_on_g4, N4D_ALLOC_CPU_DEFAULT, N4D_ALLOC_MEM_GIB_DEFAULT)
-    fleet = cost_g4 + cost_n4d
-    cf["fleet_per_hour"] = round(fleet + cf["per_hour"], 4)
-    cf["saved_per_hour"] = cf["per_hour"]
-    cf["saved_pct"] = round(100.0 * cf["per_hour"] / cf["fleet_per_hour"], 1) if cf["fleet_per_hour"] else 0.0
+        cf = counterfactual_n4d(cf_pods, N4D_ALLOC_CPU_DEFAULT, N4D_ALLOC_MEM_GIB_DEFAULT)
+    n4d_now = counts.get("n4d", 0)
+    saved_nodes = max(0, cf["n4d_nodes"] - n4d_now)
+    cf["n4d_nodes_now"] = n4d_now
+    cf["saved_nodes"] = saved_nodes
+    cf["fleet_per_hour"] = round(cost_g4 + cf["n4d_nodes"] * PRICE_N4D16_HR, 4)
+    cf["saved_per_hour"] = round(saved_nodes * PRICE_N4D16_HR, 4)
+    cf["saved_pct"] = round(100.0 * cf["saved_per_hour"] / cf["fleet_per_hour"], 1) if cf["fleet_per_hour"] else 0.0
+    cf["method"] = ("first-fit-decreasing pack of all running CPU pods (G4 backfill + N4D overflow) onto "
+                    "n4d-standard-16 allocatable minus daemonset requests; saved = nodes needed - N4D nodes running")
 
     # Spare = what is left on Ready G4 nodes after the GPU slice and system pods; colo fills it.
     g4_spare = max(0.0, g4_alloc - g4_vllm - g4_sys)
@@ -561,6 +576,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
         "saved_per_hour": cf["saved_per_hour"],
         "saved_pct": cf["saved_pct"],
         "counterfactual_n4d_nodes": cf["n4d_nodes"],
+        "saved_nodes": saved_nodes,
     }
     return {
         "ts": now,

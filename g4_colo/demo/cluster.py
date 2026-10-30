@@ -77,7 +77,12 @@ class LiveBackend:
         ca_b64 = os.environ.get("GKE_CA_CERT", "").strip()
         if not endpoint or not ca_b64:
             raise RuntimeError("No kubeconfig, in-cluster config, or GKE_ENDPOINT/GKE_CA_CERT found")
-        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        # userinfo.email lets GKE resolve the token to the service-account email, which Kubernetes RBAC
+        # bindings name. Without it, only IAM roles (not RBAC) authorize the caller.
+        creds, _ = google.auth.default(scopes=[
+            "https://www.googleapis.com/auth/cloud-platform",
+            "https://www.googleapis.com/auth/userinfo.email",
+        ])
         ca_path = "/tmp/gke-cluster-ca.crt"
         with open(ca_path, "wb") as f:
             f.write(base64.b64decode(ca_b64))
@@ -233,7 +238,7 @@ class LiveBackend:
 
     def _deployments(self) -> list[dict]:
         out = []
-        for ns in ("inference", "colo-svc"):
+        for ns in ("inference", "colo-svc", "colo-system"):  # colo-system: colo-buffer
             for d in self.apps.list_namespaced_deployment(ns).items:
                 out.append(
                     {
