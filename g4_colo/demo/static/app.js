@@ -149,33 +149,6 @@ function startScenario(name) {
   act(`/api/scenario/${name}`, {}, "Scenario started");
 }
 
-function setPresenter(on) {
-  document.documentElement.classList.toggle("presenter", on);
-  $("presenter").setAttribute("aria-pressed", String(on));
-  $("presenter").textContent = on ? "Exit presenter" : "Presenter view";
-  try { localStorage.setItem("colo-presenter", on ? "1" : "0"); } catch (_) { /* private mode */ }
-  applyChartFonts(on);
-}
-// Chart.js draws text on canvas, so CSS rem scaling does not reach it; set sizes explicitly.
-function applyChartFonts(on) {
-  if (typeof Chart === "undefined") return;
-  const size = on ? 16 : 12;
-  try {
-    Chart.defaults.font.size = size;
-    for (const c of Object.values(charts)) {
-      const o = c.options;
-      o.plugins.legend.labels.font = { size };
-      o.plugins.legend.labels.boxWidth = on ? 20 : 14;
-      for (const ax of Object.values(o.scales || {})) {
-        ax.ticks = { ...(ax.ticks || {}), font: { size } };
-        if (ax.title) ax.title.font = { size };
-      }
-      c.resize();
-      c.update("none");
-    }
-  } catch (e) { console.error("chart font update failed", e); }
-}
-$("presenter").addEventListener("click", () => setPresenter(!document.documentElement.classList.contains("presenter")));
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
   const map = { 1: "gpu-scale-out", 2: "gpu-scale-in", 3: "cpu-scale-out", 4: "guard-integer-vs-memory" };
@@ -185,7 +158,6 @@ document.addEventListener("keydown", (e) => {
     const where = last && last.mode === "mock" ? "the simulator" : "the live cluster (it can add or remove nodes)";
     if (window.confirm(`Start scenario ${e.key}: ${btn.querySelector("b").textContent}?\nThis changes ${where}.`)) startScenario(map[e.key]);
   }
-  else if (e.key === "p" || e.key === "P") setPresenter(!document.documentElement.classList.contains("presenter"));
 });
 
 const fresh = (k) => touched[k] && Date.now() - touched[k] < 8000;
@@ -195,7 +167,10 @@ function syncControls(s) {
   if (!fresh("demand") && c.demand) SVCS.forEach((sv) => { if (c.demand[sv] !== undefined) { $(`d-${sv}`).value = c.demand[sv]; $(`d-${sv}-out`).textContent = c.demand[sv]; } });
   if (!fresh("demand")) markPresets(demandValues());
   if (!fresh("guard") && c.guard_enabled !== undefined && c.guard_enabled !== null) $("guard").checked = !!c.guard_enabled;
-  $("guard-label").textContent = `Latency guard ${c.guard_enabled ? "on" : "off"}`;
+  $("guard-label").textContent = c.guard_enabled ? "On" : "Off";
+  $("guard-sub").textContent = c.guard_enabled
+    ? (c.threshold_ms ? `moves analytics off G4 above ${num(c.threshold_ms)} ms` : "moves analytics off G4 when TTFT rises")
+    : "off: nothing is moved";
   $("baseline-info").textContent = c.baseline_ttft_p99_ms ? `baseline ${num(c.baseline_ttft_p99_ms)} ms · threshold ${num(c.threshold_ms)} ms` : "no baseline yet";
   const running = s.scenario && s.scenario.status === "running";
   $("manual-fields").disabled = running;
@@ -212,82 +187,88 @@ function svcTotals(s) {
 }
 function renderRail(s) {
   const t = svcTotals(s);
-  for (const sv of SVCS) {
-    const sp = $(`sp-${sv}`);
-    sp.children[0].style.flexGrow = t[sv].bf; sp.children[1].style.flexGrow = t[sv].of;
-    $(`w-${sv}`).innerHTML = `<span><b>${t[sv].bf}</b> on G4</span><span><b>${t[sv].of}</b> on N4D</span>`;
-  }
-  const slots = ((s.story || {}).g4_slots_per_node || 0) * ((s.counts || {}).g4_ready || 0);
-  const bf = SVCS.reduce((a, sv) => a + t[sv].bf, 0);
-  const demand = SVCS.reduce((a, sv) => a + (+t[sv].demand || 0), 0);
-  $("cap-text").innerHTML = slots ? `<b>${bf}</b> of <b>${slots}</b> G4 slots` : "no G4 slots yet";
-  const bar = $("cap-bar");
-  bar.style.transform = `scaleX(${slots ? Math.min(1, demand / slots) : 0})`;
-  bar.classList.toggle("over", demand > slots);
-  bar.parentElement.title = `demand ${demand} pods vs ${slots} G4 slots`;
+  for (const sv of SVCS) $(`spill-${sv}`).innerHTML = t[sv].of ? `<b>${t[sv].of}</b> spill to N4D` : "";
+}
+
+// Secondary numbers live in the "Presets, scenarios, numbers" expander, not on the main view.
+function renderNumbers(s) {
+  const lg = s.loadgen || {}, c = s.controller || {}, v = s.vllm || {}, hpa = v.hpa || {}, cn = s.counts || {};
+  const t = svcTotals(s);
+  const bf = SVCS.reduce((a, sv) => a + t[sv].bf, 0), of = SVCS.reduce((a, sv) => a + t[sv].of, 0);
+  const want = SVCS.reduce((a, sv) => a + t[sv].bfWant + t[sv].ofWant, 0);
+  const slots = ((s.story || {}).g4_slots_per_node || 0) * (cn.g4_ready || 0);
+  const rows = [
+    ["TTFT p50", lg.ttft_p50_ms != null ? `${num(lg.ttft_p50_ms)} ms` : "–"],
+    ["End-to-end p50", lg.e2e_p50_ms != null ? `${num(lg.e2e_p50_ms)} ms` : "–"],
+    ["Guard baseline · threshold", c.baseline_ttft_p99_ms ? `${num(c.baseline_ttft_p99_ms)} · ${num(c.threshold_ms)} ms` : "no baseline"],
+    ["vLLM replicas ready / desired", `${num(v.ready)} / ${num(v.desired)}${hpa.min !== undefined ? ` (HPA ${hpa.min}–${hpa.max})` : ""}`],
+    ["Nodes G4 · N4D", `${cn.g4 || 0} · ${cn.n4d || 0}`],
+    ["CPU pods on G4 · N4D", `${bf} · ${of}${want > bf + of ? ` (${want - bf - of} pending)` : ""}`],
+    ["G4 slots used", slots ? `${bf} of ${slots}` : "–"],
+    ["Fleet cost", `${money((s.cost || {}).per_hour)}/hr`],
+  ];
+  $("kvs").innerHTML = rows.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("");
 }
 
 /* ------------------------------------------------------------------ story strip */
 function renderStory(s) {
   const st = s.story || {};
   const cf = (s.cost || {}).counterfactual || {};
-  $("h-slice").textContent = num(st.gpu_slice_vcpu);
-  const g4n = (s.counts || {}).g4_ready || 0, g4all = (s.counts || {}).g4 || 0;
-  const starting = g4all - g4n;
-  $("h-slice-note").textContent = `reserved for vLLM on each G4 node (${g4n} ready${starting > 0 ? `, ${starting} starting` : ""})`;
+  const lg = s.loadgen || {}, c = s.controller || {};
+  const g4n = (s.counts || {}).g4_ready || 0;
   $("h-reclaim").textContent = num(st.reclaimed_vcpu);
-  $("h-reclaim-note").textContent = st.reclaimed_pct_of_spare !== null && st.reclaimed_pct_of_spare !== undefined
-    ? `${num(st.reclaimed_pct_of_spare)}% of spare G4 cores · ${st.reclaimed_pods} CPU pods` : "no spare G4 cores yet";
-  $("h-overflow").textContent = num(st.overflow_vcpu);
-  const n4d = st.n4d_nodes || 0;
-  $("h-overflow-note").textContent = `${num(st.overflow_pods)} CPU pods on ${n4d} N4D ${n4d === 1 ? "node" : "nodes"}${n4d && !st.overflow_pods ? " (warm buffer only)" : ""}`;
-  $("h-saved").textContent = money(st.saved_per_hour);
-  $("h-saved-note").textContent = cf.saved_nodes !== undefined
-    ? `${cf.saved_nodes} fewer n4d-standard-16 · ${num(st.saved_pct)}% of the bill without colo` : "";
-
+  $("s-reclaim").title = st.reclaimed_pct_of_spare != null
+    ? `${num(st.reclaimed_pct_of_spare)}% of spare G4 cores · ${st.reclaimed_pods} CPU pods · GPU slice ${num(st.gpu_slice_vcpu)} vCPU per G4 node`
+    : "no spare G4 cores yet";
+  const segs = [["v", "GPU slice", st.gpu_slice_total_vcpu], ["r", "Reclaimed", st.reclaimed_vcpu], ["b", "Warm buffer", st.g4_buffer_vcpu], ["f", "Free", (st.g4_idle_vcpu || 0) + (st.g4_system_vcpu || 0)]];
+  const bar = $("vis-budget");
+  segs.forEach(([k, , x], i) => { bar.children[i].style.flexGrow = Math.max(0, x || 0); });
   const total = st.g4_alloc_vcpu || 0;
-  const segs = [
-    ["v", "GPU slice", st.gpu_slice_total_vcpu],
-    ["i", "Reclaimed", st.reclaimed_vcpu],
-    ["b", "Warm buffer", st.g4_buffer_vcpu],
-    ["s", "System", st.g4_system_vcpu],
-    ["idle", "Free", st.g4_idle_vcpu],
-  ].filter(([, , v]) => v > 0.05);
-  $("budget-total").textContent = total ? `${num(total)} allocatable vCPU on ${g4n} G4 ${g4n === 1 ? "node" : "nodes"}` : "no Ready G4 node";
-  $("budget-bar").innerHTML = segs.map(([k, label, v]) => `<span class="seg-${k}" style="flex-grow:${v}" title="${esc(label)} ${num(v, 1)} vCPU">${v / (total || 1) > 0.07 ? `${esc(label)} ${num(v)}` : ""}</span>`).join("");
-  $("budget-bar").setAttribute("aria-label", `G4 vCPU budget: ${segs.map(([, l, v]) => `${l} ${num(v)}`).join(", ")}`);
-  $("budget-key").innerHTML = segs.map(([k, label, v]) => `<li><i class="seg-${k}" aria-hidden="true"></i>${esc(label)} <b>${num(v)}</b></li>`).join("");
+  bar.setAttribute("aria-label", `G4 vCPU budget${total ? ` (${num(total)} allocatable on ${g4n} node${g4n === 1 ? "" : "s"})` : ""}: ${segs.filter(([, , x]) => x > 0.05).map(([, l, x]) => `${l} ${num(x)}`).join(", ")}`);
+  bar.title = bar.getAttribute("aria-label");
+  $("budget-key").innerHTML = segs.map(([, l, x]) => `<li>${esc(l)} ${num(x)}</li>`).join("");
+
+  $("h-saved").textContent = money(st.saved_per_hour);
+  $("s-saved").title = cf.saved_nodes !== undefined
+    ? `${cf.saved_nodes} fewer n4d-standard-16 than running every CPU pod on N4D · ${num(st.saved_pct)}% of the bill without colo` : "";
+  const running = st.n4d_nodes || 0, avoided = Math.max(0, cf.saved_nodes || 0);
+  $("vis-nodes").innerHTML = '<i class="run"></i>'.repeat(running) + '<i class="avoid"></i>'.repeat(avoided);
+  $("vis-nodes").setAttribute("aria-label", `${running} N4D node${running === 1 ? "" : "s"} running, ${avoided} avoided by colo`);
+
+  const thr = c.threshold_ms, p99 = lg.ttft_p99_ms, over = !!(thr && p99 && p99 > thr);
+  $("h-p99").firstChild.nodeValue = num(p99);
+  $("h-p99").classList.toggle("bad", over);
+  $("h-lim").textContent = thr ? `TTFT p99 · ${over ? "over" : "limit"} ${num(thr)}` : "TTFT p99";
+  $("h-lim").classList.toggle("warn", over);
+  $("s-ttft").title = `p50 ${num(lg.ttft_p50_ms)} ms${c.baseline_ttft_p99_ms ? ` · baseline ${num(c.baseline_ttft_p99_ms)} ms` : ""}`;
+  const ach = lg.achieved_rps, tgt = lg.target_rps, short = !!(tgt && ach != null && ach < tgt * 0.95);
+  $("h-rps").firstChild.nodeValue = num(ach);
+  $("h-tgt").textContent = short ? `of ${num(tgt)} target` : "requests/s · on target";
+  $("h-tgt").classList.toggle("warn", short);
 }
 
-/* ------------------------------------------------------------------ live metrics row */
-function renderMetrics(s) {
-  const lg = s.loadgen || {}, c = s.controller || {}, v = s.vllm || {}, hpa = v.hpa || {}, cn = s.counts || {};
-  const ach = lg.achieved_rps, tgt = lg.target_rps;
-  $("m-ach").textContent = num(ach);
-  $("m-tgt").textContent = `${num(tgt)} rps`;
-  const top = Math.max(tgt || 0, ach || 0, 1) * 1.1;
-  $("m-gauge").style.transform = `scaleX(${(ach || 0) / top})`;
-  $("m-gauge-t").style.left = `${((tgt || 0) / top) * 100}%`;
-  $("m-p50").textContent = num(lg.ttft_p50_ms);
-  $("m-p50s").textContent = lg.e2e_p50_ms ? `end-to-end p50 ${num(lg.e2e_p50_ms)} ms` : "median first token";
-  const thr = c.threshold_ms, p99 = lg.ttft_p99_ms;
-  const over = thr && p99 && p99 > thr;
-  $("m-p99").textContent = num(p99);
-  $("m-p99").classList.toggle("bad", !!over);
-  $("m-thr").textContent = thr ? ` / ${num(thr)} ms` : " ms";
-  $("m-p99s").textContent = c.baseline_ttft_p99_ms ? `baseline ${num(c.baseline_ttft_p99_ms)} ms · ${over ? "over threshold" : "within threshold"}` : "no baseline yet";
-  $("m-rep").textContent = num(v.ready);
-  $("m-rep-d").textContent = ` ready of ${num(v.desired)} desired`;
-  $("m-rep-s").textContent = hpa.min !== undefined ? `HPA ${hpa.min}–${hpa.max} · 1 per G4 node` : "1 per G4 node";
-  $("m-g4").textContent = num(cn.g4 || 0);
-  $("m-n4d").textContent = num(cn.n4d || 0);
-  const booting = (cn.g4 || 0) - (cn.g4_ready || 0) + (cn.n4d || 0) - (cn.n4d_ready || 0);
-  $("m-nodes-s").textContent = `${money((s.cost || {}).per_hour)}/hr fleet${booting > 0 ? ` · ${booting} starting` : ""}`;
-  const t = svcTotals(s);
-  const bf = SVCS.reduce((a, sv) => a + t[sv].bf, 0), of = SVCS.reduce((a, sv) => a + t[sv].of, 0);
-  const want = SVCS.reduce((a, sv) => a + t[sv].bfWant + t[sv].ofWant, 0);
-  $("m-bf").textContent = bf; $("m-of").textContent = of;
-  $("m-pods-s").textContent = `${Math.max(0, want - bf - of)} pending · demand ${SVCS.reduce((a, sv) => a + (+t[sv].demand || 0), 0)}`;
+/* Tiny inline-SVG trend line: no axes; the big number beside it carries the value. */
+function spark(svg, vals, ref, cls) {
+  const W = svg.clientWidth || 200, H = svg.clientHeight || 58, pad = 4;
+  const pts = vals.map((v, i) => [i, v]).filter(([, v]) => v !== null && v !== undefined && Number.isFinite(+v));
+  if (!pts.length) { svg.innerHTML = ""; return; }
+  const max = Math.max(1, ref || 0, ...pts.map(([, v]) => v)) * 1.12;
+  const n = Math.max(2, vals.length);
+  const X = (i) => (i / (n - 1)) * (W - 6);
+  const Y = (v) => pad + (1 - v / max) * (H - 2 * pad);
+  const line = pts.map(([i, v]) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+  const [li, lv] = pts[pts.length - 1];
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = (ref ? `<line class="thr ${cls === "ach" ? "target" : "limit"}" x1="0" x2="${W - 6}" y1="${Y(ref)}" y2="${Y(ref)}"/>` : "") +
+    `<polygon class="area ${cls}" points="${X(pts[0][0])},${H - pad} ${line} ${X(li)},${H - pad}"/>` +
+    `<polyline class="ln ${cls}" points="${line}"/><circle class="dot ${cls}" cx="${X(li)}" cy="${Y(lv)}" r="2.8"/>`;
+}
+function renderSparks() {
+  const recent = history.slice(-90); // ~3 min at a 2 s poll
+  const lastH = recent[recent.length - 1] || {};
+  const over = lastH.thr && lastH.p99 > lastH.thr;
+  spark($("sp-ttft"), recent.map((h) => h.p99), lastH.thr, over ? "p99 bad" : "p99");
+  spark($("sp-rps"), recent.map((h) => h.rps), lastH.target, "ach");
 }
 
 /* ------------------------------------------------------------------ nodes: L3-grouped core maps */
@@ -329,7 +310,8 @@ function buildCoreMap(n) {
     const cores = [...Array(8).keys()].map((i) => l * 8 + i).filter((c) => c < half);
     const g = document.createElement("div");
     g.className = "llc";
-    g.innerHTML = `<div class="llc-h"><span class="n">L3 ${l}</span><span class="c">cores ${cores[0]}–${cores[cores.length - 1]}</span><span class="s"></span></div><div class="tiles"></div>`;
+    g.innerHTML = `<div class="llc-h">L3 ${l}</div><div class="tiles"></div>`;
+    g._cores = `cores ${cores[0]}–${cores[cores.length - 1]}`;
     const grid = g.lastChild;
     for (const t of [0, 1]) for (const c of cores) {
       const id = c + t * half;
@@ -361,7 +343,7 @@ function updateCoreMap(root, n, label) {
   });
   root._llcs.forEach((g, i) => {
     const names = [...per[i]].map((a) => (a === "vllm" ? "vLLM" : a));
-    g.querySelector(".s").textContent = names.length ? names.join(" · ") : "free";
+    g.title = `L3 cache domain ${i}, ${g._cores}: ${names.length ? names.join(", ") : "free"}`;
     g.classList.toggle("has-vllm", per[i].has("vllm"));
     g.classList.toggle("has-mem", per[i].has("analytics"));
   });
@@ -395,38 +377,45 @@ function trackEvictions(s) {
 }
 
 const nodeEls = new Map();
-function nodeRow(n) {
+function nodeEl(n) {
   const el = document.createElement("div");
-  el.className = "node-row";
-  el.innerHTML = `<div class="node-h"><span class="role ${n.role}"></span><span class="meta"></span><span class="chips"></span><span class="stats"></span></div><div class="map"></div>`;
+  el.className = n.role === "g4" ? "nrow" : "n4d-one";
+  el.innerHTML = n.role === "g4"
+    ? `<div class="nname"><b class="g4"></b><span class="flag" hidden></span></div><div class="map"></div>`
+    : `<span class="t"><span class="nm"></span><span class="flag" hidden></span></span><div class="map"></div>`;
   return el;
+}
+function nodeFlag(n, breach) {
+  if (!n.ready) return ["warn", "starting"];
+  if (n.role === "g4" && !(n.pods || []).some((p) => p.cat === "vllm" && p.ready)) return ["warn", "vLLM starting"];
+  if ((n.blocks || []).length) return ["bad", "guard"];
+  if (breach) return ["bad", "p99 high"];
+  return null;
 }
 function renderNodes(s) {
   const thr = (s.controller || {}).threshold_ms;
   const slots = (s.story || {}).g4_slots_per_node;
-  const list = orderedNodes(s);
   const seen = new Set();
-  const g4Rows = [], n4dRows = [];
-  for (const { n, label } of list) {
+  const g4 = [], n4d = [];
+  for (const { n, label } of orderedNodes(s)) {
     seen.add(n.name);
     let el = nodeEls.get(n.name);
-    if (!el) { el = nodeRow(n); nodeEls.set(n.name, el); }
-    const breach = n.role === "g4" && thr && n.ttft_p99_ms && n.ttft_p99_ms > thr;
-    el.className = `node-row ${n.role}${breach ? " breach" : ""}${evictedUntil[n.name] > Date.now() ? " evicted" : ""}`;
-    el.querySelector(".role").textContent = label;
+    if (!el) { el = nodeEl(n); nodeEls.set(n.name, el); }
+    const breach = !!(n.role === "g4" && thr && n.ttft_p99_ms && n.ttft_p99_ms > thr);
+    el.classList.toggle("breach", breach);
+    el.classList.toggle("evicted", evictedUntil[n.name] > Date.now());
+    el.querySelector(n.role === "g4" ? "b" : ".nm").textContent = label;
+    const f = nodeFlag(n, breach), fl = el.querySelector(".flag");
+    fl.hidden = !f;
+    if (f) { fl.className = `flag ${f[0]}`; fl.textContent = f[1]; }
+    // Per-node detail on hover, so the map stays quiet.
     const type = n.instance_type || (n.role === "g4" ? "g4-standard-48" : "n4d-standard-16");
-    const meta = el.querySelector(".meta");
-    meta.textContent = `${type} · ${n.zone || ""}`; meta.title = n.name;
-    const chips = [];
-    if (!n.ready) chips.push(`<span class="chip warn">starting up</span>`);
-    else if (n.role === "g4" && !(n.pods || []).some((p) => p.cat === "vllm" && p.ready)) chips.push(`<span class="chip warn">vLLM starting</span>`);
-    else chips.push(`<span class="chip">Ready</span>`);
-    (n.blocks || []).forEach((b) => chips.push(`<span class="chip bad">guard: no ${esc(b)}</span>`));
-    el.querySelector(".chips").innerHTML = chips.join("");
-    const cpuPods = (n.pods || []).filter((p) => SVCS.includes(p.app));
-    el.querySelector(".stats").innerHTML = n.role === "g4"
-      ? `<span class="${breach ? "bad" : ""}">TTFT p99 <b>${n.ttft_p99_ms != null ? `${num(n.ttft_p99_ms)} ms` : "–"}</b>${breach ? " · over threshold" : ""}</span><span>p50 <b>${n.ttft_p50_ms != null ? `${num(n.ttft_p50_ms)} ms` : "–"}</b></span><span><b>${n.achieved_rps ? num(n.achieved_rps) : "–"}</b> rps</span><span><b>${cpuPods.length}</b>${slots ? ` / ${slots}` : ""} CPU pods</span>`
-      : `<span><b>${cpuPods.length}</b> overflow pods</span>`;
+    const cpuPods = (n.pods || []).filter((p) => SVCS.includes(p.app)).length;
+    const bits = [`${label} · ${type} · ${n.zone || ""}`, n.name];
+    if (n.role === "g4") bits.push(`TTFT p99 ${n.ttft_p99_ms != null ? num(n.ttft_p99_ms) + " ms" : "–"} · p50 ${n.ttft_p50_ms != null ? num(n.ttft_p50_ms) + " ms" : "–"} · ${n.achieved_rps ? num(n.achieved_rps) : "–"} rps`, `${cpuPods}${slots ? ` of ${slots}` : ""} CPU pods`);
+    else bits.push(`${cpuPods} overflow pods`);
+    (n.blocks || []).forEach((b) => bits.push(`guard: no ${b} pods`));
+    el.title = bits.join("\n");
     const host = el.querySelector(".map");
     if (n.cpus && n.cpus.length) {
       if (!host._map || host._ncpu !== n.cpus.length) { host.innerHTML = ""; host._map = buildCoreMap(n); host._ncpu = n.cpus.length; host.appendChild(host._map); }
@@ -435,24 +424,28 @@ function renderNodes(s) {
       host._map = null; host._ncpu = 0;
       host.innerHTML = flatCells(n);
     }
-    (n.role === "g4" ? g4Rows : n4dRows).push(el);
+    (n.role === "g4" ? g4 : n4d).push(el);
   }
   for (const k of [...nodeEls.keys()]) if (!seen.has(k)) nodeEls.delete(k);
+
   const root = $("nodes");
-  const want = [...g4Rows];
+  const want = [...g4];
   const hpa = (s.vllm || {}).hpa || {};
-  if (g4Rows.length && hpa.max && g4Rows.length < hpa.max) {
-    let gh = root.querySelector(".ghost") || Object.assign(document.createElement("div"), { className: "ghost" });
-    gh.innerHTML = `<b>G4 #${g4Rows.length + 1}</b>joins when vLLM scales out (HPA max ${hpa.max}). vLLM takes its GPU slice; CPU pods fill the spare cores.`;
+  if (g4.length && hpa.max && g4.length < hpa.max) {
+    const gh = root.querySelector(".ghost") || Object.assign(document.createElement("div"), { className: "ghost" });
+    gh.textContent = `G4 #${g4.length + 1} joins when vLLM scales out`;
     want.push(gh);
   }
-  if (n4dRows.length) {
-    let grp = root.querySelector(".n4d-group") || Object.assign(document.createElement("div"), { className: "n4d-group" });
-    let wrap = grp.querySelector(".n4d-wrap");
-    if (!wrap) { wrap = document.createElement("div"); wrap.className = "n4d-wrap"; grp.appendChild(wrap); }
-    n4dRows.forEach((el, i) => { if (wrap.children[i] !== el) wrap.insertBefore(el, wrap.children[i] || null); });
-    [...wrap.children].slice(n4dRows.length).forEach((x) => x.remove());
-    want.push(grp);
+  if (n4d.length) {
+    let line = root.querySelector(".n4d-line");
+    if (!line) {
+      line = document.createElement("div"); line.className = "n4d-line";
+      line.innerHTML = `<div class="nname"><b class="n4d">N4D</b></div><div class="n4ds"></div>`;
+    }
+    const wrap = line.querySelector(".n4ds");
+    n4d.forEach((el, i) => { if (wrap.children[i] !== el) wrap.insertBefore(el, wrap.children[i] || null); });
+    [...wrap.children].slice(n4d.length).forEach((x) => x.remove());
+    want.push(line);
   }
   if (!want.length) { root.innerHTML = `<p class="empty">No G4 or N4D nodes reported yet.</p>`; return; }
   root.querySelector(".empty")?.remove();
@@ -467,7 +460,7 @@ const lanes = {};
 (function initLanes() {
   const host = $("lanes");
   for (const sv of SVCS) {
-    host.insertAdjacentHTML("beforeend", `<span class="lane-n a-${sv}"><i class="sw" aria-hidden="true"><b>${TAG[sv]}</b></i>${sv}</span><div class="zone g" id="zg-${sv}" aria-label="${sv} on G4"></div><div class="zone n" id="zn-${sv}" aria-label="${sv} on N4D"></div>`);
+    host.insertAdjacentHTML("beforeend", `<span class="lane-n a-${sv}"><i class="dotc" aria-hidden="true"></i>${sv}</span><div class="zone g" id="zg-${sv}" aria-label="${sv} on G4"></div><div class="zone n" id="zn-${sv}" aria-label="${sv} on N4D"></div>`);
     lanes[sv] = [];
   }
 })();
@@ -492,21 +485,13 @@ function renderLanes(s) {
     while (L.length < slotsList.length) { const c = document.createElement("span"); L.push(c); }
     while (L.length > slotsList.length) L.pop().remove();
     const zg = $(`zg-${sv}`), zn = $(`zn-${sv}`);
-    zg.querySelector(".none")?.remove(); zn.querySelector(".none")?.remove();
     L.forEach((c, i) => {
       const [z, p] = slotsList[i];
-      c.className = `pod a-${sv}${p ? "" : " pending"}`;
-      c.textContent = p ? p.short : "…";
+      c.className = `pod a-${sv}${p ? (p.ready ? "" : " starting") : " pending"}`;
       c.title = p ? `${p.name} · ${p.tier || "pod"} on ${p.short}${p.ready ? "" : " · starting"}` : "pending: waiting for a node";
-      if (p && !p.ready) c.classList.add("pending");
       (z === "g" ? zg : zn).appendChild(c);
     });
-    if (!zg.querySelector(".pod")) zg.insertAdjacentHTML("beforeend", `<span class="none">none</span>`);
-    if (!zn.querySelector(".pod")) zn.insertAdjacentHTML("beforeend", `<span class="none">none</span>`);
   }
-  const slots = ((s.story || {}).g4_slots_per_node || 0) * ((s.counts || {}).g4_ready || 0);
-  $("zh-g").textContent = slots ? `${gTot} of ${slots} slots` : `${gTot} pods`;
-  $("zh-n").textContent = `${plural(nTot, "pod", "pods")}${pend ? ` · ${pend} pending` : ""}`;
   first.forEach((r, c) => {
     if (!c.isConnected) return;
     const b = c.getBoundingClientRect(), dx = r.left - b.left, dy = r.top - b.top;
@@ -630,18 +615,15 @@ function renderCharts() {
   const set = (id, arrs) => { const c = charts[id]; if (!c) return; c.data.labels = labels; arrs.forEach((a, i) => (c.data.datasets[i].data = a)); c.update("none"); };
   const col = (k) => history.map((h) => h[k]);
   try {
-    set("c-ttft", [col("p99"), col("p50"), col("thr"), col("base")]);
-    set("c-rps", [col("rps"), col("target")]);
-    const moreOpen = document.querySelector("#c-scale").closest("details").open;
-    if (moreOpen) {
+    const open = document.querySelector("#c-scale").closest("details").open;
+    if (open) {
+      set("c-ttft", [col("p99"), col("p50"), col("thr"), col("base")]);
+      set("c-rps", [col("rps"), col("target")]);
       set("c-scale", [col("vr"), col("g4"), col("n4d")]);
       set("c-svc", [col("bf"), col("of")]);
       set("c-cost", [col("cost"), col("cf")]);
     }
   } catch (e) { console.error("chart update failed", e); }
-  const lg = last && last.loadgen, thr = last && last.controller.threshold_ms;
-  $("ttft-now").textContent = lg ? `p99 ${num(lg.ttft_p99_ms)} ms${thr ? ` · threshold ${num(thr)} ms` : ""}` : "";
-  $("rps-now").textContent = lg ? `${num(lg.achieved_rps)} of ${num(lg.target_rps)} rps` : "";
 }
 
 /* ------------------------------------------------------------------ poll loop */
@@ -655,9 +637,9 @@ async function poll() {
     session = { auth: false, net: null, server: null };
     $("accel").hidden = !(s.demo && s.demo.accelerator_active);
     const parts = [
-      ["story", renderStory], ["controls", syncControls], ["rail", renderRail], ["metrics", renderMetrics], ["evictions", trackEvictions],
+      ["story", renderStory], ["controls", syncControls], ["rail", renderRail], ["numbers", renderNumbers], ["evictions", trackEvictions],
       ["nodes", renderNodes], ["lanes", renderLanes], ["scenario", () => renderScenario(s.scenario)], ["events", renderEvents], ["method", renderMethod],
-      ["history", (x) => { pushHistory(x); renderCharts(); }],
+      ["history", (x) => { pushHistory(x); renderSparks(); renderCharts(); }],
     ];
     for (const [name, fn] of parts) {
       try { fn(s); } catch (e) { console.error(`render ${name} failed`, e); } // one bad panel never blanks the page
@@ -673,10 +655,6 @@ async function poll() {
 }
 
 initCharts();
-try {
-  const q = new URLSearchParams(location.search).get("presenter");
-  if (q === "1" || (q === null && localStorage.getItem("colo-presenter") === "1")) setPresenter(true);
-} catch (_) { /* ignore */ }
 document.querySelectorAll("details").forEach((d) => d.addEventListener("toggle", () => { if (last) renderCharts(); }));
 poll();
 setInterval(poll, POLL_MS);

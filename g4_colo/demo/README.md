@@ -33,11 +33,12 @@ python -m uvicorn app:app --port 8088              # live cluster, current kubec
 DEMO_MOCK=1 python -m uvicorn app:app --port 8088  # synthetic cluster, no GKE needed
 ```
 
-Open http://localhost:8088. Add `?presenter=1` (or press `P`) for 1.35x type on a projector; keys `1`-`4` start
-the scenarios (after a confirm). The top strip states the story: GPU slice | vCPUs reclaimed on G4 (% of spare) | CPU pods on N4D
-overflow (vCPU) | $/hr saved vs running the same CPU pods on N4D without colo (counts free room on the N4D
-nodes already running). The per-L3 tile map, history charts, events and the cost method are
-behind the expanders below the fold.
+Open http://localhost:8088. Keys `1`-`4` start
+the scenarios (after a confirm). The top strip states the story in three parts: vCPUs reclaimed on G4 |
+$/hr saved vs running the same CPU pods on N4D without colo (counts free room on the N4D nodes already
+running) | GPU serving (TTFT p99 vs limit, requests/s vs target, with sparklines). The left rail holds the
+rate, per-service demand and guard controls; the per-L3 core map and service lanes fill the main panel.
+History charts, events and the cost method are in expanders below the fold.
 
 Environment variables:
 
