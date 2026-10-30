@@ -106,7 +106,13 @@ gcloud projects add-iam-policy-binding "$PROJECT" --role=roles/monitoring.viewer
 ```
 
 ### When the controller is down
-Placement freezes: Deployment replica counts stay as they are, the guard stops, and `colo.active` labels persist. A node that loses vLLM while the controller is down keeps `colo.active=true`, so new backfill can still land there until the controller returns. The admission policy and the `-100` priority still apply. A liveness probe on `/healthz` restarts a controller whose loop has not finished an iteration for 10 s (5 × `LOOP_S`, after a 60 s start-up grace). Also alert on `time() - colo_last_tick_timestamp_seconds`.
+Placement freezes: Deployment replica counts stay as they are, the guard stops, and `colo.active` labels persist. Two things still hold without the controller, because the cluster enforces them:
+- **No backfill on a G4 node without vLLM.** Backfill pods carry a required `podAffinity` to `app=vllm` on the same node, so a stale `colo.active=true` label cannot attract them. Measured in wave-2 edge case E2: after vLLM left a node with the controller stopped, 17 replacement backfill pods stayed Pending instead of binding there (`.agents/wave-2/logs/final_E2_rerun.json`).
+- **No GPU node is added for CPU work.** The `-100` priority and the admission policy still apply; E2 saw no G4 scale-up.
+
+What you lose is capacity rebalancing. If Cluster Autoscaler removes the drained G4 node while the controller is down, its backfill pods go with it and nothing raises overflow. In E2, one service ran at 1 of 18 ready pods for about 4 minutes, until the controller returned and scaled overflow up within seconds. Keep controller outages short:
+- A liveness probe on `/healthz` restarts a controller whose loop has not finished an iteration for 10 s (5 × `LOOP_S`, after a 60 s start-up grace).
+- Alert on `time() - colo_last_tick_timestamp_seconds`.
 
 ---
 
