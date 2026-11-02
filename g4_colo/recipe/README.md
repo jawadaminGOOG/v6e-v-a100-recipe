@@ -72,7 +72,7 @@ Spare CPU on a G4 node = allocatable − requests of every non-backfill pod − 
 ### G4 scale-in: make-before-break dehydrate
 When a G4 node loses its vLLM pod (HPA scale-in, rollout, crash), or is cordoned or marked for deletion by Cluster Autoscaler:
 1. The controller removes `colo.active` at once, so no new backfill lands there, and drops the node from allocation, so overflow on N4D is scaled up first.
-2. It deletes the node's remaining backfill pods, per service, only when ready overflow plus ready backfill on eligible nodes covers that service's demand, or after `dehydrate_grace_s` (180 s; longer than an N4D cold scale-up, measured ~95 s in wave-2 clause 5b), or at once if the node is cordoned or carries the Cluster Autoscaler deletion taint.
+2. It deletes the node's remaining backfill pods, per service, only when ready overflow plus ready backfill on eligible nodes covers that service's demand, or after `dehydrate_grace_s` (180 s; longer than an N4D cold scale-up, measured ~95 s in wave-2 clause 5b), or at once if the node is cordoned or carries the Cluster Autoscaler deletion taint. After the grace, a service whose overflow pods are still not Ready (N4D out of quota or capacity) keeps its backfill until `dehydrate_max_s` (900 s): in the 2 Nov sweep the old rule deleted it at 180 s while overflow was stuck on the regional N4D quota, and toolcall fell to 8 of 18 Ready.
 3. A vLLM `Recreate` rollout that brings vLLM back within the grace deletes nothing.
 4. Draining backfill pods get `controller.kubernetes.io/pod-deletion-cost: "-1000"`, so when `<svc>-backfill` shrinks the ReplicaSet removes them before ready pods on healthy G4 nodes.
 

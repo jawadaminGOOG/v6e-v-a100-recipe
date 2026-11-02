@@ -140,6 +140,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Seconds a node may stay ineligible (e.g. vLLM Recreate rollout) before its
     # remaining backfill pods are deleted even if overflow is not ready yet.
     "dehydrate_grace_s": 180,
+    # Addition: after the grace, a service's backfill is still kept while its overflow
+    # Deployment has pods that are not Ready (N4D out of quota or capacity), up to this
+    # many seconds; deleting it then would only drop serving capacity.
+    "dehydrate_max_s": 900,
     # Where the guard reads per-node TTFT from: loadgen /stats (demo), Google
     # Managed Prometheus (production) or none (guard reports no_signal, never acts).
     "ttft_source": {
@@ -207,6 +211,9 @@ def validate_config(cfg: Mapping[str, Any]) -> dict[str, Any]:
     d = c["dehydrate_grace_s"]
     if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
         raise ValueError("dehydrate_grace_s must be a number >= 0")
+    dm = c["dehydrate_max_s"]
+    if isinstance(dm, bool) or not isinstance(dm, (int, float)) or dm < d:
+        raise ValueError("dehydrate_max_s must be a number >= dehydrate_grace_s")
     ts = c["ttft_source"]
     if not isinstance(ts, Mapping) or ts.get("type") not in TTFT_SOURCE_TYPES:
         raise ValueError(f"ttft_source.type must be one of {', '.join(TTFT_SOURCE_TYPES)}")
@@ -869,6 +876,8 @@ def plan_node(
     track: NodeTrack,
     cover: Mapping[str, bool],
     dehydrate_grace_s: float,
+    overflow_short: Mapping[str, bool] | None = None,
+    dehydrate_max_s: float | None = None,
 ) -> NodePlan:
     """Decide colo.active, guard reset, and dehydrate deletes for one G4 node.
 
@@ -877,8 +886,12 @@ def plan_node(
       caller also drops the node from allocation so overflow scales up first).
       Its remaining backfill pods are deleted, per service, only when
         (a) cover[service] (overflow ready already covers that service), or
-        (b) the node has been ineligible for >= dehydrate_grace_s, or
+        (b) the node has been ineligible for >= dehydrate_grace_s and that service's
+            overflow is not short (overflow_short[service] False: all its overflow pods
+            are Ready), or for >= dehydrate_max_s regardless, or
         (c) the node is cordoned or tainted ToBeDeletedByClusterAutoscaler.
+      (b) keeps serving capacity when N4D cannot start overflow pods (quota or stockout,
+      seen live on 2 Nov: toolcall fell to 8 of 18 Ready after the 180 s grace).
       A vLLM Recreate rollout that returns within the grace therefore deletes
       nothing, and a GPU scale-in is make-before-break.
     * No vLLM on the node: reset the guard and remove colo.block.* labels.
@@ -911,7 +924,14 @@ def plan_node(
         elif CA_TAINT in node.taint_keys:
             reason, deletes = "ca-scale-down", [p.name for p in bf]
         elif now - since >= dehydrate_grace_s:
-            reason, deletes = f"ineligible ({el.reason}) for {now - since:.0f}s", [p.name for p in bf]
+            short = overflow_short or {}
+            hard = dehydrate_max_s is not None and now - since >= dehydrate_max_s
+            deletes = [p.name for p in bf if hard or not short.get(p.service or "", False)
+                       or (p.service and cover.get(p.service, False))]
+            if deletes:
+                reason = f"ineligible ({el.reason}) for {now - since:.0f}s"
+                if not hard and len(deletes) < len(bf):
+                    reason += " (kept services whose overflow is not Ready yet)"
         else:
             deletes = [p.name for p in bf if p.service and cover.get(p.service, False)]
             if deletes:

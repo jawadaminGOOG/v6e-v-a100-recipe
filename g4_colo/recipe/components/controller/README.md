@@ -85,6 +85,7 @@ Defaults (`DEFAULT_CONFIG` in `colo_logic.py`); any key may be left out:
  "buffer_replicas": 1,
  "reserve_cpu_per_node": 2,
  "dehydrate_grace_s": 180,
+ "dehydrate_max_s": 900,
  "ttft_source": {"type": "loadgen",
                  "prometheus": {"project": "", "location": "global", "query_window_s": 60,
                                 "metric": "vllm:time_to_first_token_seconds", "cluster": null}},

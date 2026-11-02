@@ -8,7 +8,8 @@ Loop (every LOOP_S seconds, or at once after POST /config or /baseline):
      labels, evictions, Events; no signal -> no action; no vLLM -> guard reset
   4. per node (colo_logic.plan_node): colo.active on eligible nodes; on ineligible
      nodes remove colo.active at once and delete backfill only when overflow is
-     ready, after dehydrate_grace_s, or when the node is cordoned / CA-tainted
+     ready, after dehydrate_grace_s (up to dehydrate_max_s while overflow pods are
+     not Ready), or when the node is cordoned / CA-tainted
   5. allocate backfill per service over eligible nodes; overflow = demand -
      backfill; patch Deployment scales without dropping ready capacity
   6. patch colo-buffer replicas
@@ -358,6 +359,7 @@ class Controller:
         gcfg = L.GuardConfig.from_config(cfg)
         demand = cfg["demand"]
         grace = float(cfg["dehydrate_grace_s"])
+        dehydrate_max = float(cfg["dehydrate_max_s"])
         reserve_m = L.parse_cpu(cfg.get("reserve_cpu_per_node", 0))
 
         # -- reads, all in parallel -------------------------------------------
@@ -437,6 +439,9 @@ class Controller:
                     ready_bf_eligible[s] = ready_bf_eligible.get(s, 0) + c
         overflow_ready = {s: (deploys[f"{s}-overflow"] or (0, 0))[1] for s in L.SERVICE_ORDER}
         cover = L.drain_cover(demand, overflow_ready, ready_bf_eligible)
+        # Overflow pods that exist but are not Ready (Pending on N4D quota or capacity, or starting).
+        overflow_short = {s: (deploys[f"{s}-overflow"] or (0, 0))[0] > (deploys[f"{s}-overflow"] or (0, 0))[1]
+                          for s in L.SERVICE_ORDER}
 
         caps: list[L.NodeCapacity] = []
         node_rows: list[dict[str, Any]] = []
@@ -445,7 +450,8 @@ class Controller:
         ineligible_pods: list[L.PodFacts] = []
         deleting: set[str] = set()
         for nm, nf in nfacts.items():
-            plan = L.plan_node(nf, facts[nm], now, self.tracks.get(nm, L.NodeTrack()), cover, grace)
+            plan = L.plan_node(nf, facts[nm], now, self.tracks.get(nm, L.NodeTrack()), cover, grace,
+                               overflow_short, dehydrate_max)
             self.tracks[nm] = plan.track
             if L.ACTIVE_LABEL in plan.label_patch:
                 self.record("active" if plan.eligible else "dehydrate", nm,

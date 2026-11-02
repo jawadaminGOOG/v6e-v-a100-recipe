@@ -41,7 +41,7 @@ images:
   newTag: v0.2.4
 - name: colo-registry.invalid/colo-controller
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-controller        # REPLACE
-  newTag: v0.2.4
+  newTag: v0.2.5
 - name: colo-registry.invalid/colo-node-agent
   newName: us-docker.pkg.dev/your-project-id/your-repository/colo-node-agent        # REPLACE
   newTag: v0.2.4

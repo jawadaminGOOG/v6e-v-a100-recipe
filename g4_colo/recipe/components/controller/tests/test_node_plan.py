@@ -279,3 +279,32 @@ def test_hold_backfill():
     assert (p.backfill, p.overflow, p.order) == (4, 4, ("overflow", "backfill"))
     p = L.ScalePlan(5, 0, ("overflow", "backfill"))
     assert L.hold_backfill(p, 4, 0) is p
+
+
+def test_grace_expiry_keeps_backfill_while_overflow_not_ready():
+    """After the grace, a service whose overflow pods are not Ready (N4D out of quota) keeps its backfill until
+    dehydrate_max_s; services whose overflow is Ready are dehydrated as before (live finding, 2 Nov)."""
+    pods = [bf("sb-1", svc="sandbox"), bf("tc-1", svc="toolcall")]
+    short = {"sandbox": False, "toolcall": True}
+    p = L.plan_node(node(labels=ACTIVE), pods, 0, L.NodeTrack(), NO_COVER, GRACE, short, 300.0)
+    p = L.plan_node(node(), pods, GRACE, p.track, NO_COVER, GRACE, short, 300.0)
+    assert p.delete_pods == ["sb-1"] and p.draining == ["tc-1"]
+    assert "kept services whose overflow is not Ready" in p.drain_reason
+    p = L.plan_node(node(), pods, 299.0, p.track, NO_COVER, GRACE, short, 300.0)
+    assert "tc-1" not in p.delete_pods
+    p = L.plan_node(node(), pods, 300.0, p.track, NO_COVER, GRACE, short, 300.0)
+    assert sorted(p.delete_pods) == ["sb-1", "tc-1"]
+
+
+def test_grace_expiry_short_overflow_still_drains_when_covered_or_ca_taint():
+    pods = [bf("tc-1", svc="toolcall")]
+    short = {"toolcall": True}
+    p = L.plan_node(node(), pods, GRACE, L.NodeTrack(0.0), {"toolcall": True}, GRACE, short, 900.0)
+    assert p.delete_pods == ["tc-1"]
+    p = L.plan_node(node(taints=(L.CA_TAINT,)), pods, 10, L.NodeTrack(0.0), NO_COVER, GRACE, short, 900.0)
+    assert p.delete_pods == ["tc-1"] and p.drain_reason == "ca-scale-down"
+
+
+def test_dehydrate_max_validation():
+    with pytest.raises(ValueError):
+        L.validate_config({"dehydrate_grace_s": 180, "dehydrate_max_s": 60})

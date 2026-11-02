@@ -114,4 +114,7 @@ spec:
       target: {type: AverageValue, averageValue: "700"}
   behavior:
     scaleUp: {stabilizationWindowSeconds: 0, policies: [{type: Pods, value: 1, periodSeconds: 15}]}
-    scaleDown: {stabilizationWindowSeconds: 15, policies: [{type: Pods, value: 1, periodSeconds: 15}]}
+    # 120 s: a new replica's request rate starts near 0, so right after scale-out the per-pod average briefly
+    # drops below target. With 15 s the HPA removed the replica it had just added (2 Nov sweep, both clusters:
+    # 2nd vLLM Ready, back to 1 within ~45 s, up again), stranding that node's backfill.
+    scaleDown: {stabilizationWindowSeconds: 120, policies: [{type: Pods, value: 1, periodSeconds: 15}]}
