@@ -112,7 +112,7 @@ spec:
       nodeSelector: {colo.role: loadgen}
       containers:
       - name: controller
-        image: colo-registry.invalid/colo-controller:v0.2.5
+        image: colo-registry.invalid/colo-controller:v0.2.7
         imagePullPolicy: IfNotPresent
         ports: [{name: http, containerPort: 8080}]
         resources:

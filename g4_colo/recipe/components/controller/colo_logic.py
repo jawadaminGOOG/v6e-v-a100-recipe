@@ -361,6 +361,22 @@ def allocate(
     return Allocation(backfill, overflow, placement, cpu)
 
 
+def cover_unschedulable(alloc: Allocation, unschedulable: Mapping[str, int]) -> Allocation:
+    """Add backfill pods the scheduler cannot place to overflow.
+
+    allocate() plans backfill as if every pod could go anywhere, but pods already running stay where the
+    scheduler put them, so a planned pod can find no room on the node the plan counted on (live, 2 Nov: the
+    latency guard blocked memory-heavy on one G4 node, the other was full of sandbox pods, and 2 analytics
+    backfill pods sat Pending with no overflow behind them). Those pods also run on N4D until they bind; the
+    backfill target is kept so they still land on G4 when room appears, and overflow then shrinks.
+    """
+    ov = dict(alloc.overflow)
+    for svc, n in unschedulable.items():
+        if n > 0 and svc in ov:
+            ov[svc] += min(int(n), alloc.backfill.get(svc, 0))
+    return replace(alloc, overflow=ov)
+
+
 @dataclass(frozen=True)
 class ScalePlan:
     backfill: int

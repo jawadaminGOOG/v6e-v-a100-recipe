@@ -308,3 +308,12 @@ def test_grace_expiry_short_overflow_still_drains_when_covered_or_ca_taint():
 def test_dehydrate_max_validation():
     with pytest.raises(ValueError):
         L.validate_config({"dehydrate_grace_s": 180, "dehydrate_max_s": 60})
+
+
+def test_cover_unschedulable_adds_pending_backfill_to_overflow():
+    alloc = L.Allocation(backfill={"analytics": 2, "sandbox": 20}, overflow={"analytics": 2, "sandbox": 0},
+                         placement={}, leftover_cpu_m={})
+    out = L.cover_unschedulable(alloc, {"analytics": 2, "sandbox": 0})
+    assert out.overflow == {"analytics": 4, "sandbox": 0} and out.backfill == alloc.backfill
+    # never more than the planned backfill (stale Pending pods from a larger old target)
+    assert L.cover_unschedulable(alloc, {"analytics": 9}).overflow["analytics"] == 4

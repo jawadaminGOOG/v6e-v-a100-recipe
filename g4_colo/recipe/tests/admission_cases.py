@@ -79,8 +79,9 @@ CASES = [
     ("accept: GPU workload in inference", pod("t7", "inference", prio="gpu-serving", cpu_req="8", cpu_lim="8",
                                               mem_req="64Gi", mem_lim="64Gi", gpu=True), True),
     ("accept: non-G4 pod unaffected", pod("t8", "colo-svc", prio="colo-overflow", g4=False), True),
-    ("reject: quota (CPU above namespace cap)", pod("t9", "colo-svc", prio="colo-overflow", cpu_req="200",
-                                                     cpu_lim="200", g4=False), False),
+    # 1000 CPUs: above the colo-svc quota of both recipes (recipe/ 180, recipe-native/ 320).
+    ("reject: quota (CPU above namespace cap)", pod("t9", "colo-svc", prio="colo-overflow", cpu_req="1000",
+                                                     cpu_lim="1000", g4=False), False),
     # --- finding 1.3 bypasses: G4 targeting without the compute-class toleration/selector pair ---
     ("reject: keyless Exists toleration + affinity colo.role=g4 (burstable)",
      pod("b1", "colo-svc", prio="colo-overflow", g4=False, tolerations=[KEYLESS],

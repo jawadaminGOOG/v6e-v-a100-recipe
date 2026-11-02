@@ -110,6 +110,18 @@ def _pod_facts(pod) -> L.PodFacts:
     )
 
 
+UNSCHEDULABLE_AFTER_S = float(os.environ.get("UNSCHEDULABLE_AFTER_S", "20"))
+UNSCHEDULABLE_HOLD_S = float(os.environ.get("UNSCHEDULABLE_HOLD_S", "120"))
+
+
+def _unschedulable_since(pod) -> float | None:
+    for c in (pod.status.conditions or []) if pod.status else []:
+        if c.type == "PodScheduled" and c.status == "False" and c.reason == "Unschedulable":
+            t = c.last_transition_time
+            return t.timestamp() if t else None
+    return None
+
+
 def _node_facts(node) -> L.NodeFacts:
     alloc = (node.status.allocatable if node.status else None) or {}
     return L.NodeFacts(
@@ -162,6 +174,7 @@ class Controller:
         self.token_fn = token_fn or TS.AdcToken()
         self.io_sem = asyncio.Semaphore(K8S_WRITE_CONCURRENCY)
         self.tracks: dict[str, L.NodeTrack] = {}
+        self.unsched_hold: dict[str, float] = {}  # service -> time until unscheduled backfill keeps N4D cover
         self.loadgen_ips: list[str] = []
         self.ttft_snap: TS.TTFTSnapshot | None = None
         self.ttft_source_ok = False
@@ -279,6 +292,36 @@ class Controller:
             self.core.create_namespaced_event(EVENT_NAMESPACE, ev)
         except ApiException as e:
             log.warning("event for node %s failed: %s", node_name, e.reason)
+
+    def _unschedulable_backfill(self, pods, now: float) -> dict[str, int]:
+        """Backfill pods per service to also run on N4D because the scheduler cannot place them.
+
+        A service qualifies once one of its backfill pods has been Unschedulable for UNSCHEDULABLE_AFTER_S. It
+        then stays qualified for UNSCHEDULABLE_HOLD_S after the last such pod, counting every unscheduled backfill
+        pod: a pod rejected by the kubelet (e.g. NodeAffinity after a guard block label) is replaced by a fresh
+        Pending pod, and restarting the timer would drop overflow and recreate it a minute later (live, 2 Nov).
+        """
+        aged: dict[str, int] = {}
+        pending: dict[str, int] = {}
+        for p in pods:
+            lb = _labels(p)
+            svc = lb.get("app")
+            if (p.metadata.namespace != NS_SVC or lb.get("colo.tier") != "backfill" or p.spec.node_name
+                    or p.metadata.deletion_timestamp or not svc):
+                continue
+            pending[svc] = pending.get(svc, 0) + 1
+            since = _unschedulable_since(p)
+            if since is not None and now - since >= UNSCHEDULABLE_AFTER_S:
+                aged[svc] = aged.get(svc, 0) + 1
+        out: dict[str, int] = {}
+        for svc in set(aged) | set(pending) | set(self.unsched_hold):
+            if aged.get(svc):
+                self.unsched_hold[svc] = now + UNSCHEDULABLE_HOLD_S
+            if now < self.unsched_hold.get(svc, 0):
+                out[svc] = pending.get(svc, 0)
+            else:
+                self.unsched_hold.pop(svc, None)
+        return out
 
     def _read_deploy(self, ns: str, name: str) -> tuple[int, int] | None:
         try:
@@ -494,7 +537,7 @@ class Controller:
             del self.tracks[gone]
 
         # -- allocation + safe scale plan --------------------------------------
-        alloc_res = L.allocate(demand, caps)
+        alloc_res = L.cover_unschedulable(L.allocate(demand, caps), self._unschedulable_backfill(pods, now))
         for row in node_rows:
             row["planned_backfill"] = alloc_res.placement.get(row["name"], {})
         svc_rows: dict[str, dict[str, int]] = {}
