@@ -81,6 +81,7 @@ spec:
   # CPU manager assigns, so a gVisor pod on G4 contends with vLLM's exclusive cores (wave-1 P6 probe: 20 -> 50 ms p99).
   - name: usesGVisor
     expression: has(object.spec.runtimeClassName) && object.spec.runtimeClassName.startsWith('gvisor')
+  # Native recipe: colo-g4-reserve (g4-reserve.yaml, a Burstable pause pod holding 2 shared cores) is exempt too.
   # colo-system is not exempt as a namespace: only the node-agent DaemonSet (read-only per-node exporter, 50m
   # Burstable, runs in the shared cpuset) may tolerate every taint there. The exemption keys on the pod's
   # serviceAccountName rather than request.userInfo because DaemonSet pods are created by the daemon-set
@@ -88,7 +89,7 @@ spec:
   - name: isNodeAgent
     expression: >-
       namespaceObject.metadata.name == 'colo-system' && has(object.spec.serviceAccountName)
-      && object.spec.serviceAccountName == 'colo-node-agent' && !variables.wantsGPU
+      && object.spec.serviceAccountName in ['colo-node-agent', 'colo-g4-reserve'] && !variables.wantsGPU
   validations:
   - expression: >-
       !variables.targetsG4

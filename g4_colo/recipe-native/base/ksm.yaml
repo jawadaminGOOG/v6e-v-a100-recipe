@@ -70,15 +70,16 @@ spec:
           capabilities: {drop: [ALL]}
           seccompProfile: {type: RuntimeDefault}
 ---
-# GKE admits system-cluster-critical outside kube-system only with a matching ResourceQuota.
+# GKE admits system-*-critical pods outside kube-system only with a matching ResourceQuota
+# (colo-ksm: system-cluster-critical; colo-g4-reserve DaemonSet, g4-reserve.yaml: system-node-critical).
 apiVersion: v1
 kind: ResourceQuota
 metadata: {name: colo-critical-pods, namespace: colo-system}
 spec:
-  hard: {pods: "4"}
+  hard: {pods: "16"}
   scopeSelector:
     matchExpressions:
-    - {operator: In, scopeName: PriorityClass, values: [system-cluster-critical]}
+    - {operator: In, scopeName: PriorityClass, values: [system-cluster-critical, system-node-critical]}
 ---
 apiVersion: monitoring.googleapis.com/v1
 kind: PodMonitoring

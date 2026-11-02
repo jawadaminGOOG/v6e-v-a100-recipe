@@ -16,4 +16,5 @@ resources:
 - rules.yaml
 - colo-services.yaml
 - guardrails.yaml
+- g4-reserve.yaml
 - node-agent.yaml

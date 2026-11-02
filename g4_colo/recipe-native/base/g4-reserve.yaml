@@ -1,0 +1,41 @@
+# G4 shared-core reserve (native replacement for colo-controller's reserve_cpu_per_node: 2).
+#
+# kubelet's static CPU manager hands whole cores to Guaranteed pods and leaves the rest in a shared pool used by
+# kubelet, containerd, DaemonSets and every non-Guaranteed pod. Without a reserve, backfill packs 19 two-vCPU pods
+# per G4 node and the shared pool shrinks to ~1 core. This pause pod asks for 2 CPUs as a *Burstable* pod
+# (no CPU limit), so the scheduler counts 2 cores as taken (backfill fits 18 per node) while kubelet keeps those
+# cores in the shared pool instead of pinning them. The pause container itself uses no CPU.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: colo-g4-reserve, namespace: colo-system}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: colo-g4-reserve, namespace: colo-system, labels: {app: colo-g4-reserve}}
+spec:
+  selector: {matchLabels: {app: colo-g4-reserve}}
+  template:
+    metadata: {labels: {app: colo-g4-reserve}}
+    spec:
+      serviceAccountName: colo-g4-reserve
+      automountServiceAccountToken: false
+      # Above vLLM's priority is not needed: DaemonSet pods are placed when the node joins, before any workload.
+      priorityClassName: system-node-critical
+      nodeSelector: {cloud.google.com/compute-class: g4-gpu}
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: pause
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests: {cpu: "2", memory: 16Mi}
+          limits: {memory: 16Mi}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}
