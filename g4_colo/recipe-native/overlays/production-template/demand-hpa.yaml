@@ -1,0 +1,15 @@
+# Example demand HPA: your service's normal autoscaler, pointed at <svc>-backfill. Replace the metric with what you
+# already scale on (RPS, queue depth, ...). Pods beyond the spare G4 cores stay Pending and the overflow HPA runs
+# that many on N4D. Do not put this HPA on <svc>-overflow; that one is owned by colo_overflow_needed.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: toolcall-demand, namespace: colo-svc}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: toolcall-backfill}
+  minReplicas: 1
+  maxReplicas: 72
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target: {type: Utilization, averageUtilization: 70}

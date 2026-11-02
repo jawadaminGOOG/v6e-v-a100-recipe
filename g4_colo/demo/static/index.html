@@ -18,8 +18,10 @@
 
 <header class="top">
   <h1>G4 colo</h1>
+  <div class="seg" id="cluster-seg" role="radiogroup" aria-label="Cluster" hidden></div>
   <p class="lede">Spare GPU-node cores run CPU services. Only the excess goes to N4D.</p>
   <span class="spacer"></span>
+  <span class="pill ctl" id="ctl-chip" hidden><span class="ctl-k">Control:</span> <b id="ctl-label"></b></span>
   <span id="accel" class="pill warn" hidden title="The demo set the vLLM HPA minReplicas to 2 so scale-out shows in seconds. It is reset to 1 when the rate drops, when a scenario ends, and on shutdown.">Demo accelerator: HPA min 2</span>
   <span class="pill status" id="conn-pill"><i class="dot" aria-hidden="true"></i><span id="conn" role="status" aria-live="polite">Connecting</span><span id="conn-age" class="age" aria-hidden="true"></span></span>
 </header>
@@ -86,9 +88,10 @@
           <span class="spill" id="spill-analytics"></span>
         </div>
       </div>
-      <div class="grp">
+      <div class="grp" id="guard-grp">
         <h3>Latency guard</h3>
-        <div class="guard-row">
+        <p class="na" id="guard-na" hidden>Not used here: memory-heavy services are kept off G4 by admission policy.</p>
+        <div class="guard-row" id="guard-row">
           <input type="checkbox" id="guard" class="switch" role="switch" aria-describedby="guard-sub">
           <label for="guard"><span id="guard-label">Guard</span><small id="guard-sub">moves analytics off a G4 node when its TTFT p99 passes the threshold</small></label>
         </div>
@@ -145,7 +148,7 @@
     </div>
     <div id="nodes" class="nodes" aria-labelledby="nodes-h"></div>
     <div class="lanes" id="lanes" aria-label="Where each CPU service runs">
-      <span></span><span class="zh">on G4 spare cores</span><span class="zh">on N4D</span>
+      <span></span><span class="zh">on G4 spare cores</span><span class="zh" id="zh-n">on N4D</span>
     </div>
   </main>
 </div>

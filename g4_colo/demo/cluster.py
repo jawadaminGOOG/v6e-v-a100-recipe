@@ -14,11 +14,14 @@ import threading
 import time
 from typing import Any
 
-from state import NAMESPACES, WATCH_REASONS, build_state, parse_cpu, parse_mem_gib
+from state import (GUARD_NA_REASON, NAMESPACES, NATIVE_DEMAND_DEPLOYMENT, WATCH_REASONS, UnsupportedOnRecipe, build_state,
+                   parse_cpu, parse_mem_gib)
 
 log = logging.getLogger("demo.cluster")
 
 PROXY_TIMEOUT_S = 4
+# A hung API server (e.g. a cluster still coming up) must not stall that cluster's /api/state forever.
+LIST_TIMEOUT_S = float(os.environ.get("DEMO_LIST_TIMEOUT_S", "10"))
 PODS_FIELD_SELECTOR = "status.phase!=Succeeded,status.phase!=Failed"
 # High-volume reasons that are never shown; dropping them server-side keeps the list small.
 _NOISY_REASONS = ("Scheduled", "Pulling", "Pulled", "Created", "Started", "Killing", "SuccessfulCreate",
@@ -42,39 +45,70 @@ def _iso(ts: Any) -> str | None:
 
 
 class LiveBackend:
-    mode = "live"
+    """One cluster. Every backend owns its own kubernetes ApiClient, so several clusters can live in one process.
 
-    def __init__(self, context: str | None = None):
-        from kubernetes import client, config
+    Never touch the process-global client state (`config.load_kube_config()` / `Configuration.set_default()`):
+    with two clusters, the second backend would silently redirect the first one's API calls.
+
+    Credential sources, in order:
+      * `endpoint` (+ `ca_cert`, base64 PEM): Google ADC bearer token (Cloud Run). Nothing else is tried.
+      * `strict=True` (an explicit DEMO_CLUSTERS context): that kubeconfig context only. Nothing else is tried,
+        so a missing context can never fall through to another cluster's credentials.
+      * otherwise (single-cluster mode): kubeconfig `context` (or the current one) -> in-cluster service account
+        -> ADC with GKE_ENDPOINT/GKE_CA_CERT from the environment.
+    """
+
+    mode = "live"
+    recipe = "controller"
+    has_controller = True
+    hpa_namespaces: tuple[str, ...] = ("inference",)
+
+    def __init__(self, context: str | None = None, endpoint: str | None = None, ca_cert: str | None = None,
+                 strict: bool = False, cluster_id: str = "default", cluster_info: dict | None = None):
+        from kubernetes import client
 
         self._adc_creds = None
         self._adc_cfg = None
-        try:
-            config.load_kube_config(context=context)
-            self.incluster = False
-        except Exception:  # noqa: BLE001 - fall back when running in a pod or Cloud Run
-            try:
-                config.load_incluster_config()
-                self.incluster = True
-            except Exception:  # noqa: BLE001 - Cloud Run / Google ADC mode
-                self.incluster = False
-                self._init_gke_adc(client)
+        self.cluster_id = cluster_id
+        self.cluster_info = cluster_info
+        self.incluster = False
         self.client = client
-        self.core = client.CoreV1Api()
-        self.apps = client.AppsV1Api()
-        self.autoscaling = client.AutoscalingV2Api()
+        self.api_client = self._make_api_client(client, context, endpoint, ca_cert, strict)
+        self.core = client.CoreV1Api(self.api_client)
+        self.apps = client.AppsV1Api(self.api_client)
+        self.autoscaling = client.AutoscalingV2Api(self.api_client)
         self._pod_ips: dict[tuple[str, str], str] = {}
         self._events_cache: tuple[float, list[dict]] | None = None
         self.fast_scale = FAST_SCALE
         self.fast_scale_forced = False  # True while this process has HPA minReplicas > 1
 
-    def _init_gke_adc(self, client: Any) -> None:
+    def _make_api_client(self, client: Any, context: str | None, endpoint: str | None, ca_cert: str | None,
+                         strict: bool = False) -> Any:
+        from kubernetes import config
+
+        if endpoint:
+            return self._init_gke_adc(client, endpoint, ca_cert or os.environ.get("GKE_CA_CERT", ""))
+        if strict:
+            return config.new_client_from_config(context=context)
+        try:
+            return config.new_client_from_config(context=context)
+        except Exception:  # noqa: BLE001 - fall back when running in a pod or Cloud Run
+            pass
+        try:
+            cfg = client.Configuration()
+            config.load_incluster_config(client_configuration=cfg)
+            self.incluster = True
+            return client.ApiClient(cfg)
+        except Exception:  # noqa: BLE001 - Cloud Run / Google ADC mode
+            return self._init_gke_adc(client, os.environ.get("GKE_ENDPOINT", ""), os.environ.get("GKE_CA_CERT", ""))
+
+    def _init_gke_adc(self, client: Any, endpoint: str, ca_b64: str) -> Any:
         import base64
-        import os
+        import re
         import google.auth
 
-        endpoint = os.environ.get("GKE_ENDPOINT", "").strip()
-        ca_b64 = os.environ.get("GKE_CA_CERT", "").strip()
+        endpoint = (endpoint or "").strip()
+        ca_b64 = (ca_b64 or "").strip()
         if not endpoint or not ca_b64:
             raise RuntimeError("No kubeconfig, in-cluster config, or GKE_ENDPOINT/GKE_CA_CERT found")
         # userinfo.email lets GKE resolve the token to the service-account email, which Kubernetes RBAC
@@ -83,7 +117,8 @@ class LiveBackend:
             "https://www.googleapis.com/auth/cloud-platform",
             "https://www.googleapis.com/auth/userinfo.email",
         ])
-        ca_path = "/tmp/gke-cluster-ca.crt"
+        # One CA file per cluster: two clusters must never share (and overwrite) one path.
+        ca_path = f"/tmp/gke-cluster-ca-{re.sub(r'[^A-Za-z0-9_.-]', '_', self.cluster_id)}.crt"
         with open(ca_path, "wb") as f:
             f.write(base64.b64decode(ca_b64))
         cfg = client.Configuration()
@@ -92,8 +127,8 @@ class LiveBackend:
         self._adc_creds = creds
         self._adc_lock = threading.Lock()
 
-        # set_default() deep-copies cfg, so refreshing a token on our own object never reaches the
-        # ApiClients. The hook runs on every request against the copy actually in use.
+        # The hook runs on every request against the Configuration the ApiClient actually holds, so the bearer
+        # token is refreshed ahead of expiry without touching any process-global default.
         def _refresh_hook(c: Any) -> None:
             c.api_key = {"authorization": self._adc_token()}
             c.api_key_prefix = {"authorization": "Bearer"}
@@ -101,7 +136,7 @@ class LiveBackend:
         cfg.refresh_api_key_hook = _refresh_hook
         _refresh_hook(cfg)
         self._adc_cfg = cfg
-        client.Configuration.set_default(cfg)
+        return client.ApiClient(cfg)
 
     def _adc_token(self) -> str:
         import google.auth.transport.requests
@@ -192,7 +227,7 @@ class LiveBackend:
     # ------------------------------------------------------------ raw fetch
     def _nodes(self) -> list[dict]:
         out = []
-        for n in self.core.list_node().items:
+        for n in self.core.list_node(_request_timeout=LIST_TIMEOUT_S).items:
             conds = {c.type: c.status for c in (n.status.conditions or [])}
             out.append(
                 {
@@ -208,7 +243,7 @@ class LiveBackend:
     def _pods(self) -> list[dict]:
         out = []
         # Finished pods are never drawn; let the apiserver drop them.
-        items = self.core.list_pod_for_all_namespaces(field_selector=PODS_FIELD_SELECTOR).items
+        items = self.core.list_pod_for_all_namespaces(field_selector=PODS_FIELD_SELECTOR, _request_timeout=LIST_TIMEOUT_S).items
         for p in items:
             if p.status and p.status.pod_ip:
                 self._pod_ips[(p.metadata.namespace, p.metadata.name)] = p.status.pod_ip
@@ -239,7 +274,7 @@ class LiveBackend:
     def _deployments(self) -> list[dict]:
         out = []
         for ns in ("inference", "colo-svc", "colo-system"):  # colo-system: colo-buffer
-            for d in self.apps.list_namespaced_deployment(ns).items:
+            for d in self.apps.list_namespaced_deployment(ns, _request_timeout=LIST_TIMEOUT_S).items:
                 out.append(
                     {
                         "name": d.metadata.name,
@@ -252,7 +287,13 @@ class LiveBackend:
 
     def _hpas(self) -> list[dict]:
         out = []
-        for h in self.autoscaling.list_namespaced_horizontal_pod_autoscaler("inference").items:
+        for ns in self.hpa_namespaces:
+            out.extend(self._hpas_in(ns))
+        return out
+
+    def _hpas_in(self, ns: str) -> list[dict]:
+        out = []
+        for h in self.autoscaling.list_namespaced_horizontal_pod_autoscaler(ns, _request_timeout=LIST_TIMEOUT_S).items:
             metric = None
             for m in h.status.current_metrics or []:
                 if m.pods and m.pods.current:
@@ -262,7 +303,7 @@ class LiveBackend:
             out.append(
                 {
                     "name": h.metadata.name,
-                    "namespace": "inference",
+                    "namespace": ns,
                     "target": h.spec.scale_target_ref.name,
                     "min": h.spec.min_replicas,
                     "max": h.spec.max_replicas,
@@ -280,7 +321,7 @@ class LiveBackend:
         if self._events_cache is not None and now - self._events_cache[0] < EVENTS_TTL_S:
             return self._events_cache[1]
         out = []
-        for e in self.core.list_event_for_all_namespaces(field_selector=EVENTS_FIELD_SELECTOR, limit=EVENTS_LIMIT).items:
+        for e in self.core.list_event_for_all_namespaces(field_selector=EVENTS_FIELD_SELECTOR, limit=EVENTS_LIMIT, _request_timeout=LIST_TIMEOUT_S).items:
             if e.reason not in WATCH_REASONS:
                 continue
             t = e.last_timestamp or e.event_time or e.first_timestamp or e.metadata.creation_timestamp
@@ -323,18 +364,16 @@ class LiveBackend:
         await asyncio.to_thread(self._ensure_adc)
         errors: list[str] = []
         t = asyncio.to_thread
-        base = await self._gather_named(
-            {
-                "nodes": t(self._nodes),
-                "pods": t(self._pods),
-                "deployments": t(self._deployments),
-                "hpas": t(self._hpas),
-                "events": t(self._events),
-                "configmap": t(self._configmap),
-            },
-            errors,
-            "list",
-        )
+        fetch = {
+            "nodes": t(self._nodes),
+            "pods": t(self._pods),
+            "deployments": t(self._deployments),
+            "hpas": t(self._hpas),
+            "events": t(self._events),
+        }
+        if self.has_controller:
+            fetch["configmap"] = t(self._configmap)
+        base = await self._gather_named(fetch, errors, "list")
         pods = base.get("pods") or []
 
         def running(ns: str, app: str) -> list[dict]:
@@ -342,20 +381,21 @@ class LiveBackend:
 
         lg = running("inference", "loadgen")
         agents = running("colo-system", "colo-node-agent")
-        ctrl = running("colo-system", "colo-controller")
         lg_res = await self._gather_named({p["name"]: self.proxy("inference", p["name"], 8080, "stats") for p in lg}, errors, "loadgen")
         ag_res = await self._gather_named({p["node"]: self.proxy("colo-system", p["name"], 8080, "cpus") for p in agents}, errors, "agent")
         controller: dict = {"state": None, "config": None}
-        if ctrl:
-            # /state already carries the effective config, so one proxy call is enough.
-            c = await self._gather_named(
-                {"state": self.proxy("colo-system", ctrl[0]["name"], 8080, "state")},
-                errors,
-                "controller",
-            )
-            controller.update(c)
-        else:
-            errors.append("controller: no Ready pod app=colo-controller in colo-system")
+        if self.has_controller:
+            ctrl = running("colo-system", "colo-controller")
+            if ctrl:
+                # /state already carries the effective config, so one proxy call is enough.
+                c = await self._gather_named(
+                    {"state": self.proxy("colo-system", ctrl[0]["name"], 8080, "state")},
+                    errors,
+                    "controller",
+                )
+                controller.update(c)
+            else:
+                errors.append("controller: no Ready pod app=colo-controller in colo-system")
         return {
             **base,
             "loadgen": lg_res,
@@ -365,7 +405,7 @@ class LiveBackend:
         }
 
     async def state(self) -> dict:
-        return build_state(await self.raw(), mode=self.mode)
+        return build_state(await self.raw(), mode=self.mode, recipe=self.recipe, cluster=self.cluster_info)
 
     # ------------------------------------------------------------ actions
     async def _controller_pod(self) -> str:
@@ -443,4 +483,35 @@ class LiveBackend:
         return await self.proxy("colo-system", pod, 8080, "baseline", "POST", {})
 
 
-__all__ = ["LiveBackend", "NAMESPACES"]
+class NativeLiveBackend(LiveBackend):
+    """A cluster running g4_colo/recipe-native/: no colo-controller and no colo-config.
+
+    Demand lives in Deployment replicas (<svc>-backfill for integer services, analytics-overflow for memory-heavy),
+    so a demand change is a patch of deployments/scale. The overflow HPAs and the scheduler do the rest.
+    """
+
+    recipe = "native"
+    has_controller = False
+    hpa_namespaces = ("inference", "colo-svc")
+
+    def _scale_sync(self, name: str, replicas: int) -> dict:
+        self.apps.patch_namespaced_deployment_scale(name, "colo-svc", {"spec": {"replicas": int(replicas)}})
+        return {"deployment": f"colo-svc/{name}", "replicas": int(replicas)}
+
+    async def set_demand(self, demand: dict) -> Any:
+        targets = {NATIVE_DEMAND_DEPLOYMENT[k]: max(0, int(v)) for k, v in demand.items() if k in NATIVE_DEMAND_DEPLOYMENT}
+        res = await asyncio.gather(*[asyncio.to_thread(self._scale_sync, n, r) for n, r in targets.items()],
+                                   return_exceptions=True)
+        errs = [f"{n}: {type(r).__name__}: {r}" for n, r in zip(targets, res) if isinstance(r, Exception)]
+        if errs:
+            raise RuntimeError("; ".join(errs))
+        return {"scaled": list(res)}
+
+    async def set_guard(self, enabled: bool) -> Any:
+        raise UnsupportedOnRecipe(f"no latency guard on the native recipe: {GUARD_NA_REASON}")
+
+    async def baseline(self) -> Any:
+        raise UnsupportedOnRecipe(f"no TTFT baseline on the native recipe: {GUARD_NA_REASON}")
+
+
+__all__ = ["LiveBackend", "NativeLiveBackend", "UnsupportedOnRecipe", "NAMESPACES"]

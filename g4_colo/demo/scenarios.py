@@ -122,6 +122,85 @@ SCENARIOS: dict[str, dict[str, Any]] = {
 }
 SCENARIO_ALIASES = {"1": "gpu-scale-out", "2": "gpu-scale-in", "3": "cpu-scale-out", "4": "guard-integer-vs-memory"}
 
+# The same stories on g4_colo/recipe-native/ (no controller). Demand is Deployment replicas; backfill pods that
+# find no G4 slot next to vLLM wait Pending by design, and the overflow HPAs (minReplicas 1, metric lag up to
+# ~2 min on GMP) cover them on N4D. There is no latency guard (memory-heavy is banned from G4 by admission), so
+# scenario 4 does not exist here. Timeouts allow for the HPA metric pipeline.
+NATIVE_SCENARIOS: dict[str, dict[str, Any]] = {
+    "gpu-scale-out": {
+        "title": "GPU scale-out: a load spike adds a 2nd G4 node, and waiting CPU pods bind to its spare vCPUs by themselves",
+        "steps": [
+            {"do": "require", "all": [["g4_nodes", "<=", 1], ["vllm_desired", "<=", 1]],
+             "msg": "Needs 1 G4 node running 1 vLLM replica. The cluster is already scaled out: run scenario 2 (GPU scale-in) first."},
+            {"do": "demand", "sandbox": 19, "toolcall": 19, "analytics": 0,
+             "note": "38 integer pods (76 vCPU); one G4 node has {g4_slots_per_node} slots next to vLLM, the rest wait and run on N4D"},
+            {"do": "observe", "label": "before"},
+            {"do": "gpu_rate", "rate": 1200, "note": "spike GPU load to 1200 rps (above the 700 rps per replica HPA target)"},
+            {"do": "wait_until", "all": [["vllm_desired", ">=", 2]], "timeout_s": 180, "note": "vLLM scales 1 -> 2 replicas"},
+            {"do": "wait_until", "all": [["g4_nodes", ">=", 2]], "timeout_s": 360,
+             "note": "GKE ComputeClass adds a 2nd G4 node for vLLM (waiting CPU pods never trigger a G4 scale-up)"},
+            {"do": "wait_until", "all": [["backfill_ready", ">=", 34]], "timeout_s": 300,
+             "note": "waiting backfill pods bind next to the new vLLM pod by themselves (podAffinity)"},
+            {"do": "wait_until", "all": [["vllm_ready", ">=", 2]], "timeout_s": 600, "note": "2nd vLLM replica Ready and serving"},
+            {"do": "wait_until", "all": [["overflow_desired", "<=", 4]], "timeout_s": 300,
+             "note": "overflow HPAs scale N4D back toward their floor after the stabilization window"},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+    "gpu-scale-in": {
+        "title": "GPU scale-in: load drops, N4D scales up before the 2nd G4 node drains, so CPU capacity never dips",
+        "steps": [
+            {"do": "require", "all": [["vllm_ready", ">=", 2], ["g4_nodes", ">=", 2]],
+             "msg": "Needs 2 vLLM replicas on 2 G4 nodes. Run scenario 1 (GPU scale-out) first."},
+            {"do": "demand", "sandbox": 19, "toolcall": 19, "analytics": 0, "note": "keep 38 integer pods (76 vCPU) active across scale-in"},
+            {"do": "observe", "label": "before"},
+            {"do": "gpu_rate", "rate": 300, "note": "drop GPU load to 300 rps (fits on 1 vLLM replica)"},
+            {"do": "wait_until", "all": [["vllm_desired", "<=", 1]], "timeout_s": 120, "note": "vLLM scales 2 -> 1"},
+            {"do": "wait_until", "all": [["overflow_ready", ">=", 18]], "timeout_s": 300,
+             "note": "backfill next to the departed vLLM stops counting, so the overflow HPAs start N4D pods before the node drains"},
+            {"do": "wait_until", "all": [["g4_nodes", "<=", 1]], "timeout_s": 600,
+             "note": "cluster autoscaler removes the 2nd G4 node after its consolidation delay"},
+            {"do": "wait_until", "all": [["backfill_ready", ">=", 18], ["overflow_ready", ">=", 18]], "timeout_s": 180,
+             "note": "G4 #1 stays packed ({g4_slots_per_node} slots) and the rest run on N4D"},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+    "cpu-scale-out": {
+        "title": "CPU scale-out: G4 stays packed while extra CPU demand waits and runs on N4D, never adding a GPU node",
+        "steps": [
+            {"do": "require", "all": [["g4_ready", ">=", 1], ["g4_nodes", "<=", 1]],
+             "msg": "Needs exactly 1 Ready G4 node. Run scenario 2 (GPU scale-in) first, or wait for the 2nd G4 node to drain."},
+            {"do": "gpu_rate", "rate": 300, "note": "steady 300 rps on 1 G4 node"},
+            {"do": "demand", "sandbox": 9, "toolcall": 9, "analytics": 0,
+             "note": "18 integer pods (36 vCPU) against {g4_slots_per_node} spare slots on G4 #1"},
+            {"do": "wait_until", "all": [["backfill_waiting", "==", 0], ["backfill_ready", ">=", 18]], "timeout_s": 120,
+             "note": "all pods run on G4 spare cores (overflow stays at its HPA floor of 1 pod per service)"},
+            {"do": "observe", "label": "fits-in-backfill"},
+            {"do": "demand", "sandbox": 18, "toolcall": 18, "analytics": 0, "note": "spike CPU demand to 36 pods (72 vCPU)"},
+            {"do": "wait_until", "all": [["backfill_waiting", ">=", 17]], "timeout_s": 30,
+             "note": "G4 is full: the extra backfill pods wait (priority -100, the autoscaler ignores them)"},
+            {"do": "wait_until", "all": [["overflow_ready", ">=", 17]], "timeout_s": 300,
+             "note": "overflow HPAs run the waiting pods on N4D; G4 node count unchanged"},
+            {"do": "observe", "label": "spilled"},
+            {"do": "demand", "sandbox": 9, "toolcall": 9, "analytics": 0, "note": "drop demand back to 18 pods (waiting pods go first)"},
+            {"do": "wait_until", "all": [["backfill_waiting", "==", 0], ["backfill_ready", ">=", 18]], "timeout_s": 60,
+             "note": "nothing waits; G4 #1 keeps its pods"},
+            {"do": "wait_until", "all": [["overflow_desired", "<=", 2]], "timeout_s": 300,
+             "note": "overflow HPAs back to their floor after the stabilization window"},
+            {"do": "observe", "label": "after"},
+        ],
+    },
+}
+SCENARIOS_BY_RECIPE: dict[str, dict[str, dict[str, Any]]] = {"controller": SCENARIOS, "native": NATIVE_SCENARIOS}
+UNAVAILABLE_REASON = {
+    ("native", "guard-integer-vs-memory"): "Not on this cluster: there is no latency guard, because memory-heavy "
+                                          "services are kept off G4 by admission policy.",
+}
+
+
+def scenarios_for(recipe: str | None) -> dict[str, dict[str, Any]]:
+    return SCENARIOS_BY_RECIPE.get(recipe or "controller", SCENARIOS)
+
 OPS = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq, "!=": operator.ne}
 
 # Plain-language names for the scenario banner ("current vs target").
@@ -133,6 +212,7 @@ METRIC_LABELS = {
     "backfill_ready": "CPU pods on G4",
     "overflow_ready": "CPU pods on N4D",
     "overflow_desired": "CPU pods assigned to N4D",
+    "backfill_waiting": "CPU pods waiting for a G4 slot",
     "integer_backfill_ready": "integer pods on G4",
     "analytics_overflow_ready": "analytics pods on N4D",
     "guard_evict_events": "guard evictions",
@@ -148,10 +228,11 @@ class PreconditionError(RuntimeError):
     pass
 
 
-def resolve_name(name: str) -> str:
+def resolve_name(name: str, scenarios: dict | None = None) -> str:
+    scenarios = SCENARIOS if scenarios is None else scenarios
     name = SCENARIO_ALIASES.get(name, name)
-    if name not in SCENARIOS:
-        raise KeyError(f"unknown scenario {name!r}; choose from {list(SCENARIOS)}")
+    if name not in scenarios:
+        raise KeyError(f"unknown scenario {name!r}; choose from {list(scenarios)}")
     return name
 
 
@@ -188,8 +269,11 @@ class ScenarioRunner:
     def __init__(self, backend, poll_s: float = 2.0, time_scale: float = 1.0,
                  state_fn: Callable[[], Awaitable[dict]] | None = None,
                  on_action: Callable[[], None] | None = None,
-                 on_finish: Callable[[], Awaitable[Any]] | None = None):
+                 on_finish: Callable[[], Awaitable[Any]] | None = None,
+                 scenarios: dict[str, dict[str, Any]] | None = None):
         self.backend = backend
+        # Scenario set for this cluster's recipe (SCENARIOS or NATIVE_SCENARIOS); one runner per cluster.
+        self.scenarios = SCENARIOS if scenarios is None else scenarios
         self.poll_s = poll_s
         self.time_scale = time_scale
         self.state_fn = state_fn or backend.state
@@ -213,14 +297,14 @@ class ScenarioRunner:
         self.note: str = ""
 
     def snapshot(self) -> dict:
-        steps = SCENARIOS.get(self.name or "", {}).get("steps", [])
+        steps = self.scenarios.get(self.name or "", {}).get("steps", [])
         cur_step = steps[self.step_index] if 0 <= self.step_index < len(steps) else None
         wait = None
         if self.wait and self.status == "running":
             wait = {**self.wait, "remaining_s": round(max(0.0, self.wait["deadline"] - time.time()), 0)}
         return {
             "name": self.name,
-            "title": SCENARIOS.get(self.name or "", {}).get("title"),
+            "title": self.scenarios.get(self.name or "", {}).get("title"),
             "status": self.status,
             "started": self.started,
             "finished": self.finished,
@@ -276,10 +360,10 @@ class ScenarioRunner:
         return (all(res) if mode == "all" else any(res)), desc
 
     async def run(self, name: str) -> dict:
-        name = resolve_name(name)
+        name = resolve_name(name, self.scenarios)
         self.reset(name)
-        steps = SCENARIOS[name]["steps"]
-        self._log(f"scenario {name}: {SCENARIOS[name]['title']}")
+        steps = self.scenarios[name]["steps"]
+        self._log(f"scenario {name}: {self.scenarios[name]['title']}")
         try:
             for i, step in enumerate(steps):
                 self.step_index = i
@@ -405,7 +489,7 @@ class ScenarioRunner:
             raise ValueError(f"unknown step kind {do!r}")
 
     def start(self, name: str) -> dict:
-        name = resolve_name(name)
+        name = resolve_name(name, self.scenarios)
         if self.task and not self.task.done():
             raise RuntimeError(f"scenario {self.name} already running")
         self.reset(name)

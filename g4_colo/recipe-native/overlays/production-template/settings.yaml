@@ -1,0 +1,18 @@
+# Production settings (native recipe): the one file to edit (plus `images:` in kustomization.yaml and the env vars
+# of infra/create-node-pools.sh). local-config: kustomize reads this ConfigMap and never emits it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: colo-settings
+  annotations: {config.kubernetes.io/local-config: "true"}
+data:
+  # This GKE cluster's name. Scopes the overflow HPAs' metric (colo_overflow_needed) to this cluster when several
+  # clusters share the project's Managed Prometheus data.
+  clusterName: your-cluster-name                # REPLACE
+  # Node pools (printed by infra/create-node-pools.sh). The g4-gpu ComputeClass tries them in this order.
+  g4ReservationPool: your-g4-reservation-pool   # REPLACE: pool bound to a G4 reservation / CUD
+  g4SpotPool: your-g4-spot-pool                 # REPLACE: Spot pool (needs PREEMPTIBLE GPU quota)
+  g4NodePool: your-g4-ondemand-pool             # REPLACE: on-demand G4 pool (G4_POOL)
+  n4dNodePool: your-n4d-pool                    # REPLACE: N4D overflow pool (N4D_POOL)
+  model: Qwen/Qwen3-1.7B-Base                   # REPLACE: Hugging Face model id served by vLLM
+  gatewayNamespace: your-gateway-namespace      # REPLACE: the only namespace (besides metrics) that may reach vLLM

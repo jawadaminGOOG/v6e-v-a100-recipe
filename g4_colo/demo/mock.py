@@ -27,7 +27,7 @@ import string
 import time
 from datetime import datetime, timezone
 
-from state import SERVICES, build_state
+from state import GUARD_NA_REASON, NATIVE_DEMAND_DEPLOYMENT, SERVICES, UnsupportedOnRecipe, build_state
 
 G4_BOOT_S = 75
 VLLM_BOOT_S = 45
@@ -72,8 +72,12 @@ def _lognormal_hist(total: int, p50: float, p99: float) -> list[int]:
 
 class MockBackend:
     mode = "mock"
+    recipe = "controller"
+    POOL_TAG = "jawadamin-us-west8-1026"
 
-    def __init__(self):
+    def __init__(self, cluster_id: str = "controller", cluster_info: dict | None = None):
+        self.cluster_id = cluster_id
+        self.cluster_info = cluster_info
         now = time.time()
         self.t = now
         self.rate = 300.0
@@ -112,7 +116,7 @@ class MockBackend:
     # ------------------------------------------------------------ helpers
     def _add_node(self, role: str, zone: str, created: float, ready: bool = False, ready_at: float | None = None) -> dict:
         pool = {"g4": "g4gpu", "n4d": "n4dcpu", "loadgen": "loadgen"}[role]
-        name = f"gke-g4cluster-{pool}-jawadamin-us-west8-1026-{_sfx(4)}-{_sfx(4)}"
+        name = f"gke-g4cluster-{pool}-{self.POOL_TAG}-{_sfx(4)}-{_sfx(4)}"
         cc = {"g4": "g4-gpu", "n4d": "n4d-cpu"}.get(role)
         labels = {
             "colo.role": role,
@@ -206,7 +210,7 @@ class MockBackend:
                 else:
                     booting = [n for n in g4s if not self._ready(n)]
                     if not booting and len(g4s) < 2:
-                        self._event("TriggeredScaleUp", "Pod", v["name"], "pod triggered scale-up: [{g4gpu-jawadamin-us-west8-1026 1->2 (max: 2)}]", "inference")
+                        self._event("TriggeredScaleUp", "Pod", v["name"], f"pod triggered scale-up: [{{g4gpu-{self.POOL_TAG} 1->2 (max: 2)}}]", "inference")
                         self._add_node("g4", "us-west8-a", now)
                     elif not booting and self.pending_g4_since is None:
                         self.pending_g4_since = now
@@ -231,23 +235,8 @@ class MockBackend:
             else:
                 n["unneeded_since"] = None
 
-        # --- controller allocation
-        eligible = [self.nodes[v["node"]] for v in self.vllm if v["node"] and now >= v["ready_at"]]
-        slots = {n["name"]: G4_SLOTS for n in eligible}
-        backfill_want = {}
-        for svc, cls in SERVICES.items():
-            want_bf = 0
-            for n in eligible:
-                if cls in n["blocks"]:
-                    continue
-                take = min(slots[n["name"]], self.demand[svc] - want_bf)
-                slots[n["name"]] -= take
-                want_bf += take
-            backfill_want[svc] = want_bf
-        for svc, cls in SERVICES.items():
-            self._reconcile_backfill(svc, cls, backfill_want[svc], eligible, now)
-            self._reconcile_overflow(svc, cls, self.demand[svc] - backfill_want[svc], now)
-        self._reconcile_buffer(now)
+        # --- placement of CPU services (controller here; the native mock overrides this)
+        self._allocate(now)
 
         # --- N4D autoscaling
         n4ds = [n for n in self.nodes.values() if n["role"] == "n4d"]
@@ -258,7 +247,7 @@ class MockBackend:
                 zone = "us-west8-a" if (len(n4ds) + i) % 2 == 0 else "us-west8-c"
                 nn = self._add_node("n4d", zone, now)
                 n4ds.append(nn)
-            self._event("TriggeredScaleUp", "Pod", pending[0]["name"], f"pod triggered scale-up: [{{n4dcpu-jawadamin-us-west8-1026 {len(n4ds) - need}->{len(n4ds)} (max: 10)}}]", "colo-svc")
+            self._event("TriggeredScaleUp", "Pod", pending[0]["name"], f"pod triggered scale-up: [{{n4dcpu-{self.POOL_TAG} {len(n4ds) - need}->{len(n4ds)} (max: 10)}}]", "colo-svc")
         for n in list(n4ds):
             used = [p for p in self.svc_pods + self.buffer_pods if p["node"] == n["name"]]
             only_buffer = all(p["tier"] == "buffer" for p in used)
@@ -295,6 +284,28 @@ class MockBackend:
             self.node_rps[node_name] = min(r, 760.0)
 
         # --- guard
+        self._guard(now, g4s)
+
+    def _allocate(self, now: float):
+        """colo-controller: split demand into backfill (eligible G4 slots) and overflow (the rest)."""
+        eligible = [self.nodes[v["node"]] for v in self.vllm if v["node"] and now >= v["ready_at"]]
+        slots = {n["name"]: G4_SLOTS for n in eligible}
+        backfill_want = {}
+        for svc, cls in SERVICES.items():
+            want_bf = 0
+            for n in eligible:
+                if cls in n["blocks"]:
+                    continue
+                take = min(slots[n["name"]], self.demand[svc] - want_bf)
+                slots[n["name"]] -= take
+                want_bf += take
+            backfill_want[svc] = want_bf
+        for svc, cls in SERVICES.items():
+            self._reconcile_backfill(svc, cls, backfill_want[svc], eligible, now)
+            self._reconcile_overflow(svc, cls, self.demand[svc] - backfill_want[svc], now)
+        self._reconcile_buffer(now)
+
+    def _guard(self, now: float, g4s: list[dict]):
         thr = (self.guard.get("baseline_ttft_p99_ms") or 60) * self.guard.get("factor", 1.5)
         for n in g4s:
             if n["name"] not in self.nodes:
@@ -569,7 +580,7 @@ class MockBackend:
         }
 
     async def state(self) -> dict:
-        return build_state(self.raw(), mode=self.mode)
+        return build_state(self.raw(), mode=self.mode, recipe=self.recipe, cluster=self.cluster_info)
 
     # ------------------------------------------------------------ actions
     async def set_gpu_rate(self, rate: float) -> dict:
@@ -600,3 +611,131 @@ class MockBackend:
         if vals:
             self.guard["baseline_ttft_p99_ms"] = round(max(vals), 1)
         return {"baseline_ttft_p99_ms": self.guard["baseline_ttft_p99_ms"]}
+
+
+# Native recipe (g4_colo/recipe-native/): HPA metric pipeline lag (GMP rule -> adapter -> HPA), compressed for the demo.
+NATIVE_METRIC_LAG_S = float(os.environ.get("DEMO_MOCK_METRIC_LAG_S", "4"))
+NATIVE_HPA_DOWN_WINDOW_S = float(os.environ.get("DEMO_MOCK_HPA_DOWN_S", "15"))
+NATIVE_OVERFLOW_MIN = 1  # HPA cannot scale to 0 on GKE
+NATIVE_OVERFLOW_MAX = 60
+
+
+class NativeMockBackend(MockBackend):
+    """Simulator for the controller-free recipe. Same raw formats as cluster.NativeLiveBackend:
+
+      * <svc>-backfill holds the whole demand. A pod binds only to a G4 node that runs a vLLM pod (podAffinity)
+        and has a free core; the rest stay Pending (priority -100, the cluster autoscaler ignores them).
+      * <svc>-overflow is scaled by an HPA on colo_overflow_needed = demand - backfill Ready next to a Ready vLLM,
+        seen NATIVE_METRIC_LAG_S late; scale-down waits NATIVE_HPA_DOWN_WINDOW_S. minReplicas 1.
+      * memory-heavy (analytics) never backfills: analytics-overflow replicas = demand.
+      * no colo-controller, no colo-config, no latency guard, no node labels.
+    """
+
+    recipe = "native"
+    POOL_TAG = "jawadamin-us-west8-1126"
+
+    def __init__(self, cluster_id: str = "native", cluster_info: dict | None = None):
+        self.overflow_hist: dict[str, list[tuple[float, int]]] = {s: [] for s, c in SERVICES.items() if c == "integer"}
+        self.hpa_overflow = {s: NATIVE_OVERFLOW_MIN for s in self.overflow_hist}
+        self.hpa_metric: dict[str, int | None] = {s: None for s in self.overflow_hist}
+        super().__init__(cluster_id=cluster_id, cluster_info=cluster_info)
+        self.guard = {"enabled": None}
+        # start settled: no metric lag on the first view
+        for s in self.overflow_hist:
+            needed = self._overflow_needed(s, time.time())
+            self.overflow_hist[s] = [(time.time() - 600, needed)]
+            self.hpa_metric[s] = needed
+            self.hpa_overflow[s] = max(NATIVE_OVERFLOW_MIN, needed)
+
+    # ------------------------------------------------------------ scheduling + HPAs
+    def _vllm_hosts(self) -> list[dict]:
+        """G4 nodes the backfill podAffinity accepts: any node with a vLLM pod bound to it."""
+        return [self.nodes[v["node"]] for v in self.vllm if v["node"] and v["node"] in self.nodes]
+
+    def _overflow_needed(self, svc: str, now: float) -> int:
+        ready_vllm = {v["node"] for v in self.vllm if v["node"] and v["ready_at"] and now >= v["ready_at"]}
+        eff = sum(1 for p in self.svc_pods if p["app"] == svc and p["tier"] == "backfill" and p["node"] in ready_vllm
+                  and p["ready_at"] is not None and now >= p["ready_at"])
+        return max(0, self.demand[svc] - eff)
+
+    def _allocate(self, now: float):
+        hosts = self._vllm_hosts()
+        for svc, cls in SERVICES.items():
+            if cls != "integer":
+                continue
+            mine = [p for p in self.svc_pods if p["app"] == svc and p["tier"] == "backfill"]
+            want = self.demand[svc]
+            while len(mine) > want:  # ReplicaSet scale-down deletes unscheduled pods first, then the newest
+                victim = next((p for p in reversed(mine) if p["node"] is None), mine[-1])
+                mine.remove(victim)
+                self._release(victim["uid"])
+                self.svc_pods.remove(victim)
+            while len(mine) < want:
+                p = self._new_pod(svc, "backfill")
+                mine.append(p)
+                self.svc_pods.append(p)
+            for p in mine:
+                if p["node"] is not None:
+                    continue
+                for n in hosts:
+                    c = self._free_core(n)
+                    if c is not None:
+                        n["cores"][c] = p["uid"]
+                        p["node"] = n["name"]
+                        p["ready_at"] = now + 6
+                        break
+        # overflow HPAs on a lagged metric
+        for svc in self.overflow_hist:
+            hist = self.overflow_hist[svc]
+            hist.append((now, self._overflow_needed(svc, now)))
+            cut = now - NATIVE_METRIC_LAG_S - NATIVE_HPA_DOWN_WINDOW_S - 5
+            while len(hist) > 1 and hist[1][0] < cut:
+                hist.pop(0)
+            seen = [v for t, v in hist if t <= now - NATIVE_METRIC_LAG_S]
+            if seen:
+                self.hpa_metric[svc] = seen[-1]
+                window = [v for t, v in hist if now - NATIVE_METRIC_LAG_S - NATIVE_HPA_DOWN_WINDOW_S <= t <= now - NATIVE_METRIC_LAG_S]
+                rec = max(window or [seen[-1]])  # up at once, down only after the stabilization window
+                self.hpa_overflow[svc] = max(NATIVE_OVERFLOW_MIN, min(NATIVE_OVERFLOW_MAX, rec))
+            self._reconcile_overflow(svc, "integer", self.hpa_overflow[svc], now)
+        self._reconcile_overflow("analytics", "memory-heavy", self.demand["analytics"], now)
+        self._reconcile_buffer(now)
+
+    def _guard(self, now: float, g4s: list[dict]):
+        return  # no latency guard: memory-heavy is banned from G4 by admission policy
+
+    # ------------------------------------------------------------ raw output
+    def raw(self) -> dict:
+        r = super().raw()
+        r["pods"] = [p for p in r["pods"] if (p.get("labels") or {}).get("app") != "colo-controller"]
+        for p in r["pods"]:
+            if (p.get("labels") or {}).get("app") == "colo-buffer":
+                p["priority_class"] = "colo-buffer"
+        r["deployments"] = [d for d in r["deployments"] if not (d["namespace"] == "colo-svc" and d["name"] == "analytics-backfill")]
+        for svc in self.overflow_hist:
+            r["hpas"].append({
+                "name": f"{svc}-overflow", "namespace": "colo-svc", "target": f"{svc}-overflow",
+                "min": NATIVE_OVERFLOW_MIN, "max": NATIVE_OVERFLOW_MAX,
+                "current": sum(1 for p in self.svc_pods if p["app"] == svc and p["tier"] == "overflow"),
+                "desired": self.hpa_overflow[svc],
+                "metric": None if self.hpa_metric[svc] is None else str(self.hpa_metric[svc]),
+            })
+        r["controller"] = {"state": None, "config": None}
+        r["configmap"] = None
+        r["events"] = [e for e in r["events"] if not str(e.get("reason", "")).startswith("ColoGuard")]
+        return r
+
+    # ------------------------------------------------------------ actions
+    async def set_demand(self, demand: dict) -> dict:
+        for k, v in demand.items():
+            if k in self.demand:
+                self.demand[k] = max(0, int(v))
+        self._step(time.time(), force=True)
+        return {"scaled": [{"deployment": f"colo-svc/{NATIVE_DEMAND_DEPLOYMENT[k]}", "replicas": self.demand[k]}
+                           for k in demand if k in NATIVE_DEMAND_DEPLOYMENT]}
+
+    async def set_guard(self, enabled: bool) -> dict:
+        raise UnsupportedOnRecipe(f"no latency guard on the native recipe: {GUARD_NA_REASON}")
+
+    async def baseline(self) -> dict:
+        raise UnsupportedOnRecipe(f"no TTFT baseline on the native recipe: {GUARD_NA_REASON}")

@@ -1,0 +1,44 @@
+# Demo overlay (native recipe): the full stack as run on the demo cluster g4cluster-jawadamin-us-west8-1126,
+# including the synthetic load generator and the node agent the demo UI reads.
+#   kubectl apply -k g4_colo/recipe-native/overlays/demo
+# Demand is the backfill Deployments' replica count; the demo sliders patch it (kubectl scale works too).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+- settings.yaml
+components:
+- ../../../recipe/components/vllm-gcs-cache
+images:
+- name: colo-registry.invalid/colo-worker
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
+  newTag: v0.2.4
+- name: colo-registry.invalid/colo-loadgen
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen
+  newTag: v0.2.4
+- name: colo-registry.invalid/colo-node-agent
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
+  newTag: v0.2.4
+- name: vllm/vllm-openai
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai
+  newTag: v0.32.0
+replacements:
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.clusterName}
+  targets:
+  - select: {kind: HorizontalPodAutoscaler, namespace: colo-svc, labelSelector: colo.tier=overflow}
+    fieldPaths: ['spec.metrics.0.external.metric.selector.matchLabels.[resource.labels.cluster]']
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4NodePool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.n4dNodePool}
+  targets:
+  - select: {kind: ComputeClass, name: n4d-cpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.model}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.containers.[name=vllm].args.0']
+    options: {delimiter: "=", index: 1}
+  - select: {kind: Deployment, name: loadgen}
+    fieldPaths: ['spec.template.spec.containers.[name=loadgen].env.[name=MODEL].value']

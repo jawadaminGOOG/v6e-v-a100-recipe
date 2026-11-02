@@ -45,7 +45,8 @@ Environment variables:
 | Variable | Default | Meaning |
 |---|---|---|
 | `DEMO_MOCK` | `0` | `1` = built-in simulator (`mock.py`) instead of the cluster |
-| `DEMO_KUBE_CONTEXT` | current | kubeconfig context to use |
+| `DEMO_CLUSTERS` | unset | JSON list of clusters for the header selector (see [Two clusters](#two-clusters)). Unset = one cluster from `DEMO_KUBE_CONTEXT` / `GKE_ENDPOINT` as before |
+| `DEMO_KUBE_CONTEXT` | current | kubeconfig context to use (single-cluster mode) |
 | `DEMO_LOADGEN_RATE_IS_TOTAL` | `0` | `1` if each loadgen replica's `/stats.rate` is already the cluster total (default: per-replica share, summed) |
 | `DEMO_SCENARIO_TIME_SCALE` | `1` | multiplies scenario `wait`/`timeout` durations |
 | `DEMO_PRICE_G4_HR`, `DEMO_PRICE_VCPU_HR`, `DEMO_PRICE_GIB_HR`, `DEMO_PRICE_N4D16_HR` | 1.98, 0.0131, 0.00149, 16·vCPU+64·GiB | cost-ticker prices (USD/hr) |
@@ -53,6 +54,53 @@ Environment variables:
 | `DEMO_FAST_SCALE` | `1` | **demo accelerator, demo-only**: on a rate change, patch HPA `vllm` `minReplicas` (2 above `DEMO_FAST_SCALE_RPS`=700, else 1) and the Deployment scale so scale-out shows in seconds. `minReplicas` is reset to 1 when the rate drops, when any scenario ends or is cancelled, and on app shutdown. The UI shows a badge whenever the live HPA has `minReplicas > 1`. Set `0` for a production-like run where only the HPA scales vLLM. |
 | `DEMO_EVENTS_TTL_S` | `10` | how often cluster events are re-listed (scoped by a reason field selector, limit 200) |
 | `DEMO_ERROR_LOG_INTERVAL_S` | `30` | each distinct backend error is logged at WARNING at most this often (for unattended soaks in Cloud Logging) |
+
+## Two clusters
+
+One app shows both recipes behind a selector in the header (`?cluster=<id>` deep link; the choice is kept in
+`localStorage`). Each cluster gets its own kubernetes `ApiClient`, 1 s state cache and scenario runner, so a
+scenario on one cluster never locks the other.
+
+| id | Cluster | Recipe | Control chip |
+|---|---|---|---|
+| `controller` | `g4cluster-jawadamin-us-west8-0726` | `g4_colo/recipe/` | Control: colo-controller |
+| `native` | `g4cluster-jawadamin-us-west8-1126` | `g4_colo/recipe-native/` | Control: HPA + scheduler |
+
+```bash
+gcloud container clusters get-credentials g4cluster-jawadamin-us-west8-1126 --region us-west8 --project northam-ce-mlai-tpu
+DEMO_CLUSTERS='[
+ {"id":"controller","label":"With colo-controller","recipe":"controller","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"},
+ {"id":"native","label":"Native K8s only","recipe":"native","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126"}
+]' python -m uvicorn app:app --port 8088
+DEMO_MOCK=1 python -m uvicorn app:app --port 8088   # both clusters simulated
+```
+
+* Entry fields: `id`, `label`, `recipe` (`controller`|`native`), and `context` **or** `endpoint` + `ca_cert`
+  (base64 PEM, Cloud Run with ADC); optional `name`, `region`, `project`. The first entry is the default.
+  A `context` entry uses only that context (no fallback to another cluster's credentials). A cluster whose
+  credentials fail to load shows an error banner; the other cluster keeps working.
+* **What differs on `native`** (no colo-controller, no `colo-config`): demand = `spec.replicas` of
+  `<svc>-backfill` (sandbox, toolcall) and `analytics-overflow` (analytics never backfills: admission policy),
+  so `/api/demand` patches `deployments/scale`. A G4 node is eligible iff it runs a Ready vLLM pod. Backfill
+  pods with no free G4 slot stay Pending at priority -100 by design; the lanes show them as "+N waiting → N4D"
+  and the `sandbox-overflow` / `toolcall-overflow` HPA tag (`colo_overflow_needed` → replicas). Overflow keeps
+  1 pod per service (HPA `minReplicas: 1`), so running can exceed demand by about 1 per service.
+* Not on `native`: latency guard and baseline (`/api/guard`, `/api/baseline` return 409; the rail says why)
+  and scenario 4. Scenarios 1-3 run a native variant (`NATIVE_SCENARIOS`) that uses only demand and GPU rate,
+  with timeouts that allow for the GMP → HPA metric lag.
+* **RBAC on both clusters** (the Cloud Run SA `colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com`; on
+  native it also patches `deployments/scale` of the 3 demand Deployments and reads HPAs in `colo-svc`):
+  ```bash
+  for c in g4cluster-jawadamin-us-west8-0726 g4cluster-jawadamin-us-west8-1126; do
+    kubectl --context gke_northam-ce-mlai-tpu_us-west8_$c apply -f k8s.yaml -l colo-demo/rbac=true
+  done
+  ```
+  `-l colo-demo/rbac=true` applies only the ServiceAccount, roles and bindings, not the in-cluster demo
+  Deployment/Service.
+* **Cloud Run**: replace `GKE_ENDPOINT`/`GKE_CA_CERT` with one `DEMO_CLUSTERS` entry per cluster carrying
+  `endpoint` and `ca_cert` (from `gcloud container clusters describe <c> --region us-west8
+  --format='value(endpoint,masterAuth.clusterCaCertificate)'`). The SA needs `roles/container.clusterViewer`
+  on the project (both clusters). The old single-cluster variables still work when `DEMO_CLUSTERS` is unset.
 
 ## Scenarios from the command line
 
@@ -62,6 +110,7 @@ The step definitions in `scenarios.py` are data. The web app and the CLI run the
 python run_scenario.py --list
 python run_scenario.py gpu-scale-out --out /tmp/gpu-scale-out.json
 DEMO_MOCK=1 python run_scenario.py guard-integer-vs-memory
+DEMO_MOCK=1 python run_scenario.py cpu-scale-out --cluster native   # any DEMO_CLUSTERS id
 ```
 
 The JSON output contains the step log, labelled observations (`observe` steps) and a metric sample every
@@ -78,7 +127,8 @@ The JSON output contains the step log, labelled observations (`observe` steps) a
 
 | Method | Path | Body / notes |
 |---|---|---|
-| GET | `/api/state` | aggregated snapshot: nodes + per-CPU owners, pods, vLLM/HPA, loadgen summary, services, controller, events, cost (incl. `cost.counterfactual`), `story` (hero numbers), `alerts` (classified backend errors), `demo` (accelerator state), `scenario` (incl. `wait` = current metric vs target + deadline) |
+| GET | `/api/clusters` | `{default, clusters: [{id, label, recipe, name, region, project, control, guard_available}]}` |
+| GET | `/api/state` | aggregated snapshot (adds `cluster_id`, `recipe`, `control`; native also `services.<svc>.backfill.waiting` and `services.<svc>.overflow.hpa`): nodes + per-CPU owners, pods, vLLM/HPA, loadgen summary, services, controller, events, cost (incl. `cost.counterfactual`), `story` (hero numbers), `alerts` (classified backend errors), `demo` (accelerator state), `scenario` (incl. `wait` = current metric vs target + deadline) |
 | POST | `/api/gpu-rate` | `{"rate": 600}`: sends `POST /rate {"rate": 600}` to every Ready loadgen pod |
 | POST | `/api/demand` | `{"sandbox": n, "toolcall": n, "analytics": n}`: sent as a patch to the controller's `POST /config` (it deep-merges). 409 while a scenario runs |
 | POST | `/api/guard` | `{"enabled": true}`: sent as a patch to the controller's `POST /config`. 409 while a scenario runs |
@@ -86,20 +136,24 @@ The JSON output contains the step log, labelled observations (`observe` steps) a
 | POST | `/api/scenario/{name}` | `name` is a scenario name or `1`-`4`; runs asynchronously |
 | GET | `/api/scenario/status` | current scenario step log + observations |
 | POST | `/api/scenario/cancel` | cancels the running scenario and resets HPA `minReplicas` to 1 |
-| GET | `/api/scenarios` | scenario definitions |
+| GET | `/api/scenarios` | scenario definitions for that cluster's recipe |
+
+Every endpoint takes `?cluster=<id>` (default: the first cluster; unknown id = 404). On `native`, `/api/demand`
+patches `deployments/scale`, and `/api/guard`, `/api/baseline` and scenario 4 return 409.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `app.py` | FastAPI routes, 1 s state cache, scenario runner instance |
-| `cluster.py` | live backend: kubernetes client reads plus pod-proxy calls (`/stats`, `/rate`, `/state`, `/config`, `/baseline`, `/cpus`) |
+| `app.py` | FastAPI routes; per cluster: 1 s state cache and scenario runner |
+| `backend.py` | `DEMO_CLUSTERS` parsing and one backend per cluster |
+| `cluster.py` | live backends (`LiveBackend` controller recipe, `NativeLiveBackend` native recipe), each with its own `ApiClient`: kubernetes client reads plus pod-proxy calls (`/stats`, `/rate`, `/state`, `/config`, `/baseline`, `/cpus`) |
 | `state.py` | pure aggregation of a raw snapshot into `/api/state` (CPU ownership, histogram merge, cost) |
-| `mock.py` | time-compressed simulator that emits the same raw formats as `cluster.py` |
+| `mock.py` | time-compressed simulators (`MockBackend`, `NativeMockBackend`) that emit the same raw formats as `cluster.py` |
 | `scenarios.py` | scenario step data + async runner. Each scenario starts with a `require` step that fails fast with a plain message (e.g. scale-in needs 2 vLLM replicas on 2 G4 nodes); note text is templated from live metrics |
 | `run_scenario.py` | headless CLI, writes the JSON observation log |
 | `static/` | `index.html`, `app.js`, `style.css` |
-| `tools/shot.py` | headless-Chrome (CDP) screenshot after N s, e.g. `python tools/shot.py http://localhost:8088/ /tmp/demo_mock.png 150` (needs `websockets`, included with `uvicorn[standard]`) |
+| `tools/shot.py` | headless-Chrome (CDP) screenshot after N s, e.g. `python tools/shot.py http://localhost:8088/ /tmp/demo_mock.png 150` (needs `websockets`, included with `uvicorn[standard]`); add `WxH` (e.g. `1440x900`) to capture exactly that viewport and print the no-scroll check |
 
 ## How the data is read
 

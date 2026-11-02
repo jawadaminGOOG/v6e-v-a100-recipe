@@ -1,0 +1,69 @@
+# Namespaces, PriorityClasses and ComputeClasses for the native (controller-free) colo recipe.
+# Same PriorityClasses as recipe/; the g4-gpu ComputeClass keeps an unneeded G4 node longer (see below).
+apiVersion: v1
+kind: Namespace
+metadata: {name: inference}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: colo-svc}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: colo-system}
+---
+# GPU workload: highest priority; preempts any co-located CPU pod on a G4 node.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: gpu-serving}
+value: 1000000
+description: GPU inference serving (vLLM).
+---
+# CPU services on N4D. Normal priority: pending pods make the autoscaler add N4D nodes.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: colo-overflow}
+value: 0
+description: CPU services running on N4D overflow nodes.
+---
+# Warm buffer on N4D: triggers scale-up (>= -10) but is preempted by colo-overflow pods.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: colo-buffer}
+value: -5
+preemptionPolicy: Never
+description: Placeholder pods that keep warm N4D capacity.
+---
+# CPU services on G4 spare cores. Below the cluster autoscaler's expendable cutoff (-10): a Pending backfill pod
+# never makes the autoscaler add a node. In this recipe backfill Deployments are sized to the full service demand,
+# so the pods that do not fit on G4 stay Pending on purpose; the overflow HPA counts them (base/rules.yaml).
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: colo-backfill}
+value: -100
+preemptionPolicy: Never
+description: CPU services backfilling spare cores on G4 GPU nodes (expendable).
+---
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata: {name: g4-gpu}
+spec:
+  priorities:
+  # PLACEHOLDER: overlays set the real pool name from their colo-settings (see overlays/*/settings.yaml).
+  - nodepools: [your-g4-node-pool]
+  whenUnsatisfiable: DoNotScaleUp
+  # Make-before-break without a controller: when vLLM leaves a G4 node, the overflow HPA scales N4D up at once
+  # (rules.yaml stops counting that node's backfill), while the autoscaler keeps the node, and its backfill pods
+  # serving, for consolidationDelayMinutes. recipe/ uses 1 min because colo-controller drains on readiness.
+  autoscalingPolicy: {consolidationDelayMinutes: 3, gpuConsolidationThreshold: 100}
+---
+apiVersion: cloud.google.com/v1
+kind: ComputeClass
+metadata: {name: n4d-cpu}
+spec:
+  priorities:
+  # PLACEHOLDER: overlays set the real pool name from their colo-settings (see overlays/*/settings.yaml).
+  - nodepools: [your-n4d-node-pool]
+  whenUnsatisfiable: DoNotScaleUp
+  # Remove an unneeded N4D node after 1 min instead of the default 10.
+  autoscalingPolicy: {consolidationDelayMinutes: 1}

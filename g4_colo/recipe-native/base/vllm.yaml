@@ -1,0 +1,117 @@
+# GPU workload: vLLM on the 8 vCPU / 64 GiB / 1 GPU slice of each G4 node, autoscaled on in-flight requests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: inference
+  labels: {app: vllm}
+spec:
+  # No `replicas:` field: the HPA below owns the replica count (re-applying must not reset it).
+  selector: {matchLabels: {app: vllm}}
+  strategy: {type: Recreate}
+  template:
+    metadata:
+      labels: {app: vllm}
+      annotations:
+        # Cluster Autoscaler must never consolidate a G4 node by moving a serving vLLM pod: backfill
+        # pods are expendable (priority -100), so without this every G4 node looks "movable" and CA
+        # may evict vLLM onto another node, causing a full model reload (wave-2 clause 5b: 138 s with
+        # 0 ready replicas). Scale-in happens through the HPA removing a replica, never through CA.
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      priorityClassName: gpu-serving
+      enableServiceLinks: false   # a Service named "vllm" would inject VLLM_PORT, which vLLM itself reads
+      nodeSelector: {cloud.google.com/compute-class: g4-gpu}
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      # Drain on scale-in: the pod leaves Service endpoints (and loadgen discovery, 2 s) as soon as it is marked
+      # for deletion, but vLLM aborts in-flight streams on SIGTERM. preStop keeps it serving for 15 s so callers
+      # stop routing to it and in-flight requests finish; the grace period covers preStop plus vLLM shutdown.
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: vllm
+        lifecycle:
+          preStop:
+            exec: {command: ["sh", "-c", "sleep 15"]}
+        # Public upstream image. Overlays may point this at a private mirror with kustomize `images:`.
+        image: vllm/vllm-openai:v0.32.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - --model=Qwen/Qwen3-1.7B-Base
+        - --port=8000
+        - --max-model-len=4096
+        - --gpu-memory-utilization=0.9
+        - --enable-prefix-caching
+        - --api-server-count=4
+        # PIECEWISE CUDA graphs only. The default (FULL_AND_PIECEWISE) also captures FULL graphs, a fixed ~46 s at
+        # every vLLM start on RTX PRO 6000 whatever the capture-size list, with no measured TTFT or throughput gain
+        # at 450 or 1,200 rps for this short-output workload (README "vLLM startup time").
+        - '--compilation-config={"cudagraph_mode": "PIECEWISE"}'
+        env:
+        - {name: VLLM_USE_DEEP_GEMM, value: "0"}
+        - {name: HF_HOME, value: /hf}
+        - {name: VLLM_CACHE_ROOT, value: /hf/vllm_cache}
+        - {name: TORCHINDUCTOR_CACHE_DIR, value: /hf/inductor_cache}
+        # Save the memory-profiling result under VLLM_CACHE_ROOT/startup_plan and reuse it on later starts with the
+        # same GPU type and config, skipping the profiling pass. A mismatch falls back to profiling.
+        - {name: VLLM_ENABLE_STARTUP_PLAN, value: "1"}
+        ports: [{name: http, containerPort: 8000}]
+        # Guaranteed QoS + integer CPU => exclusive cores from the static CPU manager.
+        resources:
+          requests: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
+          limits: {cpu: "8", memory: 64Gi, nvidia.com/gpu: 1}
+        readinessProbe:
+          httpGet: {path: /health, port: 8000}
+          periodSeconds: 2
+          failureThreshold: 3
+        startupProbe:
+          httpGet: {path: /health, port: 8000}
+          periodSeconds: 2
+          failureThreshold: 180
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: shm, mountPath: /dev/shm}
+      volumes:
+      # HF weights + vLLM/Inductor compile cache on the node. On its own this only helps when vLLM returns to a node
+      # it has already used (pod restart or reschedule); a node added by the autoscaler starts cold (HF download +
+      # compile). components/vllm-gcs-cache seeds new nodes from a GCS bucket instead (README "vLLM startup time").
+      - {name: hf, hostPath: {path: /var/lib/colo/hf, type: DirectoryOrCreate}}
+      - {name: shm, emptyDir: {medium: Memory, sizeLimit: 8Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: vllm, namespace: inference}
+spec:
+  selector: {app: vllm}
+  ports: [{name: http, port: 8000, targetPort: 8000}]
+---
+# Managed Prometheus scrape of vLLM metrics (vllm:num_requests_running, TTFT histograms, ...).
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: vllm, namespace: inference}
+spec:
+  selector: {matchLabels: {app: vllm}}
+  endpoints: [{port: http, path: /metrics, interval: 5s}]
+---
+# Scale vLLM replicas on completed requests per second per replica. Each new replica needs a G4 node, which the
+# g4-gpu ComputeClass adds; backfill CPU work then fills that node's spare cores.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: vllm, namespace: inference}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: vllm}
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+  - type: Pods
+    pods:
+      # Completed requests per second per replica (the adapter turns a Prometheus
+      # counter into a per-second rate). One replica on the 8-vCPU shape saturates
+      # near 1,300 rps with this prompt mix, so 700 rps/replica leaves headroom and,
+      # unlike num_requests_running, stays linear in load (no flapping after scale-out).
+      metric: {name: prometheus.googleapis.com|vllm:request_success_total|counter}
+      target: {type: AverageValue, averageValue: "700"}
+  behavior:
+    scaleUp: {stabilizationWindowSeconds: 0, policies: [{type: Pods, value: 1, periodSeconds: 15}]}
+    scaleDown: {stabilizationWindowSeconds: 15, policies: [{type: Pods, value: 1, periodSeconds: 15}]}

@@ -1,0 +1,19 @@
+# Base (native recipe): environment-neutral. Do not apply directly. Overlays set registry, image tags, node pool
+# names, cluster name and the model in one place (overlays/<name>/kustomization.yaml `images:` +
+# overlays/<name>/settings.yaml).
+#
+# Control path = stock GKE only: kube-scheduler (podAffinity, priorities), Cluster Autoscaler (ComputeClasses),
+# HPA (overflow), Managed Prometheus rule evaluator (rules.yaml), ValidatingAdmissionPolicy (guardrails.yaml).
+# No colo-controller. scripts/check_no_custom_code.py enforces that.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- cluster.yaml
+- custom-metrics-adapter.yaml
+- vllm.yaml
+- loadgen.yaml
+- ksm.yaml
+- rules.yaml
+- colo-services.yaml
+- guardrails.yaml
+- node-agent.yaml

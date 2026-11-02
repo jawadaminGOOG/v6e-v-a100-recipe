@@ -1,0 +1,111 @@
+# Production template (native recipe): start here for a real deployment. Edit the values marked REPLACE first.
+#   kubectl kustomize g4_colo/recipe-native/overlays/production-template   # review
+#   kubectl apply -k g4_colo/recipe-native/overlays/production-template     # after editing
+#
+# Differences from the demo overlay:
+#   1. No synthetic load generator and no demo node agent: real clients call the vLLM Service.
+#   2. The g4-gpu ComputeClass lists capacity tiers in cost order: reservation -> Spot -> on-demand.
+#   3. The vLLM HPA allows more replicas; vLLM accepts traffic from your gateway namespace.
+#   4. Demand: put your usual HPA on each <svc>-backfill Deployment (it is the service's replica count). The
+#      example below scales toolcall-backfill on CPU; Pending backfill pods become N4D overflow automatically.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+- settings.yaml
+- demand-hpa.yaml
+images:
+- name: colo-registry.invalid/colo-worker
+  newName: us-docker.pkg.dev/your-project-id/your-repository/colo-worker            # REPLACE
+  newTag: v0.2.4
+patches:
+# 1. Drop the load generator and the demo node agent.
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: {name: loadgen, namespace: inference}
+- patch: |-
+    $patch: delete
+    apiVersion: monitoring.googleapis.com/v1
+    kind: PodMonitoring
+    metadata: {name: loadgen, namespace: inference}
+- patch: |-
+    $patch: delete
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: loadgen, namespace: inference}
+- patch: |-
+    $patch: delete
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: loadgen, namespace: inference}
+- patch: |-
+    $patch: delete
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: loadgen, namespace: inference}
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata: {name: colo-node-agent, namespace: colo-system}
+- patch: |-
+    $patch: delete
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: colo-node-agent, namespace: colo-system}
+# 2. Capacity tiers for G4 (reservation -> Spot -> on-demand). Pool names come from settings.yaml.
+- target: {kind: ComputeClass, name: g4-gpu}
+  patch: |-
+    - op: replace
+      path: /spec/priorities
+      value:
+      - nodepools: [set-from-settings]
+      - nodepools: [set-from-settings]
+      - nodepools: [set-from-settings]
+# 3. More vLLM replicas; vLLM ingress from the gateway namespace instead of loadgen.
+- target: {kind: HorizontalPodAutoscaler, name: vllm, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/maxReplicas
+      value: 8
+- target: {kind: NetworkPolicy, name: vllm-ingress, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/ingress/0
+      value:
+        from:
+        - namespaceSelector:
+            matchExpressions: [{key: kubernetes.io/metadata.name, operator: In, values: [set-from-settings]}]
+        ports: [{protocol: TCP, port: 8000}]
+replacements:
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.clusterName}
+  targets:
+  - select: {kind: HorizontalPodAutoscaler, namespace: colo-svc, labelSelector: colo.tier=overflow}
+    fieldPaths: ['spec.metrics.0.external.metric.selector.matchLabels.[resource.labels.cluster]']
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4ReservationPool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4SpotPool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.1.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4NodePool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.2.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.n4dNodePool}
+  targets:
+  - select: {kind: ComputeClass, name: n4d-cpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.gatewayNamespace}
+  targets:
+  - select: {kind: NetworkPolicy, name: vllm-ingress}
+    fieldPaths: [spec.ingress.0.from.0.namespaceSelector.matchExpressions.0.values.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.model}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.containers.[name=vllm].args.0']
+    options: {delimiter: "=", index: 1}

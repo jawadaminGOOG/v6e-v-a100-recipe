@@ -5,6 +5,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: colo-system
 ---
 # RBAC (finding 1.11): cluster-wide access is read-only and limited to what the map needs.
@@ -13,10 +14,15 @@ metadata:
 #
 # Subjects: edit the `subjects:` list of each of the 4 bindings below (keep them identical). The Cloud Run
 # demo runs as a dedicated Google service account, mapped to a Kubernetes User by its email.
+#
+# Two clusters: apply the RBAC objects (label colo-demo/rbac=true) to BOTH clusters, the in-cluster demo
+# Deployment/Service only where you want it (see README "Two clusters"):
+#   kubectl --context <ctx> apply -f k8s.yaml -l colo-demo/rbac=true
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: colo-demo-read
+  labels: {colo-demo/rbac: "true"}
 rules:
 - apiGroups: [""]
   resources: [nodes, pods, events]
@@ -29,6 +35,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: colo-demo-read
+  labels: {colo-demo/rbac: "true"}
 subjects:
 - kind: ServiceAccount
   name: colo-demo
@@ -46,6 +53,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: inference
 rules:
 - apiGroups: [""]
@@ -70,6 +78,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: inference
 subjects:
 - kind: ServiceAccount
@@ -89,6 +98,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: colo-system
 rules:
 - apiGroups: [""]
@@ -106,6 +116,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: colo-system
 subjects:
 - kind: ServiceAccount
@@ -120,20 +131,32 @@ roleRef:
   name: colo-demo
 ---
 # colo-svc: read the backfill/overflow Deployments.
+# Native recipe (g4_colo/recipe-native/, no controller): demand = Deployment replicas, so the demo patches
+# deployments/scale of exactly these three, and reads the overflow HPAs (colo_overflow_needed). The demo never
+# patches them on a controller cluster (the controller owns those replicas there), so one file serves both clusters.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: colo-svc
 rules:
 - apiGroups: [apps]
   resources: [deployments]
+  verbs: [get, list, watch]
+- apiGroups: [apps]
+  resources: [deployments/scale]
+  resourceNames: [sandbox-backfill, toolcall-backfill, analytics-overflow]
+  verbs: [get, patch, update]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
   verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: colo-demo
+  labels: {colo-demo/rbac: "true"}
   namespace: colo-svc
 subjects:
 - kind: ServiceAccount

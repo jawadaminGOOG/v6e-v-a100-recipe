@@ -337,8 +337,39 @@ def classify_errors(errors: list[str], have_nodes: bool) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------- recipes
+# "controller": g4_colo/recipe/ (colo-controller in colo-system splits demand into backfill + overflow).
+# "native":     g4_colo/recipe-native/ (no controller: <svc>-backfill replicas = demand, extra backfill pods stay
+#               Pending at priority -100, and the <svc>-overflow HPAs cover them on N4D).
+RECIPES = ("controller", "native")
+GUARD_NA_REASON = "memory-heavy services are kept off G4 by admission policy"
+# Demand Deployment per service on the native recipe (memory-heavy services never backfill there).
+NATIVE_DEMAND_DEPLOYMENT = {"sandbox": "sandbox-backfill", "toolcall": "toolcall-backfill", "analytics": "analytics-overflow"}
+NATIVE_OVERFLOW_HPAS = ("sandbox-overflow", "toolcall-overflow")
+
+
+class UnsupportedOnRecipe(RuntimeError):
+    """The action has no equivalent on this cluster's recipe (e.g. the latency guard on the native recipe)."""
+
+
+def _num(x: Any) -> float | None:
+    """HPA metric quantity ('3', '1500m', 2.0) -> float."""
+    if x is None:
+        return None
+    try:
+        return round(parse_cpu(x), 3)
+    except (TypeError, ValueError):
+        return None
+
+
+def _vllm_ready_nodes(pods: list[dict]) -> set[str]:
+    return {p["node"] for p in pods if (p.get("labels") or {}).get("app") == "vllm" and p.get("node")
+            and p.get("phase") == "Running" and p.get("ready")}
+
+
 # ---------------------------------------------------------------- main builder
-def build_state(raw: dict, mode: str = "live") -> dict:
+def build_state(raw: dict, mode: str = "live", recipe: str = "controller", cluster: dict | None = None) -> dict:
+    native = recipe == "native"
     now = time.time()
     errors = list(raw.get("errors") or [])
     pods = [p for p in raw.get("pods") or [] if p.get("phase") not in ("Succeeded", "Failed")]
@@ -351,6 +382,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
 
     lg = merge_loadgen(raw.get("loadgen") or {}, pods_by_name)
     agents = raw.get("agents") or {}
+    vllm_nodes = _vllm_ready_nodes(pods)
 
     nodes_out = []
     counts = {"g4": 0, "n4d": 0, "loadgen": 0, "other": 0, "g4_ready": 0, "n4d_ready": 0}
@@ -462,6 +494,14 @@ def build_state(raw: dict, mode: str = "live") -> dict:
                     }
                 )
         blocks = sorted(k.split("colo.block.", 1)[1] for k, v in labels.items() if k.startswith("colo.block.") and str(v) == "true")
+        # Eligible for backfill: the controller marks it with colo.active=true; on the native recipe the scheduler's
+        # podAffinity makes "runs a Ready vLLM pod" the rule (there is no node label).
+        if role != "g4":
+            eligible = None
+        elif native or "colo.active" not in labels:
+            eligible = n["name"] in vllm_nodes
+        else:
+            eligible = str(labels.get("colo.active")) == "true"
         lgn = lg["per_node"].get(n["name"]) or {}
         nodes_out.append(
             {
@@ -481,6 +521,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
                 "mem_used_gib": agent.get("mem_used_gib"),
                 "pods": sorted(node_pods, key=lambda p: ({"vllm": 0, "integer": 1, "memory": 2, "buffer": 3}.get(p["cat"], 4), p["name"])),
                 "blocks": blocks,
+                "eligible": eligible,
                 "sys_cpu": round(sys_cpu, 2),  # daemonset/agent requests (shared pool, not exclusive)
                 "ttft_p99_ms": lgn.get("ttft_p99_ms"),
                 "ttft_p50_ms": lgn.get("ttft_p50_ms"),
@@ -505,6 +546,11 @@ def build_state(raw: dict, mode: str = "live") -> dict:
     cconf = ctrl.get("config") if isinstance(ctrl.get("config"), dict) else None
     conf = cconf or (cstate or {}).get("config") or cm or {}
     demand = (cstate or {}).get("demand") or conf.get("demand") or {}
+    if native:
+        # No controller and no colo-config: demand is the replicas of the Deployment that holds it.
+        cstate, conf = None, {}
+        demand = {svc: (deps.get(("colo-svc", dname)) or {}).get("replicas")
+                  for svc, dname in NATIVE_DEMAND_DEPLOYMENT.items() if deps.get(("colo-svc", dname))}
     guard = conf.get("guard") or {}
     baseline = None
     for src in (cstate or {}, guard):
@@ -521,6 +567,7 @@ def build_state(raw: dict, mode: str = "live") -> dict:
     if cstate and isinstance(cstate.get("guard"), dict) and "enabled" in cstate["guard"]:
         guard_enabled = cstate["guard"]["enabled"]
 
+    hpas_by_target = {(h.get("namespace"), h.get("target") or h.get("name")): h for h in raw.get("hpas") or []}
     services = {}
     for svc, cls in SERVICES.items():
         entry = {"class": cls, "demand": demand.get(svc)}
@@ -531,6 +578,18 @@ def build_state(raw: dict, mode: str = "live") -> dict:
                 "desired": d.get("replicas", len(tp)) if d else len(tp),
                 "ready": d.get("ready", sum(1 for p in tp if p.get("ready"))) if d else sum(1 for p in tp if p.get("ready")),
             }
+            if native and tier == "backfill":
+                # Backfill pods with no G4 slot next to a vLLM pod stay Pending (priority -100, ignored by the
+                # cluster autoscaler) by design; the overflow HPA covers them on N4D.
+                entry[tier]["waiting"] = sum(1 for p in tp if p.get("phase") == "Pending" and not p.get("node"))
+                entry[tier]["on_g4"] = sum(1 for p in tp if p.get("node") and p.get("phase") == "Running")
+                entry[tier]["effective"] = sum(1 for p in tp if p.get("ready") and p.get("node") in vllm_nodes)
+            if native and tier == "overflow":
+                h = hpas_by_target.get(("colo-svc", f"{svc}-overflow"))
+                entry[tier]["hpa"] = None if not h else {
+                    "name": h.get("name"), "metric": _num(h.get("metric")), "desired": h.get("desired"),
+                    "current": h.get("current"), "min": h.get("min"), "max": h.get("max"),
+                }
         services[svc] = entry
     buf = deps.get(("colo-system", "colo-buffer")) or deps.get(("colo-svc", "colo-buffer")) or {}
 
@@ -578,10 +637,32 @@ def build_state(raw: dict, mode: str = "live") -> dict:
         "counterfactual_n4d_nodes": cf["n4d_nodes"],
         "saved_nodes": saved_nodes,
     }
+    if native:
+        control = {
+            "kind": "native",
+            "label": "HPA + scheduler",
+            "detail": "No controller: backfill replicas = demand; a backfill pod binds only next to a vLLM pod "
+                      "(podAffinity); the overflow HPAs cover Pending backfill on N4D.",
+            "guard_available": False,
+            "guard_reason": GUARD_NA_REASON,
+            "eligible_g4": sum(1 for n in nodes_out if n["role"] == "g4" and n.get("eligible")),
+            "backfill_waiting": sum((s["backfill"].get("waiting") or 0) for s in services.values()),
+            "hpas": {svc: s["overflow"].get("hpa") for svc, s in services.items() if s["overflow"].get("hpa")},
+        }
+    else:
+        control = {
+            "kind": "controller",
+            "label": "colo-controller",
+            "detail": "colo-controller splits demand into G4 backfill + N4D overflow every 2 s and runs the TTFT guard.",
+            "guard_available": True,
+            "guard_reason": None,
+        }
     out = {
         "ts": now,
         "mode": mode,
-        "cluster": CLUSTER,
+        "recipe": recipe,
+        "cluster": cluster or CLUSTER,
+        "control": control,
         "nodes": nodes_out,
         "counts": counts,
         "story": story,
@@ -674,6 +755,8 @@ def summarize(state: dict) -> dict:
         "backfill_ready": sum(s["backfill"]["ready"] or 0 for s in svc.values()),
         "overflow_desired": sum(s["overflow"]["desired"] or 0 for s in svc.values()),
         "overflow_ready": sum(s["overflow"]["ready"] or 0 for s in svc.values()),
+        # Native recipe: backfill pods Pending for want of a G4 slot (always 0 on the controller recipe).
+        "backfill_waiting": sum(s["backfill"].get("waiting") or 0 for s in svc.values()),
         "memory_backfill_ready": sum(s["backfill"]["ready"] or 0 for s in svc.values() if s["class"] == "memory-heavy"),
         "integer_backfill_ready": sum(s["backfill"]["ready"] or 0 for s in svc.values() if s["class"] == "integer"),
         "guard_blocks": blocks,

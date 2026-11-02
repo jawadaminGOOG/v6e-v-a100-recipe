@@ -35,6 +35,16 @@ const seenEvents = new Set();
 let firstEvents = true;
 let dismissedScenario = null;
 
+/* ------------------------------------------------------------------ clusters */
+// One UI, several clusters (GET /api/clusters). The choice comes from ?cluster=, then localStorage, then the
+// server default, and every API call carries ?cluster=<id>.
+const CLUSTER_KEY = "colo-demo.cluster";
+let CLUSTERS = [];
+let CLUSTER = new URLSearchParams(location.search).get("cluster") || null;
+const api = (path) => (CLUSTER ? `${path}${path.includes("?") ? "&" : "?"}cluster=${encodeURIComponent(CLUSTER)}` : path);
+const clusterById = (id) => CLUSTERS.find((c) => c.id === id);
+const isNative = (s) => !!s && s.recipe === "native";
+
 /* ------------------------------------------------------------------ fetch with session detection */
 class AuthError extends Error {}
 async function fetchJSON(path, opts = {}) {
@@ -64,7 +74,7 @@ function toast(msg, err = false) {
 }
 async function act(path, body, label) {
   try {
-    await fetchJSON(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
+    await fetchJSON(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
     toast(label); poll();
   } catch (e) {
     if (e instanceof AuthError) { session.auth = true; renderAlerts(); return; }
@@ -155,7 +165,8 @@ document.addEventListener("keydown", (e) => {
   if (map[e.key]) {
     const btn = document.querySelector(`[data-scenario="${map[e.key]}"]`);
     if (!btn || btn.disabled) return;
-    const where = last && last.mode === "mock" ? "the simulator" : "the live cluster (it can add or remove nodes)";
+    const cl = clusterById(CLUSTER);
+    const where = (last && last.mode === "mock" ? "the simulator" : "the live cluster (it can add or remove nodes)") + (cl ? ` · ${cl.label}` : "");
     if (window.confirm(`Start scenario ${e.key}: ${btn.querySelector("b").textContent}?\nThis changes ${where}.`)) startScenario(map[e.key]);
   }
 });
@@ -166,16 +177,38 @@ function syncControls(s) {
   if (!fresh("rate") && s.loadgen && s.loadgen.target_rps !== undefined) { $("rate").value = Math.round(s.loadgen.target_rps); $("rate-out").textContent = Math.round(s.loadgen.target_rps); }
   if (!fresh("demand") && c.demand) SVCS.forEach((sv) => { if (c.demand[sv] !== undefined) { $(`d-${sv}`).value = c.demand[sv]; $(`d-${sv}-out`).textContent = c.demand[sv]; } });
   if (!fresh("demand")) markPresets(demandValues());
-  if (!fresh("guard") && c.guard_enabled !== undefined && c.guard_enabled !== null) $("guard").checked = !!c.guard_enabled;
-  $("guard-label").textContent = c.guard_enabled ? "On" : "Off";
-  $("guard-sub").textContent = c.guard_enabled
-    ? (c.threshold_ms ? `moves analytics off G4 above ${num(c.threshold_ms)} ms` : "moves analytics off G4 when TTFT rises")
-    : "off: nothing is moved";
-  $("baseline-info").textContent = c.baseline_ttft_p99_ms ? `baseline ${num(c.baseline_ttft_p99_ms)} ms · threshold ${num(c.threshold_ms)} ms` : "no baseline yet";
+  if (isNative(s)) {
+    $("baseline-info").textContent = "no guard on this cluster";
+  } else {
+    if (!fresh("guard") && c.guard_enabled !== undefined && c.guard_enabled !== null) $("guard").checked = !!c.guard_enabled;
+    $("guard-label").textContent = c.guard_enabled ? "On" : "Off";
+    $("guard-sub").textContent = c.guard_enabled
+      ? (c.threshold_ms ? `moves analytics off G4 above ${num(c.threshold_ms)} ms` : "moves analytics off G4 when TTFT rises")
+      : "off: nothing is moved";
+    $("baseline-info").textContent = c.baseline_ttft_p99_ms ? `baseline ${num(c.baseline_ttft_p99_ms)} ms · threshold ${num(c.threshold_ms)} ms` : "no baseline yet";
+  }
   const running = s.scenario && s.scenario.status === "running";
   $("manual-fields").disabled = running;
   $("manual-lock").hidden = !running;
 }
+
+// Which control plane runs this cluster, and what it does not have (native: no guard, no scenario 4).
+function renderControl(s) {
+  const ctl = s.control || {}, native = isNative(s);
+  document.body.classList.toggle("recipe-native", native);
+  $("ctl-chip").hidden = !ctl.label;
+  $("ctl-label").textContent = ctl.label || "";
+  const hp = ctl.hpas || {};
+  $("ctl-chip").title = [ctl.detail, ...Object.entries(hp).map(([sv, h]) => `${h.name}: colo_overflow_needed ${num(h.metric)} → ${num(h.desired)} replicas (min ${h.min})`),
+    native ? `${ctl.eligible_g4 ?? 0} G4 node(s) eligible (running a Ready vLLM pod) · ${ctl.backfill_waiting ?? 0} backfill pod(s) waiting` : ""].filter(Boolean).join("\n");
+  $("guard-row").hidden = native;
+  $("guard-na").hidden = !native;
+  if (ctl.guard_reason) $("guard-na").textContent = `Not used here: ${ctl.guard_reason}.`;
+  $("btn-baseline").disabled = native;
+  $("btn-baseline").title = native ? `No baseline on this cluster: ${ctl.guard_reason || "no latency guard"}.` : "Records the current TTFT p99 as the guard's reference. Do this at steady load with no memory-heavy pods.";
+  $("zh-n").textContent = native ? "on N4D · overflow HPA" : "on N4D";
+}
+const unavailable = (name) => ((last && last.demo && last.demo.scenarios_unavailable) || {})[name];
 
 function svcTotals(s) {
   const out = {};
@@ -187,7 +220,7 @@ function svcTotals(s) {
 }
 function renderRail(s) {
   const t = svcTotals(s);
-  for (const sv of SVCS) $(`spill-${sv}`).innerHTML = t[sv].of ? `<b>${t[sv].of}</b> spill to N4D` : "";
+  for (const sv of SVCS) $(`spill-${sv}`).innerHTML = t[sv].of ? (isNative(s) ? `<b>${t[sv].of}</b> on N4D` : `<b>${t[sv].of}</b> spill to N4D`) : "";
 }
 
 // Secondary numbers live in the "Presets, scenarios, numbers" expander, not on the main view.
@@ -200,10 +233,14 @@ function renderNumbers(s) {
   const rows = [
     ["TTFT p50", lg.ttft_p50_ms != null ? `${num(lg.ttft_p50_ms)} ms` : "–"],
     ["End-to-end p50", lg.e2e_p50_ms != null ? `${num(lg.e2e_p50_ms)} ms` : "–"],
-    ["Guard baseline · threshold", c.baseline_ttft_p99_ms ? `${num(c.baseline_ttft_p99_ms)} · ${num(c.threshold_ms)} ms` : "no baseline"],
+    isNative(s)
+      ? ["Overflow HPA metric → replicas", Object.entries((s.control || {}).hpas || {}).map(([sv, h]) => `${sv[0].toUpperCase()} ${num(h.metric)}→${num(h.desired)}`).join(" · ") || "–"]
+      : ["Guard baseline · threshold", c.baseline_ttft_p99_ms ? `${num(c.baseline_ttft_p99_ms)} · ${num(c.threshold_ms)} ms` : "no baseline"],
     ["vLLM replicas ready / desired", `${num(v.ready)} / ${num(v.desired)}${hpa.min !== undefined ? ` (HPA ${hpa.min}–${hpa.max})` : ""}`],
     ["Nodes G4 · N4D", `${cn.g4 || 0} · ${cn.n4d || 0}`],
-    ["CPU pods on G4 · N4D", `${bf} · ${of}${want > bf + of ? ` (${want - bf - of} pending)` : ""}`],
+    isNative(s)
+      ? ["CPU pods on G4 · N4D", `${bf} · ${of}${(s.control || {}).backfill_waiting ? ` (${s.control.backfill_waiting} waiting → N4D)` : ""}`]
+      : ["CPU pods on G4 · N4D", `${bf} · ${of}${want > bf + of ? ` (${want - bf - of} pending)` : ""}`],
     ["G4 slots used", slots ? `${bf} of ${slots}` : "–"],
     ["Fleet cost", `${money((s.cost || {}).per_hour)}/hr`],
   ];
@@ -466,7 +503,7 @@ const lanes = {};
 (function initLanes() {
   const host = $("lanes");
   for (const sv of SVCS) {
-    host.insertAdjacentHTML("beforeend", `<span class="lane-n a-${sv}"><i class="dotc" aria-hidden="true"></i>${sv}</span><div class="zone g" id="zg-${sv}" aria-label="${sv} on G4"></div><div class="zone n" id="zn-${sv}" aria-label="${sv} on N4D"></div>`);
+    host.insertAdjacentHTML("beforeend", `<span class="lane-n a-${sv}"><i class="dotc" aria-hidden="true"></i>${sv}</span><div class="zone g" id="zg-${sv}" aria-label="${sv} on G4"><span class="wait" id="zw-${sv}" hidden></span></div><div class="zone n" id="zn-${sv}" aria-label="${sv} on N4D"><span class="hpa-tag" id="zt-${sv}" hidden></span></div>`);
     lanes[sv] = [];
   }
 })();
@@ -484,7 +521,10 @@ function renderLanes(s) {
       const item = { short, ready: p.ready !== false, name: p.name, tier: p.tier };
       if (p.tier === "overflow" || n.role === "n4d") nn.push(item); else g.push(item);
     }
-    const pg = Math.max(0, (svc.backfill.desired || 0) - g.length), pn = Math.max(0, (svc.overflow.desired || 0) - nn.length);
+    const native = isNative(s);
+    // Native: backfill pods with no G4 slot wait Pending by design (the overflow HPA covers them), so they are a
+    // calm note, not amber "pending" chips.
+    const pg = native ? 0 : Math.max(0, (svc.backfill.desired || 0) - g.length), pn = Math.max(0, (svc.overflow.desired || 0) - nn.length);
     const slotsList = [...g.map((x) => ["g", x]), ...Array(pg).fill(["g", null]), ...nn.map((x) => ["n", x]), ...Array(pn).fill(["n", null])];
     gTot += g.length; nTot += nn.length; pend += pg + pn;
     const L = lanes[sv];
@@ -497,6 +537,19 @@ function renderLanes(s) {
       c.title = p ? `${p.name} · ${p.tier || "pod"} on ${p.short}${p.ready ? "" : " · starting"}` : "pending: waiting for a node";
       (z === "g" ? zg : zn).appendChild(c);
     });
+    const w = $(`zw-${sv}`), tg = $(`zt-${sv}`);
+    const waiting = native ? (svc.backfill.waiting || 0) : 0, hpa = native ? svc.overflow.hpa : null;
+    if (native && SVC_CLASS[sv] === "memory-heavy") {
+      w.hidden = false; w.textContent = "kept off G4 · admission policy";
+      w.title = "Memory-heavy services never backfill on this cluster: a ValidatingAdmissionPolicy bans them from G4, so analytics-overflow holds the whole demand.";
+    } else {
+      w.hidden = !waiting;
+      w.textContent = `+${waiting} waiting → N4D`;
+      w.title = `${waiting} ${sv}-backfill pod${waiting === 1 ? "" : "s"} found no free G4 slot next to vLLM and wait Pending at priority -100 (by design: the autoscaler ignores them). The ${sv}-overflow HPA runs the same number on N4D.`;
+    }
+    tg.hidden = !hpa;
+    if (hpa) { tg.textContent = `HPA ${num(hpa.metric)}→${num(hpa.desired)}`; tg.title = `${hpa.name}: colo_overflow_needed = ${num(hpa.metric)} → ${num(hpa.desired)} replicas (min ${hpa.min}, max ${hpa.max})`; }
+    zg.appendChild(w); zn.appendChild(tg);
   }
   first.forEach((r, c) => {
     if (!c.isConnected) return;
@@ -510,8 +563,12 @@ function renderScenario(sc) {
   if (!sc) return;
   const running = sc.status === "running";
   document.querySelectorAll("[data-scenario]").forEach((b) => {
+    const na = unavailable(b.dataset.scenario);
     b.classList.toggle("active", sc.name === b.dataset.scenario && running);
-    b.disabled = running;
+    b.classList.toggle("na", !!na);
+    b.disabled = running || !!na;
+    if (!b.dataset.title) b.dataset.title = b.title;
+    b.title = na || b.dataset.title;
   });
   const log = $("scen-log");
   log.innerHTML = (sc.log || []).map((e) => `<li class="${esc(e.level)}"><span class="t">+${Math.round(e.elapsed_s)}s</span><span>${esc(e.msg)}</span></li>`).join("") || `<li class="empty">No scenario run yet.</li>`;
@@ -563,8 +620,11 @@ function renderMethod(s) {
     `<b>Reclaimed</b>: CPU requests of Running backfill pods on Ready G4 nodes. <b>Spare</b>: G4 allocatable minus vLLM and system-pod requests.`,
     `<b>Core map</b>: one tile per vCPU from the node agent; columns are the 8 physical cores of an L3 domain, rows the two hyperthreads. Fill height is the CPU's busy %. Grey tiles are the kubelet reserve plus daemonset requests.`,
     `<b>Prices</b> are list unit prices set in the demo config (DEMO_PRICE_*), not a quote.`,
+    isNative(s)
+      ? `<b>Control on this cluster</b>: no controller. <i>svc</i>-backfill replicas = demand; a backfill pod binds only next to a vLLM pod (podAffinity), so a G4 node is eligible iff it runs a Ready vLLM pod. Pods with no slot wait Pending at priority -100, and the <i>svc</i>-overflow HPA (metric colo_overflow_needed, min 1) runs them on N4D. Analytics never backfills (admission policy).`
+      : `<b>Control on this cluster</b>: colo-controller splits demand into G4 backfill and N4D overflow every 2 s and runs the TTFT guard.`,
   ].map((x) => `<li>${x}</li>`).join("");
-  $("cluster").textContent = `${s.cluster.name} · ${s.cluster.region} · ${s.cluster.project}`;
+  $("cluster").textContent = `${s.cluster.label ? s.cluster.label + " · " : ""}${s.cluster.name} · ${s.cluster.region} · ${s.cluster.project}`;
 }
 
 /* ------------------------------------------------------------------ charts (optional) */
@@ -634,16 +694,19 @@ function renderCharts() {
 
 /* ------------------------------------------------------------------ poll loop */
 let inflight = false;
+let repoll = false;
 async function poll() {
-  if (inflight) return;
+  if (inflight) { repoll = true; return; }
   inflight = true;
+  const cid = CLUSTER;
   try {
-    const s = await fetchJSON("/api/state");
+    const s = await fetchJSON(api("/api/state"));
+    if (cid !== CLUSTER) return; // the presenter switched clusters while this request was in flight
     last = s; lastGoodAt = Date.now();
     session = { auth: false, net: null, server: null };
     $("accel").hidden = !(s.demo && s.demo.accelerator_active);
     const parts = [
-      ["story", renderStory], ["controls", syncControls], ["rail", renderRail], ["numbers", renderNumbers], ["evictions", trackEvictions],
+      ["control", renderControl], ["story", renderStory], ["controls", syncControls], ["rail", renderRail], ["numbers", renderNumbers], ["evictions", trackEvictions],
       ["nodes", renderNodes], ["lanes", renderLanes], ["scenario", () => renderScenario(s.scenario)], ["events", renderEvents], ["method", renderMethod],
       ["history", (x) => { pushHistory(x); renderSparks(); renderCharts(); }],
     ];
@@ -651,16 +714,66 @@ async function poll() {
       try { fn(s); } catch (e) { console.error(`render ${name} failed`, e); } // one bad panel never blanks the page
     }
   } catch (e) {
-    if (e instanceof AuthError) session.auth = true;
-    else if (e.net) session.net = e.message;
-    else session.server = e.message;
+    if (cid === CLUSTER) {
+      if (e instanceof AuthError) session.auth = true;
+      else if (e.net) session.net = e.message;
+      else session.server = e.message;
+    }
   } finally {
     inflight = false;
     renderConn(); renderAlerts();
+    if (repoll || cid !== CLUSTER) { repoll = false; poll(); }
   }
+}
+
+/* ------------------------------------------------------------------ cluster selector */
+function renderClusterSeg() {
+  const seg = $("cluster-seg");
+  seg.hidden = CLUSTERS.length < 2;
+  seg.innerHTML = CLUSTERS.map((c) => `<button type="button" role="radio" data-cluster="${esc(c.id)}" aria-checked="${c.id === CLUSTER}" ` +
+    `title="${esc(`${c.name} · control: ${c.control}`)}">${esc(c.label)}</button>`).join("");
+  seg.querySelectorAll("[data-cluster]").forEach((b) => b.addEventListener("click", () => switchCluster(b.dataset.cluster)));
+  seg.onkeydown = (e) => { // arrow keys move between the radios
+    if (!["ArrowLeft", "ArrowRight"].includes(e.key) || CLUSTERS.length < 2) return;
+    const i = CLUSTERS.findIndex((c) => c.id === CLUSTER), n = CLUSTERS.length;
+    const next = CLUSTERS[(i + (e.key === "ArrowRight" ? 1 : n - 1)) % n];
+    switchCluster(next.id); seg.querySelector(`[data-cluster="${next.id}"]`)?.focus(); e.preventDefault();
+  };
+}
+function resetView() {
+  // Everything drawn so far belongs to the other cluster.
+  history.length = 0; last = null; lastGoodAt = 0; session = { auth: false, net: null, server: null };
+  for (const k of Object.keys(touched)) delete touched[k];
+  for (const k of Object.keys(evictedUntil)) delete evictedUntil[k];
+  seenEvents.clear(); firstEvents = true; dismissedScenario = null; alertsKey = ""; connKey = "";
+  nodeEls.clear(); $("nodes").innerHTML = "";
+  for (const sv of SVCS) { lanes[sv].forEach((c) => c.remove()); lanes[sv] = []; }
+  $("scen-banner").hidden = true;
+  renderSparks(); renderCharts();
+}
+function switchCluster(id, push = true) {
+  if (!clusterById(id) || id === CLUSTER) return;
+  CLUSTER = id;
+  try { localStorage.setItem(CLUSTER_KEY, id); } catch (e) { /* private mode */ }
+  if (push) { const u = new URL(location.href); u.searchParams.set("cluster", id); window.history.replaceState(null, "", u); }
+  renderClusterSeg(); resetView(); renderConn(); poll();
+}
+async function initClusters() {
+  try {
+    const j = await fetchJSON("/api/clusters");
+    CLUSTERS = j.clusters || [];
+    let saved = null;
+    try { saved = localStorage.getItem(CLUSTER_KEY); } catch (e) { /* private mode */ }
+    if (!clusterById(CLUSTER)) CLUSTER = clusterById(saved) ? saved : j.default;
+    try { localStorage.setItem(CLUSTER_KEY, CLUSTER); } catch (e) { /* private mode */ }
+    const u = new URL(location.href);
+    if (CLUSTERS.length > 1 && u.searchParams.get("cluster") !== CLUSTER) { u.searchParams.set("cluster", CLUSTER); window.history.replaceState(null, "", u); }
+  } catch (e) {
+    CLUSTER = null; // old server or auth trouble: poll() reports it; the API default cluster is used
+  }
+  renderClusterSeg();
 }
 
 initCharts();
 document.querySelectorAll("details").forEach((d) => d.addEventListener("toggle", () => { if (last) renderCharts(); }));
-poll();
-setInterval(poll, POLL_MS);
+initClusters().then(() => { poll(); setInterval(poll, POLL_MS); });

@@ -1,0 +1,88 @@
+# kube-state-metrics (upstream, SIG Instrumentation) limited to the pod facts the overflow rule needs:
+# which backfill pods exist, which node they are on, and whether they and the vLLM pods are Ready.
+# Scraped every 5 s by Managed Prometheus; base/rules.yaml turns it into colo_overflow_needed.
+# Upstream KSM rather than GKE's managed package so the recipe controls the metric set and the 5 s scrape interval.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: colo-ksm, namespace: colo-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: colo-ksm, namespace: colo-svc}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: colo-ksm, namespace: colo-svc}
+subjects: [{kind: ServiceAccount, name: colo-ksm, namespace: colo-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: colo-ksm}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: colo-ksm, namespace: inference}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: colo-ksm, namespace: inference}
+subjects: [{kind: ServiceAccount, name: colo-ksm, namespace: colo-system}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: colo-ksm}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: colo-ksm, namespace: colo-system, labels: {app: colo-ksm}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: colo-ksm}}
+  template:
+    metadata: {labels: {app: colo-ksm}}
+    spec:
+      serviceAccountName: colo-ksm
+      priorityClassName: system-cluster-critical
+      containers:
+      - name: kube-state-metrics
+        image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
+        args:
+        - --resources=pods
+        - --namespaces=colo-svc,inference
+        - --metric-allowlist=kube_pod_info,kube_pod_status_ready,kube_pod_status_phase,kube_pod_deletion_timestamp
+        - --port=8080
+        - --telemetry-port=8081
+        ports:
+        - {name: http-metrics, containerPort: 8080}
+        - {name: telemetry, containerPort: 8081}
+        readinessProbe: {httpGet: {path: /readyz, port: 8081}, periodSeconds: 5}
+        livenessProbe: {httpGet: {path: /livez, port: 8081}, periodSeconds: 10}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {memory: 256Mi}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}
+---
+# GKE admits system-cluster-critical outside kube-system only with a matching ResourceQuota.
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: colo-critical-pods, namespace: colo-system}
+spec:
+  hard: {pods: "4"}
+  scopeSelector:
+    matchExpressions:
+    - {operator: In, scopeName: PriorityClass, values: [system-cluster-critical]}
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: colo-ksm, namespace: colo-system}
+spec:
+  selector: {matchLabels: {app: colo-ksm}}
+  endpoints: [{port: http-metrics, path: /metrics, interval: 5s}]

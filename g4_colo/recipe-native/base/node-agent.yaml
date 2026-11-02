@@ -1,0 +1,44 @@
+# Demo telemetry only (not in the control path): read-only per-node exporter of the kubelet CPU-manager state and
+# per-CPU utilisation for the demo's node map. production-template removes it.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: colo-node-agent, namespace: colo-system}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: colo-node-agent, namespace: colo-system, labels: {app: colo-node-agent}}
+spec:
+  selector: {matchLabels: {app: colo-node-agent}}
+  template:
+    metadata: {labels: {app: colo-node-agent}}
+    spec:
+      serviceAccountName: colo-node-agent
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions: [{key: colo.role, operator: In, values: [g4, n4d]}]
+      # Only the colo node taints. Not a keyless `operator: Exists`: that also tolerates the Cluster Autoscaler's
+      # ToBeDeletedByClusterAutoscaler taint, so agent pods were scheduled onto N4D nodes CA was already deleting
+      # and showed as Running but unreachable until the Node object went away (wave-2 live finding).
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Exists, effect: NoSchedule}
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      - {key: sandbox.gke.io/runtime, operator: Exists, effect: NoSchedule}
+      containers:
+      - name: agent
+        image: colo-registry.invalid/colo-node-agent:v0.2.4
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: NODE_NAME
+          valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+        ports: [{name: http, containerPort: 8080}]
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {memory: 128Mi}
+        volumeMounts:
+        - {name: kubelet, mountPath: /host/var/lib/kubelet, readOnly: true}
+        - {name: proc, mountPath: /host/proc, readOnly: true}
+      volumes:
+      - {name: kubelet, hostPath: {path: /var/lib/kubelet}}
+      - {name: proc, hostPath: {path: /proc}}
