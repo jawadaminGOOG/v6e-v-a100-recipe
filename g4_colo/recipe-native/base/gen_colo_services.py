@@ -11,6 +11,7 @@ How the split works without a controller:
     Ready next to a Ready vLLM pod (base/rules.yaml). Pending or stranded backfill becomes N4D capacity.
   * memory-heavy services never backfill (guardrails.yaml bans them from G4), so they get one N4D Deployment.
 """
+import argparse
 from pathlib import Path
 
 REG = "colo-registry.invalid"
@@ -123,20 +124,18 @@ kind: HorizontalPodAutoscaler
 metadata: {{name: {name}-overflow, namespace: colo-svc, labels: {{app: {name}, colo.tier: overflow}}}}
 spec:
   scaleTargetRef: {{apiVersion: apps/v1, kind: Deployment, name: {name}-overflow}}
-  # HPA cannot scale to 0 on GKE (HPAScaleToZero is alpha), so one overflow pod always runs on N4D.
-  minReplicas: 1
+  # 0: no overflow pod runs while every backfill pod fits on G4 (HPA scale to zero: GKE >= 1.37). On older GKE set 1
+  # in your overlay; then one pod per service always runs on N4D.
+  minReplicas: 0
   maxReplicas: {OVERFLOW_MAX}
   metrics:
   - type: External
     external:
-      # Recorded by ClusterRules/colo-split (base/rules.yaml): backfill pods of this service that are not Ready
-      # next to a Ready vLLM pod. AverageValue 1 => one overflow pod per missing backfill pod.
+      # AutoscalingMetric colo-overflow (overlays/*/autoscaling-metric.yaml, generated per cluster): backfill pods
+      # of this service that are not Ready next to a Ready vLLM pod. AverageValue 1 => one overflow pod per missing
+      # backfill pod.
       metric:
-        name: prometheus.googleapis.com|colo_overflow_needed|gauge
-        selector:
-          matchLabels:
-            metric.labels.service: {name}
-            resource.labels.cluster: your-cluster-name   # PLACEHOLDER: overlays set clusterName
+        name: autoscaling.gke.io|colo-overflow|overflow-needed-{name}
       target: {{type: AverageValue, averageValue: "1"}}
   behavior:
     # tolerance 0 (HPA configurable tolerance, beta and on by default in Kubernetes 1.35): the metric is an exact
@@ -172,16 +171,27 @@ FRESH_S = 3 * KSM_SCRAPE_S
 RULE_INTERVAL = "5s"
 
 
-def rules():
+def exprs(cluster=None, service=None):
+    """PromQL for desired / effective / needed backfill.
+
+    service=None: per-service vectors (`by (service)`), for the ClusterRules (the rule evaluator scopes them to
+    its own cluster). service set: one label-less series for that service, for an AutoscalingMetric; `cluster`
+    then scopes every selector, because those queries run project-wide.
+    """
+    c = f',cluster="{cluster}"' if cluster else ""
+    pod_re = f"{service}-backfill-.+" if service else ".+-backfill-.+"
+    dep = f'deployment="{service}-backfill"' if service else 'deployment=~".+-backfill"'
+    by = "" if service else "by (service) "
     # KSM is scraped from colo-system, so Managed Prometheus keeps its own target labels and renames the
     # conflicting KSM labels: the subject pod is exported_pod / exported_namespace. node is not a target label.
-    info_bf = fresh('kube_pod_info{exported_namespace="colo-svc",exported_pod=~".+-backfill-.+"}')
-    ready_bf = fresh('kube_pod_status_ready{exported_namespace="colo-svc",condition="true"}') + " == 1"
-    deleting = fresh('kube_pod_deletion_timestamp{exported_namespace="colo-svc"}')
-    info_vllm = fresh('kube_pod_info{exported_namespace="inference",exported_pod=~"vllm-.+"}')
-    ready_vllm = fresh('kube_pod_status_ready{exported_namespace="inference",condition="true"}') + " == 1"
-    deleting_vllm = fresh('kube_pod_deletion_timestamp{exported_namespace="inference"}')
-    svc = lambda e: f'label_replace({e}, "service", "$1", "exported_pod", "(.+)-backfill-.+")'  # noqa: E731
+    info_bf = fresh(f'kube_pod_info{{exported_namespace="colo-svc",exported_pod=~"{pod_re}"{c}}}')
+    ready_bf = fresh(f'kube_pod_status_ready{{exported_namespace="colo-svc",condition="true"{c}}}') + " == 1"
+    deleting = fresh(f'kube_pod_deletion_timestamp{{exported_namespace="colo-svc"{c}}}')
+    info_vllm = fresh(f'kube_pod_info{{exported_namespace="inference",exported_pod=~"vllm-.+"{c}}}')
+    ready_vllm = fresh(f'kube_pod_status_ready{{exported_namespace="inference",condition="true"{c}}}') + " == 1"
+    deleting_vllm = fresh(f'kube_pod_deletion_timestamp{{exported_namespace="inference"{c}}}')
+    svc = ((lambda e: e) if service else  # noqa: E731
+           (lambda e: f'label_replace({e}, "service", "$1", "exported_pod", "(.+)-backfill-.+")'))
     on_pod = "on (exported_namespace, exported_pod)"
     # Nodes with a Ready vLLM pod that is not terminating. A vLLM pod being scaled in stays Ready through its 15 s
     # preStop drain; counting it delayed overflow by that long plus FRESH_S (run1 phase b: ~50 s).
@@ -189,18 +199,24 @@ def rules():
                   f"* {on_pod} group_left () ({ready_vllm}))")
     # The service's demand: the backfill Deployment's spec.replicas. One series per Deployment, so pod churn
     # (evictions, Pending replacements) cannot double-count it.
-    desired = ('max by (service) (label_replace(' +
-               fresh('kube_deployment_spec_replicas{exported_namespace="colo-svc",deployment=~".+-backfill"}') +
-               ', "service", "$1", "deployment", "(.+)-backfill"))')
+    dep_sel = fresh(f'kube_deployment_spec_replicas{{exported_namespace="colo-svc",{dep}{c}}}')
+    desired = (f"max (({dep_sel}))" if service else
+               f'max by (service) (label_replace({dep_sel}, "service", "$1", "deployment", "(.+)-backfill"))')
     # Backfill pods Ready on a node that runs a Ready, non-terminating vLLM pod.
-    effective = (f"count by (service) ({svc(f'({info_bf} * {on_pod} group_left () ({ready_bf})) '
+    effective = (f"count {by}({svc(f'({info_bf} * {on_pod} group_left () ({ready_bf})) '
                  f'* on (node) group_left () {vllm_nodes} unless {on_pod} {deleting}')})")
-    # No `or 0` fallback: if kube-state-metrics or the rule stops, the series disappears and every overflow HPA
-    # keeps its current size (HPA holds on a missing metric) instead of collapsing overflow to 1.
+    # No `or 0` fallback: if kube-state-metrics stops, the series disappears and every overflow HPA keeps its
+    # current size (HPA holds on a missing metric) instead of collapsing overflow.
     needed = f"clamp_min(({desired}) - (({effective}) or ({desired}) * 0), 0)"
-    effective_or0 = f"({effective}) or ({desired}) * 0"
-    return f"""# GENERATED by gen_colo_services.py - the native recipe's whole "controller": three PromQL recording rules,
-# evaluated every {RULE_INTERVAL} by Managed Prometheus' rule evaluator, read by the overflow HPAs.
+    return desired, f"({effective}) or ({desired}) * 0", needed
+
+
+def rules():
+    desired, effective_or0, needed = exprs()
+    return f"""# GENERATED by gen_colo_services.py - observability copy of the split, as recording rules evaluated every
+# {RULE_INTERVAL} by Managed Prometheus' rule evaluator (dashboards, demo, tests/lag_probe.py). The overflow HPAs do not
+# read these: they read the same PromQL directly through GKE's AutoscalingMetric (one hop less), see
+# autoscaling_metric() and overlays/*/autoscaling-metric.yaml.
 #   colo_backfill_desired{{service}}   <svc>-backfill spec.replicas (= the service's demand)
 #   colo_backfill_effective{{service}} backfill pods Ready on a node that runs a Ready, non-terminating vLLM pod
 #   colo_overflow_needed{{service}}    desired - effective: Pending backfill, or backfill stranded on a G4 node
@@ -225,7 +241,55 @@ spec:
 """
 
 
+def autoscaling_metric(cluster):
+    """GKE AutoscalingMetric (autoscaling.gke.io/v1beta1, GKE >= 1.36.2, Preview): one External metric per service,
+    `autoscaling.gke.io|colo-overflow|overflow-needed-<svc>`, evaluated by GKE's managed metrics adapter straight
+    from the raw kube-state-metrics series (no recording-rule stage, no custom-metrics-stackdriver-adapter)."""
+    items = []
+    for s in SERVICES:
+        if s[2] == "memory-heavy":
+            continue
+        _, _, needed = exprs(cluster=cluster, service=s[0])
+        items.append(f"""  - promql:
+      name: overflow-needed-{s[0]}
+      type: External
+      query: |-
+        {needed}""")
+    body = "\n".join(items)
+    return f"""# GENERATED by base/gen_colo_services.py --cluster {cluster} - do not edit; re-run the generator instead.
+# Metric sources for the HPAs, served by GKE's managed autoscaling-metrics-adapter (kube-system). Queries run
+# project-wide, so every selector is scoped to cluster={cluster}.
+apiVersion: autoscaling.gke.io/v1beta1
+kind: AutoscalingMetric
+metadata: {{name: colo-overflow, namespace: colo-svc}}
+spec:
+  metrics:
+{body}
+---
+# vLLM HPA (patched in base/kustomization.yaml): completed requests per second per vLLM pod, the same signal recipe/
+# reads through custom-metrics-stackdriver-adapter (prometheus.googleapis.com|vllm:request_success_total|counter).
+apiVersion: autoscaling.gke.io/v1beta1
+kind: AutoscalingMetric
+metadata: {{name: vllm, namespace: inference}}
+spec:
+  metrics:
+  - promql:
+      name: request-rate
+      type: Pods
+      query: |-
+        sum by (pod, namespace, cluster, location, project_id) (rate(vllm:request_success_total{{namespace="inference",cluster="{cluster}"}}[1m]))
+"""
+
+
 def main():
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--cluster", help="also write the AutoscalingMetric for this GKE cluster name")
+    ap.add_argument("--out", help="directory for autoscaling-metric.yaml (with --cluster)")
+    args = ap.parse_args()
+    if args.cluster:
+        out = Path(args.out or ".") / "autoscaling-metric.yaml"
+        out.write_text(autoscaling_metric(args.cluster))
+        print(f"wrote {out}")
     Path(__file__).with_name("rules.yaml").write_text(rules())
     docs = ["# GENERATED by gen_colo_services.py - CPU services (backfill on G4, overflow on N4D), overflow HPAs, "
             "warm buffer."]

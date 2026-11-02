@@ -3,13 +3,15 @@
 # overlays/<name>/settings.yaml).
 #
 # Control path = stock GKE only: kube-scheduler (podAffinity, priorities), Cluster Autoscaler (ComputeClasses),
-# HPA (overflow), Managed Prometheus rule evaluator (rules.yaml), ValidatingAdmissionPolicy (guardrails.yaml).
+# HPA (overflow, metrics from GKE's managed autoscaling-metrics-adapter via AutoscalingMetric PromQL, generated per
+# cluster into overlays/*/autoscaling-metric.yaml), ValidatingAdmissionPolicy (guardrails.yaml).
+# Requires GKE >= 1.37 (HPA scale to zero; AutoscalingMetric PromQL needs >= 1.36.2). No custom-metrics-stackdriver-
+# adapter: it would own the external.metrics.k8s.io APIService and hide GKE's managed adapter.
 # No colo-controller. scripts/check_no_custom_code.py enforces that.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - cluster.yaml
-- custom-metrics-adapter.yaml
 - vllm.yaml
 - loadgen.yaml
 - ksm.yaml
@@ -18,3 +20,12 @@ resources:
 - guardrails.yaml
 - g4-reserve.yaml
 - node-agent.yaml
+patches:
+# vLLM HPA: same signal and target as recipe/ (completed requests/s per pod, 700), read through GKE's managed
+# adapter (AutoscalingMetric vllm/request-rate in overlays/*/autoscaling-metric.yaml) instead of the Stackdriver
+# adapter. vllm.yaml itself stays byte-identical to recipe/ (scripts/check_sync.py).
+- target: {kind: HorizontalPodAutoscaler, name: vllm, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/metrics/0/pods/metric/name
+      value: autoscaling.gke.io|vllm|request-rate

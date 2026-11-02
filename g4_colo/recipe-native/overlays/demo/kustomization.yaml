@@ -7,6 +7,8 @@ kind: Kustomization
 resources:
 - ../../base
 - settings.yaml
+# Overflow HPA metric source for this cluster: python3 base/gen_colo_services.py --cluster <name> --out overlays/demo
+- autoscaling-metric.yaml
 components:
 - ../../../recipe/components/vllm-gcs-cache
 images:
@@ -23,10 +25,6 @@ images:
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai
   newTag: v0.32.0
 replacements:
-- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.clusterName}
-  targets:
-  - select: {kind: HorizontalPodAutoscaler, namespace: colo-svc, labelSelector: colo.tier=overflow}
-    fieldPaths: ['spec.metrics.0.external.metric.selector.matchLabels.[resource.labels.cluster]']
 - source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4NodePool}
   targets:
   - select: {kind: ComputeClass, name: g4-gpu}

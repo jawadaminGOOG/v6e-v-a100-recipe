@@ -299,7 +299,12 @@ class LiveBackend:
                 if m.pods and m.pods.current:
                     metric = m.pods.current.average_value
                 elif m.external and m.external.current:
-                    metric = m.external.current.average_value or m.external.current.value
+                    # A Deployment scaled to zero has no pods to average over: Kubernetes then reports
+                    # averageValue as the int64 minimum and only `value` (the raw metric) is meaningful.
+                    av = m.external.current.average_value
+                    if av is not None and str(av).startswith("-"):
+                        av = None
+                    metric = av or m.external.current.value
             out.append(
                 {
                     "name": h.metadata.name,

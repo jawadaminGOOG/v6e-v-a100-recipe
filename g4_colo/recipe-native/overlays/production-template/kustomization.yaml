@@ -13,6 +13,8 @@ kind: Kustomization
 resources:
 - ../../base
 - settings.yaml
+# Overflow HPA metric source for this cluster: python3 base/gen_colo_services.py --cluster <name> --out overlays/production-template
+- autoscaling-metric.yaml
 - demand-hpa.yaml
 images:
 - name: colo-registry.invalid/colo-worker
@@ -80,10 +82,6 @@ patches:
             matchExpressions: [{key: kubernetes.io/metadata.name, operator: In, values: [set-from-settings]}]
         ports: [{protocol: TCP, port: 8000}]
 replacements:
-- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.clusterName}
-  targets:
-  - select: {kind: HorizontalPodAutoscaler, namespace: colo-svc, labelSelector: colo.tier=overflow}
-    fieldPaths: ['spec.metrics.0.external.metric.selector.matchLabels.[resource.labels.cluster]']
 - source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4ReservationPool}
   targets:
   - select: {kind: ComputeClass, name: g4-gpu}

@@ -103,20 +103,18 @@ kind: HorizontalPodAutoscaler
 metadata: {name: sandbox-overflow, namespace: colo-svc, labels: {app: sandbox, colo.tier: overflow}}
 spec:
   scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: sandbox-overflow}
-  # HPA cannot scale to 0 on GKE (HPAScaleToZero is alpha), so one overflow pod always runs on N4D.
-  minReplicas: 1
+  # 0: no overflow pod runs while every backfill pod fits on G4 (HPA scale to zero: GKE >= 1.37). On older GKE set 1
+  # in your overlay; then one pod per service always runs on N4D.
+  minReplicas: 0
   maxReplicas: 60
   metrics:
   - type: External
     external:
-      # Recorded by ClusterRules/colo-split (base/rules.yaml): backfill pods of this service that are not Ready
-      # next to a Ready vLLM pod. AverageValue 1 => one overflow pod per missing backfill pod.
+      # AutoscalingMetric colo-overflow (overlays/*/autoscaling-metric.yaml, generated per cluster): backfill pods
+      # of this service that are not Ready next to a Ready vLLM pod. AverageValue 1 => one overflow pod per missing
+      # backfill pod.
       metric:
-        name: prometheus.googleapis.com|colo_overflow_needed|gauge
-        selector:
-          matchLabels:
-            metric.labels.service: sandbox
-            resource.labels.cluster: your-cluster-name   # PLACEHOLDER: overlays set clusterName
+        name: autoscaling.gke.io|colo-overflow|overflow-needed-sandbox
       target: {type: AverageValue, averageValue: "1"}
   behavior:
     # tolerance 0 (HPA configurable tolerance, beta and on by default in Kubernetes 1.35): the metric is an exact
@@ -223,20 +221,18 @@ kind: HorizontalPodAutoscaler
 metadata: {name: toolcall-overflow, namespace: colo-svc, labels: {app: toolcall, colo.tier: overflow}}
 spec:
   scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: toolcall-overflow}
-  # HPA cannot scale to 0 on GKE (HPAScaleToZero is alpha), so one overflow pod always runs on N4D.
-  minReplicas: 1
+  # 0: no overflow pod runs while every backfill pod fits on G4 (HPA scale to zero: GKE >= 1.37). On older GKE set 1
+  # in your overlay; then one pod per service always runs on N4D.
+  minReplicas: 0
   maxReplicas: 60
   metrics:
   - type: External
     external:
-      # Recorded by ClusterRules/colo-split (base/rules.yaml): backfill pods of this service that are not Ready
-      # next to a Ready vLLM pod. AverageValue 1 => one overflow pod per missing backfill pod.
+      # AutoscalingMetric colo-overflow (overlays/*/autoscaling-metric.yaml, generated per cluster): backfill pods
+      # of this service that are not Ready next to a Ready vLLM pod. AverageValue 1 => one overflow pod per missing
+      # backfill pod.
       metric:
-        name: prometheus.googleapis.com|colo_overflow_needed|gauge
-        selector:
-          matchLabels:
-            metric.labels.service: toolcall
-            resource.labels.cluster: your-cluster-name   # PLACEHOLDER: overlays set clusterName
+        name: autoscaling.gke.io|colo-overflow|overflow-needed-toolcall
       target: {type: AverageValue, averageValue: "1"}
   behavior:
     # tolerance 0 (HPA configurable tolerance, beta and on by default in Kubernetes 1.35): the metric is an exact

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Node pools for the native (controller-free) G4 colo recipe (GKE Standard). Same pools as recipe/infra. Set the variables, then run once:
+# Node pools for the native (controller-free) G4 colo recipe (GKE Standard >= 1.37). Same pools as recipe/infra. Set the variables, then run once:
 #   PROJECT=my-project CLUSTER=my-cluster REGION=us-central1 SUFFIX=prod \
 #   G4_ZONES=us-central1-a N4D_ZONES=us-central1-a,us-central1-b \
 #     bash g4_colo/recipe-native/infra/create-node-pools.sh
@@ -68,11 +68,11 @@ if [[ "$CREATE_LOADGEN_POOL" == 1 ]]; then
 fi
 
 # Workload Identity (read-only Managed Prometheus access, no service-account keys):
-#   - custom-metrics-stackdriver-adapter: feeds the vLLM HPA and the overflow HPAs (colo_overflow_needed).
-#   - gmp-system/collector: the managed rule evaluator that records colo_overflow_needed (base/rules.yaml) queries
-#     Managed Prometheus as this KSA.
+#   - gmp-system/collector: the managed rule evaluator that records the observability copy of the split
+#     (base/rules.yaml) queries Managed Prometheus as this KSA. The HPAs' metrics come from GKE's managed
+#     autoscaling-metrics-adapter (AutoscalingMetric), which needs no binding here.
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
-for ksa in custom-metrics/custom-metrics-stackdriver-adapter gmp-system/collector; do
+for ksa in gmp-system/collector; do
   gcloud projects add-iam-policy-binding "$PROJECT" --role=roles/monitoring.viewer --condition=None \
     --member="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${PROJECT}.svc.id.goog/subject/ns/${ksa%%/*}/sa/${ksa##*/}"
 done

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 G4 = Path(__file__).resolve().parents[2]
-SHARED = ["base/vllm.yaml", "base/loadgen.yaml", "base/custom-metrics-adapter.yaml", "infra/kubelet-config.yaml"]
+SHARED = ["base/vllm.yaml", "base/loadgen.yaml", "infra/kubelet-config.yaml"]
 
 
 def main() -> int:

@@ -65,7 +65,7 @@ def main():
         of0, _ = kget(f"{SVC}-overflow")
         d = DELTA if i % 2 == 0 else -DELTA
         want_metric = (m0 or 0) + d
-        want_of = max(1, int(want_metric))  # HPA: ceil(metric / 1), floored at minReplicas 1
+        want_of = max(0, int(want_metric))  # HPA: ceil(metric / 1); minReplicas 0 on GKE >= 1.37
         t0 = time.time()
         scale(f"{SVC}-backfill", bf + d)
         r = {"round": i, "delta": d, "metric_before": m0, "overflow_before": of0, "metric_target": want_metric,
