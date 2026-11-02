@@ -383,3 +383,22 @@ def test_adc_backends_isolated_with_token_refresh_hook(monkeypatch, tmp_path):
     a._adc_creds.valid = False
     assert ca.get_api_key_with_prefix("authorization") == "Bearer tokA-2"
     assert cb.get_api_key_with_prefix("authorization").startswith("Bearer tokB")
+
+
+def test_shutdown_restores_hpa_only_if_this_process_forced_it(monkeypatch):
+    """A revision swap or a failed start must not reset an HPA minReplicas another instance set."""
+    calls = []
+    for ctx in demo_app.CTXS.values():
+        async def _restore(c=ctx):
+            calls.append(c.id)
+        monkeypatch.setattr(ctx, "restore_accelerator", _restore)
+        ctx.backend.fast_scale_forced = False
+    with TestClient(demo_app.app):
+        pass
+    assert calls == []
+    first = next(iter(demo_app.CTXS.values()))
+    first.backend.fast_scale_forced = True
+    with TestClient(demo_app.app):
+        pass
+    assert calls == [first.id]
+    first.backend.fast_scale_forced = False

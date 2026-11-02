@@ -150,10 +150,14 @@ async def lifespan(_app: FastAPI):
     yield
     if beat_task:
         beat_task.cancel()
-    # Never leave HPA minReplicas forced to 2 (a G4 node at ~$2/hr) behind a stopped instance.
+    # Never leave HPA minReplicas forced to 2 (a G4 node at ~$2/hr) behind a stopped instance, but only undo what
+    # this process forced: another instance (local server, another Cloud Run revision) may own the current value,
+    # and resetting it on every revision swap or failed start changed live clusters behind the presenter's back.
     for ctx in CTXS.values():
         ctx.runner.cancel()
     for ctx in CTXS.values():
+        if not getattr(ctx.backend, "fast_scale_forced", False):
+            continue
         try:
             await asyncio.wait_for(ctx.restore_accelerator(), timeout=8)
         except Exception:  # noqa: BLE001
