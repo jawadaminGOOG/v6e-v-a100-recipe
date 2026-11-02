@@ -119,14 +119,19 @@ spec:
             resource.labels.cluster: your-cluster-name   # PLACEHOLDER: overlays set clusterName
       target: {type: AverageValue, averageValue: "1"}
   behavior:
+    # tolerance 0 (HPA configurable tolerance, beta and on by default in Kubernetes 1.35): the metric is an exact
+    # pod count, so act on every pod of difference. The default 10 % tolerance ignores e.g. 17 -> 18, and up to
+    # 5 pods at 50 replicas.
     # Up: at once, as fast as the scheduler can place pods.
     scaleUp:
+      tolerance: 0
       stabilizationWindowSeconds: 0
       selectPolicy: Max
       policies: [{type: Percent, value: 100, periodSeconds: 15}, {type: Pods, value: 20, periodSeconds: 15}]
-    # Down: wait 60 s so a backfill pod that just became Ready on a new G4 node stays Ready before N4D shrinks.
+    # Down: wait 30 s so a backfill pod that just became Ready on a new G4 node stays Ready before N4D shrinks.
     scaleDown:
-      stabilizationWindowSeconds: 60
+      tolerance: 0
+      stabilizationWindowSeconds: 30
       policies: [{type: Percent, value: 100, periodSeconds: 15}]
 
 ---
@@ -234,14 +239,19 @@ spec:
             resource.labels.cluster: your-cluster-name   # PLACEHOLDER: overlays set clusterName
       target: {type: AverageValue, averageValue: "1"}
   behavior:
+    # tolerance 0 (HPA configurable tolerance, beta and on by default in Kubernetes 1.35): the metric is an exact
+    # pod count, so act on every pod of difference. The default 10 % tolerance ignores e.g. 17 -> 18, and up to
+    # 5 pods at 50 replicas.
     # Up: at once, as fast as the scheduler can place pods.
     scaleUp:
+      tolerance: 0
       stabilizationWindowSeconds: 0
       selectPolicy: Max
       policies: [{type: Percent, value: 100, periodSeconds: 15}, {type: Pods, value: 20, periodSeconds: 15}]
-    # Down: wait 60 s so a backfill pod that just became Ready on a new G4 node stays Ready before N4D shrinks.
+    # Down: wait 30 s so a backfill pod that just became Ready on a new G4 node stays Ready before N4D shrinks.
     scaleDown:
-      stabilizationWindowSeconds: 60
+      tolerance: 0
+      stabilizationWindowSeconds: 30
       policies: [{type: Percent, value: 100, periodSeconds: 15}]
 
 ---

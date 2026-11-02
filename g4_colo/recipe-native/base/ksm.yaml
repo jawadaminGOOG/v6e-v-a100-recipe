@@ -1,7 +1,8 @@
 # kube-state-metrics (upstream, SIG Instrumentation) limited to the pod facts the overflow rule needs:
 # which backfill pods exist, which node they are on, and whether they and the vLLM pods are Ready.
-# Scraped every 5 s by Managed Prometheus; base/rules.yaml turns it into colo_overflow_needed.
-# Upstream KSM rather than GKE's managed package so the recipe controls the metric set and the 5 s scrape interval.
+# Plus each backfill Deployment's spec.replicas (the demand). Scraped every 5 s (the Managed Prometheus minimum);
+# base/rules.yaml turns it into colo_overflow_needed.
+# Upstream KSM rather than GKE's managed package so the recipe controls the metric set and the scrape interval.
 apiVersion: v1
 kind: ServiceAccount
 metadata: {name: colo-ksm, namespace: colo-system}
@@ -12,6 +13,9 @@ metadata: {name: colo-ksm, namespace: colo-svc}
 rules:
 - apiGroups: [""]
   resources: [pods]
+  verbs: [list, watch]
+- apiGroups: [apps]
+  resources: [deployments]
   verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -26,6 +30,9 @@ metadata: {name: colo-ksm, namespace: inference}
 rules:
 - apiGroups: [""]
   resources: [pods]
+  verbs: [list, watch]
+- apiGroups: [apps]
+  resources: [deployments]
   verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -49,9 +56,9 @@ spec:
       - name: kube-state-metrics
         image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
         args:
-        - --resources=pods
+        - --resources=pods,deployments
         - --namespaces=colo-svc,inference
-        - --metric-allowlist=kube_pod_info,kube_pod_status_ready,kube_pod_status_phase,kube_pod_deletion_timestamp
+        - --metric-allowlist=kube_pod_info,kube_pod_status_ready,kube_pod_status_phase,kube_pod_deletion_timestamp,kube_deployment_spec_replicas
         - --port=8080
         - --telemetry-port=8081
         ports:
