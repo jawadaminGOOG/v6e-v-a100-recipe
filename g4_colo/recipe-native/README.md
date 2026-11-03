@@ -172,6 +172,10 @@ Same scenarios on both clusters with [`../bench_compare/sweep.py`](../bench_comp
 | ![Reaction times](docs/bench/6_reaction_times.png) | Reaction times side by side |
 | ![Reclaimed vCPU and N4D](docs/bench/7_reclaimed_vcpu_and_n4d.png) | Reclaimed G4 vCPU and N4D nodes over the simultaneous sweep: equal N4D cost |
 
+**Fixes from the sweep, retested live on 3 Nov** ([`../bench_compare/retest_fixes.py`](../bench_compare/retest_fixes.py), [`docs/bench/retest_verdict.json`](docs/bench/retest_verdict.json)):
+- vLLM HPA scale-down window 15 s → 120 s (shared `vllm.yaml`). Before: the 2nd vLLM was removed within ~45 s of becoming Ready. After: 0 drops in 240 s at 1,200 rps.
+- Controller (recipe/, v0.2.5+) keeps stranded backfill while overflow pods are not Ready. Before: toolcall fell to 8 of 18 when N4D could not start. After, with the N4D pool capped: Ready ≥ demand in 100 % of samples (min 18/18) until the autoscaler drained the node, 314 s after scale-in.
+
 ## 3. Trade-offs you accept
 
 1. **Slower reaction.** The overflow tier follows demand in about 15 s, not 2 s: kube-state-metrics scrape (5 s, the Managed Prometheus minimum) + ingestion + the HPA's fixed 15 s sync.

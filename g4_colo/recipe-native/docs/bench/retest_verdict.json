@@ -1,0 +1,51 @@
+{
+ "starve": {
+  "saved": {
+   "demand": {
+    "sandbox": 20,
+    "toolcall": 11,
+    "analytics": 4
+   },
+   "hpa": [
+    2,
+    2
+   ],
+   "rate": 1400.0,
+   "n4d": [
+    4,
+    0
+   ]
+  },
+  "n4d_capped_at": 1,
+  "scale_in_at": 1793665042.579746,
+  "ca_marked_after_s": 313.8,
+  "samples": 54,
+  "ready_ge_demand_pct": 100.0,
+  "samples_with_overflow_pending": 53,
+  "held_past_grace": true,
+  "min_ready": {
+   "sandbox": 18,
+   "toolcall": 18
+  },
+  "pass_": true
+ },
+ "flap": {
+  "saved": {
+   "demand": {
+    "sandbox": 20,
+    "toolcall": 20,
+    "analytics": 6
+   },
+   "hpa": [
+    1,
+    2
+   ],
+   "rate": 660.0
+  },
+  "vllm2_ready_after_s": 267.7,
+  "samples": 38,
+  "samples_below_2": 0,
+  "scale_down_events_since_scale_out": [],
+  "pass_": true
+ }
+}
