@@ -160,17 +160,25 @@ TTFT depends on the number of backfill pods on the node and on whether vLLM's co
 
 ### Benchmark charts (2 Nov sweep, both clusters)
 
-Same scenarios on both clusters with [`../bench_compare/sweep.py`](../bench_compare/sweep.py), charts from [`plots.py`](../bench_compare/plots.py). The phases that scale N4D (demand step, GPU scale-in) were rerun one cluster at a time, because both clusters share one regional N4D quota ([`docs/bench/SOURCES.md`](docs/bench/SOURCES.md)). Numbers: [`docs/bench/summary.md`](docs/bench/summary.md).
+The same scenarios ran on both clusters ([`../bench_compare/sweep.py`](../bench_compare/sweep.py); charts from [`charts.py`](../bench_compare/charts.py)). Phases that scale N4D were rerun one cluster at a time, because both clusters share one regional N4D quota ([`docs/bench/SOURCES.md`](docs/bench/SOURCES.md)). All numbers: [`docs/bench/summary.md`](docs/bench/summary.md). Navy = controller recipe, green = native recipe.
 
-| Chart | What it shows |
-|---|---|
-| ![TTFT vs backfill](docs/bench/1_ttft_vs_backfill.png) | TTFT p99 vs backfill pods on the vLLM node, 450 rps: 20 → 26 ms on both recipes |
-| ![TTFT vs load](docs/bench/2_ttft_vs_load.png) | TTFT p99 vs load, solo and full node. Native ~10 ms lower at 1,000–1,200 rps; the controller cluster's vLLM cores span 2 L3 domains |
-| ![CPU busy](docs/bench/3_cpu_busy_vs_backfill.png) | CPU busy on the G4 node: vLLM cores 23–35 %, whole node up to 72 % |
-| ![Demand step](docs/bench/4_step_response.png) | CPU demand 18 → 40 → 18 pods: covered in 70 s (controller) vs 88 s (native); overflow drained in 12 s vs 38 s |
-| ![GPU scale-out and scale-in](docs/bench/5_gpu_scale_out_in.png) | GPU scale-out and scale-in: new G4 node filled at 0 s on both; Ready ≥ demand 100 % on both |
-| ![Reaction times](docs/bench/6_reaction_times.png) | Reaction times side by side |
-| ![Reclaimed vCPU and N4D](docs/bench/7_reclaimed_vcpu_and_n4d.png) | Reclaimed G4 vCPU and N4D nodes over the simultaneous sweep: equal N4D cost |
+![Both recipes keep vLLM inside its latency budget](docs/bench/1_latency_protection.png)
+
+Filling the G4 node with 18 CPU pods raises vLLM TTFT p99 from 20 to 26 ms on both recipes, inside the 30 ms budget.
+
+![Under heavy load, latency tracks the node, not the recipe](docs/bench/2_latency_under_load.png)
+
+Above ~700 requests/s TTFT climbs steeply on both. The controller cluster is ~10 ms slower even with vLLM alone, because its vLLM cores span two L3 caches. That is a placement effect, not a recipe effect.
+
+![A CPU demand spike spills to N4D in under 90 s on both recipes](docs/bench/3_cpu_demand_spike.png)
+
+Grey is free capacity on G4; orange is paid N4D. The controller covers the spike 18 s sooner and empties N4D 26 s sooner. Both are dominated by N4D boot time.
+
+![GPU scale-in keeps every CPU pod running on both recipes](docs/bench/4_gpu_scale_out_in.png)
+
+When vLLM scales out, CPU pods move onto the new G4 node and N4D empties. When it scales in, N4D takes over before the node goes. Ready ≥ demand held in 100 % of samples on both. The flap marked in amber is fixed (see below).
+
+![The controller reacts faster to CPU changes; GPU timings are the same](docs/bench/5_reaction_times.png)
 
 **Fixes from the sweep, retested live on 3 Nov** ([`../bench_compare/retest_fixes.py`](../bench_compare/retest_fixes.py), [`docs/bench/retest_verdict.json`](docs/bench/retest_verdict.json)):
 - vLLM HPA scale-down window 15 s → 120 s (shared `vllm.yaml`). Before: the 2nd vLLM was removed within ~45 s of becoming Ready. After: 0 drops in 240 s at 1,200 rps.
