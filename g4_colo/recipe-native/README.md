@@ -158,6 +158,20 @@ Raw data: `.agents/native/logs/` (`N0_lag.json`, `gate_native.run{1,2,3}.verdict
 
 TTFT depends on the number of backfill pods on the node and on whether vLLM's cores sit in one L3 domain (G4: AMD EPYC 9B45, 3 × 16-vCPU L3 domains), not on the recipe. Measured at the same moment and load, the native full node was 8 ms faster than the controller's.
 
+### Benchmark charts (2 Nov sweep, both clusters)
+
+Same scenarios on both clusters with [`../bench_compare/sweep.py`](../bench_compare/sweep.py), charts from [`plots.py`](../bench_compare/plots.py). The phases that scale N4D (demand step, GPU scale-in) were rerun one cluster at a time, because both clusters share one regional N4D quota ([`docs/bench/SOURCES.md`](docs/bench/SOURCES.md)). Numbers: [`docs/bench/summary.md`](docs/bench/summary.md).
+
+| Chart | What it shows |
+|---|---|
+| ![TTFT vs backfill](docs/bench/1_ttft_vs_backfill.png) | TTFT p99 vs backfill pods on the vLLM node, 450 rps: 20 → 26 ms on both recipes |
+| ![TTFT vs load](docs/bench/2_ttft_vs_load.png) | TTFT p99 vs load, solo and full node. Native ~10 ms lower at 1,000–1,200 rps; the controller cluster's vLLM cores span 2 L3 domains |
+| ![CPU busy](docs/bench/3_cpu_busy_vs_backfill.png) | CPU busy on the G4 node: vLLM cores 23–35 %, whole node up to 72 % |
+| ![Demand step](docs/bench/4_step_response.png) | CPU demand 18 → 40 → 18 pods: covered in 70 s (controller) vs 88 s (native); overflow drained in 12 s vs 38 s |
+| ![GPU scale-out and scale-in](docs/bench/5_gpu_scale_out_in.png) | GPU scale-out and scale-in: new G4 node filled at 0 s on both; Ready ≥ demand 100 % on both |
+| ![Reaction times](docs/bench/6_reaction_times.png) | Reaction times side by side |
+| ![Reclaimed vCPU and N4D](docs/bench/7_reclaimed_vcpu_and_n4d.png) | Reclaimed G4 vCPU and N4D nodes over the simultaneous sweep: equal N4D cost |
+
 ## 3. Trade-offs you accept
 
 1. **Slower reaction.** The overflow tier follows demand in about 15 s, not 2 s: kube-state-metrics scrape (5 s, the Managed Prometheus minimum) + ingestion + the HPA's fixed 15 s sync.
