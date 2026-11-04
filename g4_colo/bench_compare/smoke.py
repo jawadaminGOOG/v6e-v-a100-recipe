@@ -136,6 +136,15 @@ def main():
         short = coverage(c, dem)
         check(f"{c}: Ready pods >= demand per service", not short, f"demand={dem} short={short}")
 
+    # 3b. customer DaemonSet on every G4 and N4D node, shared cores only
+    for c in CTX:
+        nodes = {n["metadata"]["name"]: n["metadata"]["labels"].get("colo.role") for n in kj(c, "get", "nodes")["items"]}
+        want = {n for n, r in nodes.items() if r in ("g4", "n4d")}
+        have = {p["spec"].get("nodeName") for p in kj(c, "-n", "colo-agents", "get", "pods", "-l", "app=sample-node-agent")["items"]
+                if ready(p)}
+        check(f"{c}: customer DaemonSet Ready on every G4 and N4D node", want <= have,
+              f"{len(have & want)}/{len(want)} (G4 {sum(1 for n in have if nodes.get(n) == 'g4')})")
+
     # 4. metrics isolation ----------------------------------------------------------------------------------------
     clusters = {r["metric"].get("cluster") for r in promql('count by (cluster) (kube_pod_info{container="kube-state-metrics",exported_namespace="colo-svc"})')}
     check("GMP: colo kube-state-metrics series only from the native cluster", clusters <= {NAME["native"]}, str(clusters))

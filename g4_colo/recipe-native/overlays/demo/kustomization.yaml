@@ -10,6 +10,8 @@ resources:
 # Overflow HPA metric source for this cluster: python3 base/gen_colo_services.py --cluster <name> --out overlays/demo
 - autoscaling-metric.yaml
 components:
+# Example customer DaemonSet on G4 + N4D (README "Customer DaemonSets on G4").
+- ../../../recipe/components/customer-daemonset
 - ../../../recipe/components/vllm-gcs-cache
 images:
 - name: colo-registry.invalid/colo-worker

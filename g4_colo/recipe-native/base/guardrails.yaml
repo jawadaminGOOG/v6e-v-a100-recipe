@@ -90,17 +90,33 @@ spec:
     expression: >-
       namespaceObject.metadata.name == 'colo-system' && has(object.spec.serviceAccountName)
       && object.spec.serviceAccountName in ['colo-node-agent', 'colo-g4-reserve'] && !variables.wantsGPU
+  # Customer DaemonSets (logging, monitoring, security agents) that must also run on G4 nodes. Allowed only when
+  # all hold: (1) the pod was created by the DaemonSet controller itself (its identity cannot be used by people or
+  # workloads; ownerReferences on a pod could be forged, this cannot), (2) the namespace carries the admin-set label
+  # colo.gke.io/g4-daemonsets=allowed, and (3) it requests no GPU. gVisor stays banned (rule below). Burstable agents
+  # run on the shared cores only, never on vLLM's or backfill's exclusive cores; their CPU requests shrink the G4
+  # backfill slots automatically (size the shared-core reserve for them, README "Customer DaemonSets on G4").
+  - name: isCustomerDaemonSet
+    expression: >-
+      has(request.userInfo.username)
+      && request.userInfo.username == 'system:serviceaccount:kube-system:daemon-set-controller'
+      && has(namespaceObject.metadata.labels)
+      && 'colo.gke.io/g4-daemonsets' in namespaceObject.metadata.labels
+      && namespaceObject.metadata.labels['colo.gke.io/g4-daemonsets'] == 'allowed'
+      && !variables.wantsGPU
   validations:
   - expression: >-
       !variables.targetsG4
       || variables.isNodeAgent
+      || variables.isCustomerDaemonSet
       || (namespaceObject.metadata.name == 'inference' && variables.wantsGPU && variables.guaranteedIntegerCPU)
       || (has(object.spec.priorityClassName) && object.spec.priorityClassName == 'colo-backfill'
           && !variables.wantsGPU && variables.guaranteedIntegerCPU)
     messageExpression: >-
       'pods targeting G4 nodes (g4-gpu toleration incl. keyless Exists, compute-class/colo.role/gke-accelerator '
       + 'selector or affinity, or nodeName) must be the GPU workload (namespace inference, GPU, Guaranteed integer '
-      + 'CPU) or expendable backfill (priorityClassName colo-backfill, no GPU, integer CPU, requests == limits)'
+      + 'CPU), expendable backfill (priorityClassName colo-backfill, no GPU, integer CPU, requests == limits), or a '
+      + 'DaemonSet pod in a namespace labelled colo.gke.io/g4-daemonsets=allowed'
     reason: Forbidden
   - expression: "!variables.targetsG4 || variables.isNodeAgent || !variables.usesGVisor"
     message: >-
@@ -126,7 +142,8 @@ spec:
   policyName: colo-g4-guard
   validationActions: [Deny]
   # GKE system namespaces only. Their DaemonSets tolerate every taint and must keep running on G4 nodes.
-  # If you run your own all-tolerating DaemonSets (logging, security agents), add their namespace here.
+  # Your own DaemonSets (logging, security agents) do not need an exemption here: label their namespace
+  # colo.gke.io/g4-daemonsets=allowed (rule isCustomerDaemonSet above).
   matchResources:
     namespaceSelector:
       matchExpressions:

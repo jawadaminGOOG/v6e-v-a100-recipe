@@ -1,0 +1,50 @@
+# Example customer DaemonSet on G4 + N4D. The pause image stands in for your agent; keep its requests honest,
+# because they come out of the G4 backfill budget (every 2 vCPU requested = one fewer 2-vCPU backfill pod per node).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: colo-agents
+  labels:
+    # G4 (1/3): admin-set opt-in. colo-g4-guard admits DaemonSet pods onto G4 only in namespaces with this label.
+    colo.gke.io/g4-daemonsets: allowed
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: sample-node-agent, namespace: colo-agents, labels: {app: sample-node-agent}}
+spec:
+  selector: {matchLabels: {app: sample-node-agent}}
+  updateStrategy: {type: RollingUpdate, rollingUpdate: {maxUnavailable: 1}}
+  template:
+    metadata: {labels: {app: sample-node-agent}}
+    spec:
+      # Normal priority (0): on a G4 node already full of backfill (priority -100), a new agent pod preempts one
+      # backfill pod, which then waits and is covered by N4D.
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              # G4 (2/3): include g4 next to your existing CPU node selection.
+              - {key: colo.role, operator: In, values: [g4, n4d]}
+      tolerations:
+      # G4 (3/3): the two G4 taints. (N4D taints below are what CPU-node agents already tolerate.)
+      - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
+      - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+      - {key: cloud.google.com/compute-class, operator: Equal, value: n4d-cpu, effect: NoSchedule}
+      - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: agent
+        image: registry.k8s.io/pause:3.10
+        # Burstable: runs on the node's shared cores, never on vLLM's or backfill's exclusive cores.
+        resources:
+          requests: {cpu: 200m, memory: 128Mi}
+          limits: {memory: 128Mi}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}

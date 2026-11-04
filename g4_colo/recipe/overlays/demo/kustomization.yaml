@@ -17,6 +17,8 @@ resources:
 - settings.yaml
 # vLLM starts on new G4 nodes from a GCS copy of the model and startup cache (cacheBucket / cacheKey in settings.yaml).
 components:
+# Example customer DaemonSet on G4 + N4D (README "Customer DaemonSets on G4").
+- ../../components/customer-daemonset
 - ../../components/vllm-gcs-cache
 images:
 - name: colo-registry.invalid/colo-worker

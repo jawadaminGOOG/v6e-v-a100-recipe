@@ -57,7 +57,33 @@ def g4_node_name():
 
 
 NODE = g4_node_name()
+AGENT_NS = "colo-agents"  # labelled colo.gke.io/g4-daemonsets=allowed by components/customer-daemonset
 BURST = dict(cpu_req="500m", cpu_lim="1", mem_req="256Mi", mem_lim="512Mi")
+
+AGENT_TOL = [{"key": "cloud.google.com/compute-class", "operator": "Equal", "value": "g4-gpu", "effect": "NoSchedule"},
+             {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}]
+FORGED_OWNER = [{"apiVersion": "apps/v1", "kind": "DaemonSet", "name": "sample-node-agent", "controller": True,
+                 "uid": "00000000-0000-0000-0000-000000000000"}]
+
+
+def agent_cases():
+    """Customer-DaemonSet rule: only pods the DaemonSet controller creates, in a labelled namespace, may target G4."""
+    if subprocess.run(["kubectl", "get", "ns", AGENT_NS], capture_output=True).returncode:
+        print(f"NOTE: namespace {AGENT_NS} not found; customer-DaemonSet cases skipped")
+        return []
+    agent = lambda name, **kw: {  # noqa: E731
+        "apiVersion": "v1", "kind": "Pod", "metadata": {"name": name, "namespace": AGENT_NS, **kw},
+        "spec": {"tolerations": AGENT_TOL, "affinity": affinity("colo.role", ["g4"]),
+                 "containers": [{"name": "c", "image": "registry.k8s.io/pause:3.10",
+                                 "resources": {"requests": {"cpu": "200m", "memory": "128Mi"}}}]}}
+    return [
+        ("reject: agent pod on G4 created by a user in the labelled namespace", agent("a1"), False),
+        ("reject: agent pod on G4 with a forged DaemonSet ownerReference", agent("a2", ownerReferences=FORGED_OWNER),
+         False),
+        ("accept: agent pod in the labelled namespace that does not target G4",
+         {**agent("a3"), "spec": {"containers": agent("x")["spec"]["containers"]}}, True),
+    ]
+
 
 CASES = [
     # --- wave-1 cases (compute-class toleration + nodeSelector) ---
@@ -143,6 +169,12 @@ def manifest_cases(overlay):
         meta = {"name": f"dryrun-{d['metadata']['name']}"[:63], "namespace": d["metadata"]["namespace"],
                 "labels": tmpl.get("metadata", {}).get("labels", {})}
         p = {"apiVersion": "v1", "kind": "Pod", "metadata": meta, "spec": tmpl["spec"]}
+        if meta["namespace"] == AGENT_NS:
+            # Customer DaemonSets are admitted onto G4 only when the DaemonSet controller creates the pod; the same
+            # template submitted by a person must be denied. The admitted path is checked live (daemonset_check.py).
+            cases.append((f"reject: manifest {d['kind']} template created directly by a user "
+                          f"{meta['namespace']}/{d['metadata']['name']}", p, False))
+            continue
         cases.append((f"accept: manifest {d['kind']} {meta['namespace']}/{d['metadata']['name']}", p, True))
     return cases
 
@@ -227,7 +259,7 @@ def main():
     ap.add_argument("--live-gated", action="store_true",
                     help="create one real scheduling-gated pod in colo-svc for the N2 bypass case, then delete it")
     a = ap.parse_args()
-    cases = [("create",) + c for c in CASES]
+    cases = [("create",) + c for c in CASES + agent_cases()]
     if not a.no_manifests:
         cases += [("create",) + c for c in manifest_cases(a.overlay)]
     cases += update_cases()

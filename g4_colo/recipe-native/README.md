@@ -193,6 +193,27 @@ When vLLM scales out, CPU pods move onto the new G4 node and N4D empties. When i
 5. **Make-before-break is time-based.** It costs up to 3 extra G4-minutes per scale-in (`consolidationDelayMinutes: 3`).
 6. **Stock components added:** upstream kube-state-metrics (pods and Deployments only, 5 s scrape), one GMP `ClusterRules` (observability), two `AutoscalingMetric` objects. No custom-metrics-stackdriver-adapter: it would own the external-metrics API and hide GKE's managed adapter.
 
+## 3b. Customer DaemonSets on G4
+
+Node agents you already run on your CPU nodes (log shippers, monitoring, security sensors) can also run on the G4 nodes that now carry CPU work. Three changes, shown in [`components/customer-daemonset/agent.yaml`](../recipe/components/customer-daemonset/agent.yaml):
+
+1. **Label the agent's namespace** `colo.gke.io/g4-daemonsets: allowed`. Only cluster admins can label namespaces.
+2. **Tolerate the two G4 taints:** `cloud.google.com/compute-class=g4-gpu:NoSchedule` and `nvidia.com/gpu:NoSchedule`.
+3. **Include G4 in the node selection**, e.g. `colo.role In [g4, n4d]`.
+
+`colo-g4-guard` admits a pod onto G4 through this path only when all three hold:
+- the **DaemonSet controller** created it (`system:serviceaccount:kube-system:daemon-set-controller`; a pod's ownerReferences can be forged, this identity can't);
+- its namespace has the label;
+- it requests **no GPU**.
+
+gVisor stays banned on G4. A person creating the same pod directly is denied. So is a G4-tolerating DaemonSet in an unlabelled namespace, on every node: a G4 toleration alone marks a pod as G4-bound, so it fails closed. DaemonSets without the G4 tolerations run on CPU nodes as before. All of this is tested by `../recipe/tests/admission_cases.py` and `../recipe/tests/daemonset_check.py`.
+
+What changes on the node:
+- **vLLM stays isolated.** A Burstable agent runs only on the node's shared cores; it is not in the kubelet CPU manager's exclusive allocations.
+- **Backfill shrinks to fit.** Agent CPU requests come out of the backfill budget: every 2 vCPU requested is one fewer 2-vCPU backfill pod per G4 node. The scheduler fits fewer backfill pods; the rest wait and the overflow HPA covers them on N4D.
+- **Rollouts always land.** At normal priority (0) a new agent pod preempts a priority -100 backfill pod on a full node; that pod is covered on N4D.
+- **Watch the shared cores.** A heavy agent competes with kubelet and containerd on the shared cores. Raise the reserve (`base/g4-reserve.yaml`) if it uses more than a fraction of a core.
+
 ## 4. Deploy
 
 ```bash

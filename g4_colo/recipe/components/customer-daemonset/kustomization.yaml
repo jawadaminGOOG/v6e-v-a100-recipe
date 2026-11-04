@@ -1,0 +1,10 @@
+# Optional component: an example customer DaemonSet (a node agent such as a log shipper or security sensor) that
+# runs on every CPU node, N4D and G4 alike. Enable it in an overlay:
+#   components:
+#   - ../../components/customer-daemonset
+# For your own agents, copy the three pieces marked G4 in agent.yaml: the namespace label, the two G4
+# tolerations, and colo.role g4 in the node affinity. README "Customer DaemonSets on G4".
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+- agent.yaml
