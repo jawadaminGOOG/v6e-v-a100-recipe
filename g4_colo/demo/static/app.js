@@ -331,11 +331,11 @@ function cpuKinds(n) {
     else if (o) app = "other";
     return { app, pending: !!(o && o.pod && podReady[o.pod] === false), label: o ? `${o.ns ? o.ns + "/" : ""}${o.pod}` : "" };
   });
-  // Your DaemonSets get their own colour: ceil(their CPU requests) shared-pool CPUs, after the kubelet/system reserve.
+  // Customer DaemonSets get their own colour: ceil(their CPU requests) shared-pool CPUs, after the kubelet/system reserve.
   const agentCpu = n.agent_cpu || 0;
   let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(Math.max(0, (n.sys_cpu || 0) - agentCpu));
   let agentTiles = agentCpu > 0 ? Math.ceil(agentCpu) : 0;
-  const agentLabel = `your DaemonSets (shared cores): ${(n.agents || []).map((a) => `${a.ns}/${a.name} ${a.cpu} vCPU`).join(", ")}`;
+  const agentLabel = `DaemonSet (shared cores): ${(n.agents || []).map((a) => `${a.ns}/${a.name} ${a.cpu} vCPU`).join(", ")}`;
   const shared = n.cpus.filter((c, i) => kinds[i].app === "free").sort((a, b) => a.core - b.core || a.thread - b.thread);
   for (const c of shared) {
     const i = n.cpus.indexOf(c);
@@ -393,7 +393,7 @@ function updateCoreMap(root, n, label) {
     g.classList.toggle("has-vllm", per[i].has("vllm"));
     g.classList.toggle("has-mem", per[i].has("analytics"));
   });
-  root.setAttribute("aria-label", `${label} per-vCPU map: ${Object.entries(cnt).map(([k, v]) => `${v} ${k === "system" ? "reserved" : k === "agent" ? "your DaemonSets" : k}`).join(", ")}`);
+  root.setAttribute("aria-label", `${label} per-vCPU map: ${Object.entries(cnt).map(([k, v]) => `${v} ${k === "system" ? "reserved" : k === "agent" ? "DaemonSet" : k}`).join(", ")}`);
 }
 
 // Node agent not reporting yet: fall back to one flat cell per requested vCPU from the pod list.
