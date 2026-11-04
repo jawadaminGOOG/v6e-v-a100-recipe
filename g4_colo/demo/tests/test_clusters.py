@@ -419,3 +419,13 @@ def test_customer_daemonsets_get_their_own_cpu_budget():
     assert g4a["agent_cpu"] == 0.2
     assert [a["ns"] for a in g4a["agents"]] == ["colo-agents"]
     assert g4a["sys_cpu"] >= 0.35  # agents still count toward the shared-pool budget
+
+
+def test_customer_daemonset_ready_flag_reaches_ui_state():
+    raw = _native_raw()
+    agent = _pod("sample-node-agent-y", "g4a", "sample-node-agent", ns="colo-agents", cpu=0.2, mem=0.125, ready=False)
+    agent["owner_kind"] = "DaemonSet"
+    raw["pods"].append(agent)
+    st = build_state(raw, recipe="native", cluster={"id": "native", "name": "x", "region": "r", "project": "p"})
+    g4a = next(n for n in st["nodes"] if n["name"] == "g4a")
+    assert g4a["agents"] == [{"ns": "colo-agents", "name": "sample-node-agent-y", "cpu": 0.2, "ready": False}]

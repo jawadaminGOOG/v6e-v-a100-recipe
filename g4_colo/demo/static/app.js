@@ -335,12 +335,13 @@ function cpuKinds(n) {
   const agentCpu = n.agent_cpu || 0;
   let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(Math.max(0, (n.sys_cpu || 0) - agentCpu));
   let agentTiles = agentCpu > 0 ? Math.ceil(agentCpu) : 0;
-  const agentLabel = `DaemonSet (shared cores): ${(n.agents || []).map((a) => `${a.ns}/${a.name} ${a.cpu} vCPU`).join(", ")}`;
+  const agentLabel = `DaemonSet (shared cores): ${(n.agents || []).map((a) => `${a.ns}/${a.name} ${a.cpu} vCPU, ${a.ready ? "Running" : "Starting"}`).join("; ")}`;
+  const agentPending = (n.agents || []).some((a) => !a.ready);
   const shared = n.cpus.filter((c, i) => kinds[i].app === "free").sort((a, b) => a.core - b.core || a.thread - b.thread);
   for (const c of shared) {
     const i = n.cpus.indexOf(c);
     if (reserved > 0) { kinds[i].app = "system"; kinds[i].label = "reserved for kubelet / system"; reserved--; }
-    else if (agentTiles > 0) { kinds[i].app = "agent"; kinds[i].label = agentLabel; agentTiles--; }
+    else if (agentTiles > 0) { kinds[i].app = "agent"; kinds[i].label = agentLabel; kinds[i].pending = agentPending; agentTiles--; }
     else break;
   }
   return kinds;
@@ -408,7 +409,8 @@ function flatCells(n) {
   let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(Math.max(0, (n.sys_cpu || 0) - agentCpu));
   while (reserved-- > 0 && cells.length < cap) cells.push({ app: "system", pending: false });
   let agentTiles = agentCpu > 0 ? Math.ceil(agentCpu) : 0;
-  while (agentTiles-- > 0 && cells.length < cap) cells.push({ app: "agent", pending: false });
+  const agentPending = (n.agents || []).some((a) => !a.ready);
+  while (agentTiles-- > 0 && cells.length < cap) cells.push({ app: "agent", pending: agentPending });
   while (cells.length < cap) cells.push({ app: "free", pending: false });
   cells.length = Math.min(cells.length, cap); // never draw more cells than the node has vCPUs
   const cols = Math.max(1, Math.ceil(cap / 2)); // two rows, like the hyperthread pairs of the core map
