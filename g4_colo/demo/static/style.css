@@ -33,6 +33,7 @@
   --t-analytics: #fcefe3; --f-analytics: #e9b083; --k-analytics: #6b2f04;
   --t-free: #ffffff; --f-free: #d3d1cb;
   --t-system: #e3e1db; --f-system: #c9c7c0;
+  --t-agent: #efe8fb; --f-agent: #b9a2e8; --k-agent: #3b1a7a;
   --radius: 10px;
   --gap: 14px;
   --tile: 48px;
@@ -246,6 +247,7 @@ details.more > * + * { margin-top: 0.7rem; }
 .cpu.pending { opacity: .5; box-shadow: inset 0 0 0 2px var(--fillc); }
 .a-free { --tint: var(--t-free); --fillc: var(--f-free); --inkc: #6c6f75; }
 .a-system { --tint: var(--t-system); --fillc: var(--f-system); --inkc: #5b5e63; }
+.a-agent { --tint: var(--t-agent); --fillc: var(--f-agent); --inkc: var(--k-agent); }
 .a-vllm { --tint: var(--t-vllm); --fillc: var(--f-vllm); --inkc: var(--k-vllm); }
 .a-sandbox { --tint: var(--t-sandbox); --fillc: var(--f-sandbox); --inkc: var(--k-sandbox); }
 .a-toolcall { --tint: var(--t-toolcall); --fillc: var(--f-toolcall); --inkc: var(--k-toolcall); }

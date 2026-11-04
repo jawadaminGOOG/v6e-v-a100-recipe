@@ -15,7 +15,7 @@ const PRESETS = {
 const CSS = getComputedStyle(document.documentElement);
 const C = (n) => CSS.getPropertyValue(n).trim();
 const COL = { v: C("--v"), vSoft: C("--f-vllm"), i: C("--i"), m: C("--m"), bad: C("--bad"), muted: C("--muted"), faint: C("--faint"), line: C("--line"), n4d: C("--n4d"), ink: C("--ink") };
-const TAG = { vllm: "V", sandbox: "S", toolcall: "T", analytics: "A", buffer: "B" };
+const TAG = { vllm: "V", sandbox: "S", toolcall: "T", analytics: "A", buffer: "B", agent: "D" };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -331,9 +331,18 @@ function cpuKinds(n) {
     else if (o) app = "other";
     return { app, pending: !!(o && o.pod && podReady[o.pod] === false), label: o ? `${o.ns ? o.ns + "/" : ""}${o.pod}` : "" };
   });
-  let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(n.sys_cpu || 0);
+  // Your DaemonSets get their own colour: ceil(their CPU requests) shared-pool CPUs, after the kubelet/system reserve.
+  const agentCpu = n.agent_cpu || 0;
+  let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(Math.max(0, (n.sys_cpu || 0) - agentCpu));
+  let agentTiles = agentCpu > 0 ? Math.ceil(agentCpu) : 0;
+  const agentLabel = `your DaemonSets (shared cores): ${(n.agents || []).map((a) => `${a.ns}/${a.name} ${a.cpu} vCPU`).join(", ")}`;
   const shared = n.cpus.filter((c, i) => kinds[i].app === "free").sort((a, b) => a.core - b.core || a.thread - b.thread);
-  for (const c of shared) { if (reserved <= 0) break; const i = n.cpus.indexOf(c); kinds[i].app = "system"; kinds[i].label = "reserved for kubelet / system"; reserved--; }
+  for (const c of shared) {
+    const i = n.cpus.indexOf(c);
+    if (reserved > 0) { kinds[i].app = "system"; kinds[i].label = "reserved for kubelet / system"; reserved--; }
+    else if (agentTiles > 0) { kinds[i].app = "agent"; kinds[i].label = agentLabel; agentTiles--; }
+    else break;
+  }
   return kinds;
 }
 
@@ -384,7 +393,7 @@ function updateCoreMap(root, n, label) {
     g.classList.toggle("has-vllm", per[i].has("vllm"));
     g.classList.toggle("has-mem", per[i].has("analytics"));
   });
-  root.setAttribute("aria-label", `${label} per-vCPU map: ${Object.entries(cnt).map(([k, v]) => `${v} ${k === "system" ? "reserved" : k}`).join(", ")}`);
+  root.setAttribute("aria-label", `${label} per-vCPU map: ${Object.entries(cnt).map(([k, v]) => `${v} ${k === "system" ? "reserved" : k === "agent" ? "your DaemonSets" : k}`).join(", ")}`);
 }
 
 // Node agent not reporting yet: fall back to one flat cell per requested vCPU from the pod list.
@@ -395,8 +404,11 @@ function flatCells(n) {
     for (let i = 0; i < Math.max(1, Math.round(p.cpu || 0)); i++) cells.push({ app, pending: !p.ready });
   }
   const cap = n.ncpu || Math.round(n.alloc_cpu || 0);
-  let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(n.sys_cpu || 0);
+  const agentCpu = n.agent_cpu || 0;
+  let reserved = Math.max(0, Math.round((n.ncpu || 0) - (n.alloc_cpu || n.ncpu || 0))) + Math.round(Math.max(0, (n.sys_cpu || 0) - agentCpu));
   while (reserved-- > 0 && cells.length < cap) cells.push({ app: "system", pending: false });
+  let agentTiles = agentCpu > 0 ? Math.ceil(agentCpu) : 0;
+  while (agentTiles-- > 0 && cells.length < cap) cells.push({ app: "agent", pending: false });
   while (cells.length < cap) cells.push({ app: "free", pending: false });
   cells.length = Math.min(cells.length, cap); // never draw more cells than the node has vCPUs
   const cols = Math.max(1, Math.ceil(cap / 2)); // two rows, like the hyperthread pairs of the core map

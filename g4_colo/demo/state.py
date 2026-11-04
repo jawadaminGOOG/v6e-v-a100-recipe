@@ -160,6 +160,17 @@ def node_role(labels: dict) -> str:
     return "other"
 
 
+# Platform namespaces whose DaemonSets are part of GKE or of the recipe (drawn as "reserved", not as your agents).
+_PLATFORM_NS_PREFIX = ("kube-", "gke-", "gmp-")
+_PLATFORM_NS = {"colo-system", "inference", "colo-svc"}
+
+
+def is_customer_daemonset(pod: dict) -> bool:
+    """A DaemonSet pod you run (log shipper, security sensor...), as opposed to GKE's or the recipe's own agents."""
+    ns = pod.get("namespace") or ""
+    return pod.get("owner_kind") == "DaemonSet" and ns not in _PLATFORM_NS and not ns.startswith(_PLATFORM_NS_PREFIX)
+
+
 def pod_category(pod: dict) -> str:
     labels = pod.get("labels") or {}
     if labels.get("app") == "vllm":
@@ -443,6 +454,8 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
         sys_pods = [p for p in node_all if p.get("namespace") not in ("inference", "colo-svc") and pod_category(p) != "buffer"]
         sys_cpu = sum(p.get("cpu_req", 0.0) for p in sys_pods)
         sys_mem = sum(p.get("mem_req_gib", 0.0) for p in sys_pods)
+        agent_pods = [p for p in sys_pods if is_customer_daemonset(p)]
+        agent_cpu = sum(p.get("cpu_req", 0.0) for p in agent_pods)
         if role == "g4" and n.get("ready"):
             g4_alloc += parse_cpu(alloc.get("cpu"))
             g4_sys += sys_cpu
@@ -523,6 +536,11 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
                 "blocks": blocks,
                 "eligible": eligible,
                 "sys_cpu": round(sys_cpu, 2),  # daemonset/agent requests (shared pool, not exclusive)
+                # Of sys_cpu, what your own DaemonSets request (namespaces outside GKE and the recipe); drawn in its
+                # own colour on the node map. Shared cores, never exclusive.
+                "agent_cpu": round(agent_cpu, 2),
+                "agents": [{"ns": p.get("namespace"), "name": p.get("name"), "cpu": p.get("cpu_req", 0.0),
+                            "ready": bool(p.get("ready"))} for p in agent_pods],
                 "ttft_p99_ms": lgn.get("ttft_p99_ms"),
                 "ttft_p50_ms": lgn.get("ttft_p50_ms"),
                 "achieved_rps": lgn.get("achieved_rps"),

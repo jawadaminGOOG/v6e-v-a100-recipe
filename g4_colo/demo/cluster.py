@@ -266,6 +266,7 @@ class LiveBackend:
                     "cpu_req": round(cpu, 3),
                     "mem_req_gib": round(mem, 3),
                     "priority_class": p.spec.priority_class_name,
+                    "owner_kind": (p.metadata.owner_references or [None])[0].kind if p.metadata.owner_references else None,
                     "deleting": p.metadata.deletion_timestamp is not None,
                 }
             )

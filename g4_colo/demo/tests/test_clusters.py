@@ -402,3 +402,20 @@ def test_shutdown_restores_hpa_only_if_this_process_forced_it(monkeypatch):
         pass
     assert calls == [first.id]
     first.backend.fast_scale_forced = False
+
+
+def test_customer_daemonsets_get_their_own_cpu_budget():
+    """Customer DaemonSet pods (outside GKE/recipe namespaces) are split out of sys_cpu as agent_cpu for the UI."""
+    raw = _native_raw()
+    agent = _pod("sample-node-agent-x", "g4a", "sample-node-agent", ns="colo-agents", cpu=0.2, mem=0.125)
+    agent["owner_kind"] = "DaemonSet"
+    gke = _pod("fluentbit-gke-x", "g4a", "fluentbit-gke", ns="kube-system", cpu=0.1, mem=0.1)
+    gke["owner_kind"] = "DaemonSet"
+    ours = _pod("colo-node-agent-x", "g4a", "colo-node-agent", ns="colo-system", cpu=0.05, mem=0.06)
+    ours["owner_kind"] = "DaemonSet"
+    raw["pods"] += [agent, gke, ours]
+    st = build_state(raw, recipe="native", cluster={"id": "native", "name": "x", "region": "r", "project": "p"})
+    g4a = next(n for n in st["nodes"] if n["name"] == "g4a")
+    assert g4a["agent_cpu"] == 0.2
+    assert [a["ns"] for a in g4a["agents"]] == ["colo-agents"]
+    assert g4a["sys_cpu"] >= 0.35  # agents still count toward the shared-pool budget
