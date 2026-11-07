@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -38,6 +39,49 @@ PRICE_GIB_HR = float(os.environ.get("DEMO_PRICE_GIB_HR", "0.00149"))
 PRICE_N4D16_HR = float(
     os.environ.get("DEMO_PRICE_N4D16_HR", str(round(16 * PRICE_VCPU_HR + 64 * PRICE_GIB_HR, 4)))
 )
+# ct6e-standard-1t (1 TPU v6e chip, 44 vCPU, 176 GiB): on-demand list price per chip-hour (Spot is about half).
+PRICE_V6E_HR = float(os.environ.get("DEMO_PRICE_V6E_HR", "2.70"))
+
+# ---------------------------------------------------------------- accelerator profiles
+# The accelerator host of a cluster (the node that runs vLLM and lends its spare cores to CPU services). Internally
+# that node keeps the role key "g4" (the recipe's class identifiers: compute-class g4-gpu, colo.role=g4) whatever the
+# accelerator is; everything a person reads comes from the profile.
+#   name:    selector / heading name       host: word in prose ("Reclaimed on G4")
+#   tag:     node tile label ("G4 #1")     short: one-letter node id in lane tooltips ("G1")
+#   unit:    accelerator unit ("GPU")      chip: the accelerator itself
+#   machine: GKE machine type              vcpu: host vCPUs (fallback when no node agent reports)
+#   price_hr: USD per node-hour (DEMO_PRICE_G4_HR / DEMO_PRICE_V6E_HR)
+ACCELERATORS: dict[str, dict] = {
+    "g4": {"id": "g4", "name": "G4 · RTX PRO 6000", "host": "G4", "tag": "G4", "short": "G", "unit": "GPU",
+           "chip": "RTX PRO 6000", "machine": "g4-standard-48", "vcpu": 48, "price_hr": PRICE_G4_HR},
+    "tpu-v6e": {"id": "tpu-v6e", "name": "TPU v6e", "host": "TPU v6e", "tag": "v6e", "short": "T", "unit": "TPU",
+                "chip": "TPU v6e", "machine": "ct6e-standard-1t", "vcpu": 44, "price_hr": PRICE_V6E_HR},
+}
+DEFAULT_ACCELERATOR = "g4"
+
+
+def accel_profile(accel: str | dict | None = None) -> dict:
+    """Profile for an accelerator id (or a cluster dict carrying "accelerator"); unknown or missing -> G4."""
+    if isinstance(accel, dict):
+        accel = accel.get("accelerator")
+    return dict(ACCELERATORS.get(accel or DEFAULT_ACCELERATOR) or ACCELERATORS[DEFAULT_ACCELERATOR])
+
+
+_G4_TILE = re.compile(r"\bG4 #")
+_G4 = re.compile(r"\bG4\b")
+_GPU = re.compile(r"\bGPU(?=s?\b)")
+
+
+def localize(text: Any, prof: dict | None) -> Any:
+    """Rewrite G4/GPU wording of a display string for the cluster's accelerator. Identity on G4 clusters, so their
+    text stays exactly as written. Case-sensitive: identifiers such as g4_nodes or g4-standard-48 are untouched.
+    static/app.js has the same rules (function L)."""
+    if not isinstance(text, str) or not text or not prof or prof.get("id") == DEFAULT_ACCELERATOR:
+        return text
+    t = text.replace("RTX PRO 6000", prof["chip"])
+    t = _G4_TILE.sub(prof["tag"] + " #", t)
+    t = _G4.sub(prof["host"], t)
+    return _GPU.sub(prof["unit"], t)
 
 SERVICES = {
     "sandbox": "integer",
@@ -381,6 +425,8 @@ def _vllm_ready_nodes(pods: list[dict]) -> set[str]:
 # ---------------------------------------------------------------- main builder
 def build_state(raw: dict, mode: str = "live", recipe: str = "controller", cluster: dict | None = None) -> dict:
     native = recipe == "native"
+    # Accelerator host of this cluster (cluster["accelerator"], default G4): price, host vCPUs and display words.
+    accel = accel_profile(cluster)
     now = time.time()
     errors = list(raw.get("errors") or [])
     pods = [p for p in raw.get("pods") or [] if p.get("phase") not in ("Succeeded", "Failed")]
@@ -415,7 +461,7 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
         if n.get("ready"):
             counts[f"{role}_ready"] = counts.get(f"{role}_ready", 0) + 1
         if role == "g4":
-            cost_g4 += PRICE_G4_HR
+            cost_g4 += accel["price_hr"]
         elif role == "n4d":
             cost_n4d += PRICE_N4D16_HR
         alloc = n.get("allocatable") or {}
@@ -470,7 +516,7 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
             n4d_caps.append((parse_cpu(alloc.get("cpu")), parse_mem_gib(alloc.get("memory")), sys_cpu, sys_mem))
 
         agent = agents.get(n["name"]) or {}
-        ncpu = int(agent.get("ncpu") or round(parse_cpu(alloc.get("cpu_capacity") or 0)) or (48 if role == "g4" else 16 if role == "n4d" else 0))
+        ncpu = int(agent.get("ncpu") or round(parse_cpu(alloc.get("cpu_capacity") or 0)) or (accel["vcpu"] if role == "g4" else 16 if role == "n4d" else 0))
         busy = agent.get("busy") or []
         cms = agent.get("cpu_manager_state") or {}
         owner: dict[int, dict] = {}
@@ -631,8 +677,9 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
     cf["fleet_per_hour"] = round(cost_g4 + cf["n4d_nodes"] * PRICE_N4D16_HR, 4)
     cf["saved_per_hour"] = round(saved_nodes * PRICE_N4D16_HR, 4)
     cf["saved_pct"] = round(100.0 * cf["saved_per_hour"] / cf["fleet_per_hour"], 1) if cf["fleet_per_hour"] else 0.0
-    cf["method"] = ("first-fit-decreasing pack of all running CPU pods (G4 backfill + N4D overflow) onto "
-                    "n4d-standard-16 allocatable minus daemonset requests; saved = nodes needed - N4D nodes running")
+    cf["method"] = localize("first-fit-decreasing pack of all running CPU pods (G4 backfill + N4D overflow) onto "
+                            "n4d-standard-16 allocatable minus daemonset requests; saved = nodes needed - N4D nodes "
+                            "running", accel)
 
     # Spare = what is left on Ready G4 nodes after the GPU slice and system pods; colo fills it.
     g4_spare = max(0.0, g4_alloc - g4_vllm - g4_sys)
@@ -662,7 +709,7 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
             "detail": "No controller: backfill replicas = demand; a backfill pod binds only next to a vLLM pod "
                       "(podAffinity); the overflow HPAs cover Pending backfill on N4D.",
             "guard_available": False,
-            "guard_reason": GUARD_NA_REASON,
+            "guard_reason": localize(GUARD_NA_REASON, accel),
             "eligible_g4": sum(1 for n in nodes_out if n["role"] == "g4" and n.get("eligible")),
             "backfill_waiting": sum((s["backfill"].get("waiting") or 0) for s in services.values()),
             "hpas": {svc: s["overflow"].get("hpa") for svc, s in services.items() if s["overflow"].get("hpa")},
@@ -671,7 +718,8 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
         control = {
             "kind": "controller",
             "label": "colo-controller",
-            "detail": "colo-controller splits demand into G4 backfill + N4D overflow every 2 s and runs the TTFT guard.",
+            "detail": localize("colo-controller splits demand into G4 backfill + N4D overflow every 2 s and runs the "
+                               "TTFT guard.", accel),
             "guard_available": True,
             "guard_reason": None,
         }
@@ -680,6 +728,8 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
         "mode": mode,
         "recipe": recipe,
         "cluster": cluster or CLUSTER,
+        # Display profile of the accelerator host (see ACCELERATORS); the UI takes every G4/GPU word from it.
+        "accelerator": accel,
         "control": control,
         "nodes": nodes_out,
         "counts": counts,
@@ -711,7 +761,8 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
             "counterfactual": cf,
             "saved_per_hour": cf["saved_per_hour"],
             "prices": {
-                "g4_hr": PRICE_G4_HR,
+                "g4_hr": accel["price_hr"],  # accelerator host per node-hour (key kept for compatibility)
+                "accel_hr": accel["price_hr"],
                 "n4d16_hr": PRICE_N4D16_HR,
                 "vcpu_hr": PRICE_VCPU_HR,
                 "gib_hr": PRICE_GIB_HR,

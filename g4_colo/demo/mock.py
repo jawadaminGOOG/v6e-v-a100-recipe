@@ -27,7 +27,7 @@ import string
 import time
 from datetime import datetime, timezone
 
-from state import GUARD_NA_REASON, NATIVE_DEMAND_DEPLOYMENT, SERVICES, UnsupportedOnRecipe, build_state
+from state import GUARD_NA_REASON, NATIVE_DEMAND_DEPLOYMENT, SERVICES, UnsupportedOnRecipe, accel_profile, build_state
 
 G4_BOOT_S = 75
 VLLM_BOOT_S = 45
@@ -78,6 +78,12 @@ class MockBackend:
     def __init__(self, cluster_id: str = "controller", cluster_info: dict | None = None):
         self.cluster_id = cluster_id
         self.cluster_info = cluster_info
+        # Accelerator host to emulate (cluster_info["accelerator"]: g4 or tpu-v6e). Its vCPU count sizes the core map,
+        # allocatable and backfill slots: g4-standard-48 -> 46 allocatable, 19 slots; ct6e-standard-1t -> 42, 17.
+        self.accel = accel_profile(cluster_info)
+        self.g4_half = self.accel["vcpu"] // 2
+        self.g4_alloc = float(self.accel["vcpu"] - 2)
+        self.g4_slots = int((self.g4_alloc - 8) // 2)
         now = time.time()
         self.t = now
         self.rate = 300.0
@@ -115,16 +121,20 @@ class MockBackend:
 
     # ------------------------------------------------------------ helpers
     def _add_node(self, role: str, zone: str, created: float, ready: bool = False, ready_at: float | None = None) -> dict:
-        pool = {"g4": "g4gpu", "n4d": "n4dcpu", "loadgen": "loadgen"}[role]
-        name = f"gke-g4cluster-{pool}-{self.POOL_TAG}-{_sfx(4)}-{_sfx(4)}"
-        cc = {"g4": "g4-gpu", "n4d": "n4d-cpu"}.get(role)
+        tpu = self.accel["id"] == "tpu-v6e"
+        pool = self._pool(role)
+        name = f"gke-{'v6ecluster' if tpu else 'g4cluster'}-{pool}-{self.POOL_TAG}-{_sfx(4)}-{_sfx(4)}"
+        cc = {"g4": "g4-gpu", "n4d": "n4d-cpu"}.get(role)  # the TPU pool keeps the recipe's class identifiers
         labels = {
             "colo.role": role,
             "topology.kubernetes.io/zone": zone,
-            "node.kubernetes.io/instance-type": {"g4": "g4-standard-48", "n4d": "n4d-standard-16", "loadgen": "e2-standard-8"}[role],
+            "node.kubernetes.io/instance-type": {"g4": self.accel["machine"], "n4d": "n4d-standard-16", "loadgen": "e2-standard-8"}[role],
         }
         if cc:
             labels["cloud.google.com/compute-class"] = cc
+        if tpu and role == "g4":
+            labels["cloud.google.com/gke-tpu-accelerator"] = "tpu-v6e-slice"
+            labels["cloud.google.com/gke-tpu-topology"] = "1x1"
         n = {
             "name": name,
             "role": role,
@@ -141,6 +151,11 @@ class MockBackend:
         self.nodes[name] = n
         return n
 
+    def _pool(self, role: str) -> str:
+        if role == "g4":
+            return "v6etpu" if self.accel["id"] == "tpu-v6e" else "g4gpu"
+        return {"n4d": "n4dcpu", "loadgen": "loadgen"}[role]
+
     def _event(self, reason: str, kind: str, obj: str, msg: str, ns: str | None = None, source: str = "cluster-autoscaler"):
         self.events.append({"time": _iso(self.t), "reason": reason, "kind": kind, "object": obj, "namespace": ns, "message": msg, "source": source, "count": 1})
         self.events = self.events[-200:]
@@ -149,7 +164,7 @@ class MockBackend:
         return self.t >= n["ready_at"]
 
     def _free_core(self, node: dict) -> int | None:
-        ncores = 24 if node["role"] == "g4" else 8
+        ncores = self.g4_half if node["role"] == "g4" else 8
         for c in range(1, ncores):
             if c not in node["cores"]:
                 return c
@@ -210,7 +225,7 @@ class MockBackend:
                 else:
                     booting = [n for n in g4s if not self._ready(n)]
                     if not booting and len(g4s) < 2:
-                        self._event("TriggeredScaleUp", "Pod", v["name"], f"pod triggered scale-up: [{{g4gpu-{self.POOL_TAG} 1->2 (max: 2)}}]", "inference")
+                        self._event("TriggeredScaleUp", "Pod", v["name"], f"pod triggered scale-up: [{{{self._pool('g4')}-{self.POOL_TAG} 1->2 (max: 2)}}]", "inference")
                         self._add_node("g4", "us-west8-a", now)
                     elif not booting and self.pending_g4_since is None:
                         self.pending_g4_since = now
@@ -289,7 +304,7 @@ class MockBackend:
     def _allocate(self, now: float):
         """colo-controller: split demand into backfill (eligible G4 slots) and overflow (the rest)."""
         eligible = [self.nodes[v["node"]] for v in self.vllm if v["node"] and now >= v["ready_at"]]
-        slots = {n["name"]: G4_SLOTS for n in eligible}
+        slots = {n["name"]: self.g4_slots for n in eligible}
         backfill_want = {}
         for svc, cls in SERVICES.items():
             want_bf = 0
@@ -434,7 +449,7 @@ class MockBackend:
         self._step(now)
         nodes = []
         for n in self.nodes.values():
-            alloc = {"g4": (G4_ALLOC_CPU, "176Gi"), "n4d": (N4D_ALLOC_CPU, "58Gi"), "loadgen": (7.9, "28Gi")}[n["role"]]
+            alloc = {"g4": (self.g4_alloc, "176Gi" if self.accel["id"] == "g4" else "165Gi"), "n4d": (N4D_ALLOC_CPU, "58Gi"), "loadgen": (7.9, "28Gi")}[n["role"]]
             nodes.append(
                 {
                     "name": n["name"],
@@ -481,7 +496,7 @@ class MockBackend:
         for n in self.nodes.values():
             if n["role"] not in ("g4", "n4d") or not self._ready(n):
                 continue
-            half = 24 if n["role"] == "g4" else 8
+            half = self.g4_half if n["role"] == "g4" else 8
             entries: dict[str, dict[str, list[int]]] = {}
             for core, uid in n["cores"].items():
                 entries.setdefault(uid, {}).setdefault("main", []).extend([core, core + half])
@@ -544,7 +559,7 @@ class MockBackend:
             "guard": dict(self.guard),
             "baseline_ttft_p99_ms": self.guard.get("baseline_ttft_p99_ms"),
             "nodes": {
-                n["name"]: {"spare_cpu": G4_SLOTS * 2, "blocks": sorted(n["blocks"]), "p99_ms": round(self.node_p99.get(n["name"], 0), 1)}
+                n["name"]: {"spare_cpu": self.g4_slots * 2, "blocks": sorted(n["blocks"]), "p99_ms": round(self.node_p99.get(n["name"], 0), 1)}
                 for n in self.nodes.values()
                 if n["role"] == "g4"
             },

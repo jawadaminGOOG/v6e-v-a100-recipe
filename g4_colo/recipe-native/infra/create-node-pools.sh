@@ -8,6 +8,10 @@
 #     tainted for the g4-gpu ComputeClass. No GKE Sandbox: G4 backfill runs under runc (gVisor bypasses the
 #     static CPU manager's container cpuset, see README section 2), so the sandbox taint would only add a
 #     toleration every G4 pod must carry.
+#   - ACCELERATOR=tpu-v6e: the accelerator pool is Cloud TPU v6e (ct6e-standard-1t single-host: 1 chip, 44 vCPU, 176 GiB, the
+#     closest TPU shape to g4-standard-48) instead of G4. G4_ZONES then lists zones with v6e capacity, and the pool
+#     carries the same compute-class/colo.role label and taint, so every manifest that targets the accelerator
+#     class is unchanged; overlays/tpu-v6e patches only vLLM and the TPU taint toleration. SPOT=1 uses Spot VMs.
 #   - N4D pool: CPU overflow nodes across zones; same kubelet config plus GKE Sandbox (gVisor) for
 #     sandbox-overflow; n4d-cpu ComputeClass.
 #   - loadgen pool (CREATE_LOADGEN_POOL=1 only): demo load generator. Not needed in production.
@@ -22,13 +26,15 @@ set -euo pipefail
 : "${G4_ZONES:?set G4_ZONES (comma-separated zones with RTX PRO 6000 capacity)}"
 : "${N4D_ZONES:?set N4D_ZONES (comma-separated zones for N4D overflow)}"
 G4_MAX=${G4_MAX:-2}
+ACCELERATOR=${ACCELERATOR:-g4}                     # g4 | tpu-v6e
+SPOT=${SPOT:-0}
 N4D_MAX=${N4D_MAX:-4}
 NETWORK=${NETWORK:-default}
 CREATE_NAT=${CREATE_NAT:-1}
 CREATE_LOADGEN_POOL=${CREATE_LOADGEN_POOL:-0}
 CREATE_CACHE_BUCKET=${CREATE_CACHE_BUCKET:-0}      # 1 = bucket + IAM for components/vllm-gcs-cache
 CACHE_BUCKET=${CACHE_BUCKET:-bucket-cache-${SUFFIX}}
-G4_POOL=${G4_POOL:-g4gpu-${SUFFIX}}
+if [[ "$ACCELERATOR" == tpu-v6e ]]; then G4_POOL=${G4_POOL:-v6etpu-${SUFFIX}}; else G4_POOL=${G4_POOL:-g4gpu-${SUFFIX}}; fi
 N4D_POOL=${N4D_POOL:-n4dcpu-${SUFFIX}}
 LOADGEN_POOL=${LOADGEN_POOL:-loadgen-${SUFFIX}}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -44,9 +50,17 @@ fi
 gcloud container clusters update "$CLUSTER" --region "$REGION" --project "$PROJECT" --update-addons=NetworkPolicy=ENABLED --quiet || true
 gcloud container clusters update "$CLUSTER" --region "$REGION" --project "$PROJECT" --enable-network-policy --quiet || true
 
+case "$ACCELERATOR" in
+  g4)      ACCEL_FLAGS=(--machine-type g4-standard-48 --accelerator type=nvidia-rtx-pro-6000,count=1,gpu-driver-version=latest) ;;
+  # Single-host slice (GKE rejects --tpu-topology for single-host pools; the node still gets topology label 1x1).
+  # GKE adds the google.com/tpu=present:NoSchedule taint itself.
+  tpu-v6e) ACCEL_FLAGS=(--machine-type ct6e-standard-1t) ;;
+  *) echo "ACCELERATOR must be g4 or tpu-v6e" >&2; exit 1 ;;
+esac
+[[ "$SPOT" == 1 ]] && ACCEL_FLAGS+=(--spot)
+
 gcloud container node-pools create "$G4_POOL" --cluster "$CLUSTER" --region "$REGION" --project "$PROJECT" \
-  --node-locations "$G4_ZONES" --machine-type g4-standard-48 \
-  --accelerator type=nvidia-rtx-pro-6000,count=1,gpu-driver-version=latest \
+  --node-locations "$G4_ZONES" "${ACCEL_FLAGS[@]}" \
   --system-config-from-file "$HERE/kubelet-config.yaml" --enable-image-streaming --enable-private-nodes \
   --disk-type hyperdisk-balanced --disk-size 150 \
   --enable-autoscaling --min-nodes 1 --max-nodes "$G4_MAX" --num-nodes 1 \

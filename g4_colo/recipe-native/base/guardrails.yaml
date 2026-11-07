@@ -45,7 +45,8 @@ spec:
         ('cloud.google.com/compute-class' in object.spec.nodeSelector
           && object.spec.nodeSelector['cloud.google.com/compute-class'] == 'g4-gpu')
         || ('colo.role' in object.spec.nodeSelector && object.spec.nodeSelector['colo.role'] == 'g4')
-        || 'cloud.google.com/gke-accelerator' in object.spec.nodeSelector)
+        || 'cloud.google.com/gke-accelerator' in object.spec.nodeSelector
+        || 'cloud.google.com/gke-tpu-accelerator' in object.spec.nodeSelector)
   - name: affinesG4
     expression: >-
       has(object.spec.affinity) && has(object.spec.affinity.nodeAffinity)
@@ -54,17 +55,20 @@ spec:
         has(term.matchExpressions) && term.matchExpressions.exists(e,
           (e.key == 'cloud.google.com/compute-class' && e.operator == 'In' && has(e.values) && 'g4-gpu' in e.values)
           || (e.key == 'colo.role' && e.operator == 'In' && has(e.values) && 'g4' in e.values)
-          || (e.key == 'cloud.google.com/gke-accelerator' && (e.operator == 'In' || e.operator == 'Exists'))))
+          || (e.key in ['cloud.google.com/gke-accelerator', 'cloud.google.com/gke-tpu-accelerator']
+              && (e.operator == 'In' || e.operator == 'Exists'))))
   # nodeName bypasses the scheduler and therefore the NoSchedule taint. The policy cannot see node labels, so any
   # pod with nodeName set is treated as targeting G4 (system pods that use nodeName live in exempt namespaces).
   - name: bindsNode
     expression: has(object.spec.nodeName) && object.spec.nodeName != ''
   - name: targetsG4
     expression: variables.toleratesG4 || variables.selectsG4 || variables.affinesG4 || variables.bindsNode
+  # "GPU" here means any accelerator: an NVIDIA GPU (G4) or a Cloud TPU (overlays/tpu-v6e). Backfill may request
+  # neither; only the serving workload in namespace inference may.
   - name: wantsGPU
     expression: >-
       object.spec.containers.exists(c, has(c.resources) && has(c.resources.limits)
-        && 'nvidia.com/gpu' in c.resources.limits)
+        && ('nvidia.com/gpu' in c.resources.limits || 'google.com/tpu' in c.resources.limits))
   # Init containers count too: a Burstable or fractional-CPU init container makes the whole pod non-Guaranteed,
   # so kubelet's static CPU manager gives no exclusive cores and the pod runs in the shared pool next to vLLM.
   - name: guaranteedIntegerCPU
@@ -162,6 +166,7 @@ spec:
     requests.cpu: "320"
     limits.memory: 800Gi
     requests.nvidia.com/gpu: "0"
+    requests.google.com/tpu: "0"
 ---
 # Agentic sandboxes may only reach the tool-calling service and DNS.
 apiVersion: networking.k8s.io/v1

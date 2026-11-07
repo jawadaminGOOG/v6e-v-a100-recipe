@@ -25,6 +25,42 @@ const money = (v) => (v === null || v === undefined ? "–" : `$${(Math.round(Nu
 const hhmmss = (t) => new Date(t).toLocaleTimeString([], { hour12: false });
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+/* ------------------------------------------------------------------ accelerator wording */
+// The accelerator host of the selected cluster (/api/state .accelerator, /api/clusters .accelerator_profile). Every
+// G4/GPU word the page shows goes through L(), which mirrors state.localize(): identity on G4 clusters, so their text
+// is exactly as written; on a TPU v6e cluster "G4 #1" -> "v6e #1", "G4" -> "TPU v6e", "GPU" -> "TPU".
+const ACC_G4 = { id: "g4", name: "G4 · RTX PRO 6000", host: "G4", tag: "G4", short: "G", unit: "GPU", chip: "RTX PRO 6000", machine: "g4-standard-48" };
+let ACC = ACC_G4;
+function L(s) {
+  if (s === null || s === undefined || ACC.id === "g4") return s;
+  return String(s).replace(/RTX PRO 6000/g, ACC.chip).replace(/\bG4 #/g, `${ACC.tag} #`).replace(/\bG4\b/g, ACC.host).replace(/\bGPU(?=s?\b)/g, ACC.unit);
+}
+// Static markup marked data-acc: originals are captured once (page load, G4 wording) and re-localized on each switch.
+const DOC_TITLE = document.title;
+const accOrig = new Map();
+function localizeStatic() {
+  document.title = L(DOC_TITLE);
+  document.querySelectorAll("[data-acc]").forEach((el) => {
+    let o = accOrig.get(el);
+    if (!o) {
+      o = { texts: [], attrs: {} };
+      const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = w.nextNode(); t; t = w.nextNode()) o.texts.push([t, t.nodeValue]);
+      for (const a of ["title", "aria-label"]) if (el.hasAttribute(a)) o.attrs[a] = el.getAttribute(a);
+      accOrig.set(el, o);
+    }
+    for (const [t, v] of o.texts) t.nodeValue = L(v);
+    for (const [a, v] of Object.entries(o.attrs)) el.setAttribute(a, L(v));
+  });
+  for (const c of Object.values(charts)) { c.data.datasets.forEach((d) => { d._orig = d._orig ?? d.label; d.label = L(d._orig); }); c.update("none"); }
+}
+function setAccelerator(prof) {
+  const next = prof && prof.id ? prof : ACC_G4;
+  const changed = next.id !== ACC.id;
+  ACC = next;
+  if (changed) localizeStatic();
+}
+
 const history = [];
 let last = null;
 let lastGoodAt = 0;
@@ -131,7 +167,7 @@ setInterval(() => { renderConn(); renderAlerts(); renderClock(); }, 1000);
 
 /* ------------------------------------------------------------------ controls (left rail) */
 function debounce(fn, ms) { let h; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); }; }
-const sendRate = debounce((v) => act("/api/gpu-rate", { rate: v }, `GPU rate set to ${v} rps`), 400);
+const sendRate = debounce((v) => act("/api/gpu-rate", { rate: v }, L(`GPU rate set to ${v} rps`)), 400);
 $("rate").addEventListener("input", (e) => { touched.rate = Date.now(); $("rate-out").textContent = e.target.value; sendRate(+e.target.value); });
 const demandValues = () => Object.fromEntries(SVCS.map((s) => [s, +$(`d-${s}`).value]));
 const sendDemand = debounce(() => { const d = demandValues(); act("/api/demand", d, `Demand: ${SVCS.map((s) => `${s} ${d[s]}`).join(", ")}`); }, 400);
@@ -182,9 +218,9 @@ function syncControls(s) {
   } else {
     if (!fresh("guard") && c.guard_enabled !== undefined && c.guard_enabled !== null) $("guard").checked = !!c.guard_enabled;
     $("guard-label").textContent = c.guard_enabled ? "On" : "Off";
-    $("guard-sub").textContent = c.guard_enabled
+    $("guard-sub").textContent = L(c.guard_enabled
       ? (c.threshold_ms ? `moves analytics off G4 above ${num(c.threshold_ms)} ms` : "moves analytics off G4 when TTFT rises")
-      : "off: nothing is moved";
+      : "off: nothing is moved");
     $("baseline-info").textContent = c.baseline_ttft_p99_ms ? `baseline ${num(c.baseline_ttft_p99_ms)} ms · threshold ${num(c.threshold_ms)} ms` : "no baseline yet";
   }
   const running = s.scenario && s.scenario.status === "running";
@@ -200,7 +236,7 @@ function renderControl(s) {
   $("ctl-label").textContent = ctl.label || "";
   const hp = ctl.hpas || {};
   $("ctl-chip").title = [ctl.detail, ...Object.entries(hp).map(([sv, h]) => `${h.name}: colo_overflow_needed ${num(h.metric)} → ${num(h.desired)} replicas (min ${h.min})`),
-    native ? `${ctl.eligible_g4 ?? 0} G4 node(s) eligible (running a Ready vLLM pod) · ${ctl.backfill_waiting ?? 0} backfill pod(s) waiting` : ""].filter(Boolean).join("\n");
+    native ? L(`${ctl.eligible_g4 ?? 0} G4 node(s) eligible (running a Ready vLLM pod) · ${ctl.backfill_waiting ?? 0} backfill pod(s) waiting`) : ""].filter(Boolean).join("\n");
   $("guard-row").hidden = native;
   $("guard-na").hidden = !native;
   if (ctl.guard_reason) $("guard-na").textContent = `Not used here: ${ctl.guard_reason}.`;
@@ -244,7 +280,7 @@ function renderNumbers(s) {
     ["G4 slots used", slots ? `${bf} of ${slots}` : "–"],
     ["Fleet cost", `${money((s.cost || {}).per_hour)}/hr`],
   ];
-  $("kvs").innerHTML = rows.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join("");
+  $("kvs").innerHTML = rows.map(([k, x]) => `<dt>${esc(L(k))}</dt><dd>${esc(L(x))}</dd>`).join("");
 }
 
 /* ------------------------------------------------------------------ story strip */
@@ -254,14 +290,14 @@ function renderStory(s) {
   const lg = s.loadgen || {}, c = s.controller || {};
   const g4n = (s.counts || {}).g4_ready || 0;
   $("h-reclaim").textContent = num(st.reclaimed_vcpu);
-  $("s-reclaim").title = st.reclaimed_pct_of_spare != null
+  $("s-reclaim").title = L(st.reclaimed_pct_of_spare != null
     ? `${num(st.reclaimed_pct_of_spare)}% of spare G4 cores · ${st.reclaimed_pods} CPU pods · GPU slice ${num(st.gpu_slice_vcpu)} vCPU per G4 node`
-    : "no spare G4 cores yet";
-  const segs = [["v", "GPU slice", st.gpu_slice_total_vcpu], ["r", "Reclaimed", st.reclaimed_vcpu], ["b", "Warm buffer", st.g4_buffer_vcpu], ["f", "Free", (st.g4_idle_vcpu || 0) + (st.g4_system_vcpu || 0)]];
+    : "no spare G4 cores yet");
+  const segs = [["v", L("GPU slice"), st.gpu_slice_total_vcpu], ["r", "Reclaimed", st.reclaimed_vcpu], ["b", "Warm buffer", st.g4_buffer_vcpu], ["f", "Free", (st.g4_idle_vcpu || 0) + (st.g4_system_vcpu || 0)]];
   const bar = $("vis-budget");
   segs.forEach(([k, , x], i) => { bar.children[i].style.flexGrow = Math.max(0, x || 0); });
   const total = st.g4_alloc_vcpu || 0;
-  bar.setAttribute("aria-label", `G4 vCPU budget${total ? ` (${num(total)} allocatable on ${g4n} node${g4n === 1 ? "" : "s"})` : ""}: ${segs.filter(([, , x]) => x > 0.05).map(([, l, x]) => `${l} ${num(x)}`).join(", ")}`);
+  bar.setAttribute("aria-label", L(`G4 vCPU budget`) + `${total ? ` (${num(total)} allocatable on ${g4n} node${g4n === 1 ? "" : "s"})` : ""}: ${segs.filter(([, , x]) => x > 0.05).map(([, l, x]) => `${l} ${num(x)}`).join(", ")}`);
   bar.title = bar.getAttribute("aria-label");
   $("budget-key").innerHTML = segs.map(([, l, x]) => `<li>${esc(l)} ${num(x)}</li>`).join("");
 
@@ -314,7 +350,7 @@ function orderedNodes(s) {
   const order = { g4: 0, n4d: 1 };
   const nodes = (s.nodes || []).filter((n) => n.role in order).sort((a, b) => order[a.role] - order[b.role] || (b.age_s ?? 0) - (a.age_s ?? 0));
   const idx = { g4: 0, n4d: 0 };
-  return nodes.map((n) => { idx[n.role] += 1; return { n, label: `${n.role === "g4" ? "G4" : "N4D"} #${idx[n.role]}`, short: `${n.role === "g4" ? "G" : "N"}${idx[n.role]}` }; });
+  return nodes.map((n) => { idx[n.role] += 1; return { n, label: `${n.role === "g4" ? ACC.tag : "N4D"} #${idx[n.role]}`, short: `${n.role === "g4" ? ACC.short : "N"}${idx[n.role]}` }; });
 }
 
 // Shared-pool CPUs covering the kubelet reserve (ncpu - allocatable) plus daemonset requests are drawn
@@ -357,7 +393,7 @@ function buildCoreMap(n) {
     const cores = [...Array(8).keys()].map((i) => l * 8 + i).filter((c) => c < half);
     const g = document.createElement("div");
     g.className = "llc";
-    g.innerHTML = `<div class="llc-h">L3 ${l}</div><div class="tiles"></div>`;
+    g.innerHTML = `<div class="llc-h">L3 ${l}</div><div class="tiles" style="--llc-cols:${cores.length}"></div>`;
     g._cores = `cores ${cores[0]}–${cores[cores.length - 1]}`;
     const grid = g.lastChild;
     for (const t of [0, 1]) for (const c of cores) {
@@ -461,7 +497,7 @@ function renderNodes(s) {
     fl.hidden = !f;
     if (f) { fl.className = `flag ${f[0]}`; fl.textContent = f[1]; }
     // Per-node detail on hover, so the map stays quiet.
-    const type = n.instance_type || (n.role === "g4" ? "g4-standard-48" : "n4d-standard-16");
+    const type = n.instance_type || (n.role === "g4" ? ACC.machine : "n4d-standard-16");
     const cpuPods = (n.pods || []).filter((p) => SVCS.includes(p.app)).length;
     const bits = [`${label} · ${type} · ${n.zone || ""}`, n.name];
     if (n.role === "g4") bits.push(`TTFT p99 ${n.ttft_p99_ms != null ? num(n.ttft_p99_ms) + " ms" : "–"} · p50 ${n.ttft_p50_ms != null ? num(n.ttft_p50_ms) + " ms" : "–"} · ${n.achieved_rps ? num(n.achieved_rps) : "–"} rps`, `${cpuPods}${slots ? ` of ${slots}` : ""} CPU pods`);
@@ -485,7 +521,7 @@ function renderNodes(s) {
   const hpa = (s.vllm || {}).hpa || {};
   if (g4.length && hpa.max && g4.length < hpa.max) {
     const gh = root.querySelector(".ghost") || Object.assign(document.createElement("div"), { className: "ghost" });
-    gh.textContent = `G4 #${g4.length + 1} joins when vLLM scales out`;
+    gh.textContent = L(`G4 #${g4.length + 1} joins when vLLM scales out`);
     want.push(gh);
   }
   if (n4d.length) {
@@ -504,7 +540,7 @@ function renderNodes(s) {
   root.style.setProperty("--ghost", want.some((el) => el.classList.contains("ghost")) ? "1" : "0");
   root.style.setProperty("--n4dn", n4d.length ? "1" : "0");
   root.style.setProperty("--n4dc", String(Math.max(1, n4d.length)));
-  if (!want.length) { root.innerHTML = `<p class="empty">No G4 or N4D nodes reported yet.</p>`; return; }
+  if (!want.length) { root.innerHTML = `<p class="empty">${esc(L("No G4 or N4D nodes reported yet."))}</p>`; return; }
   root.querySelector(".empty")?.remove();
   want.forEach((el, i) => { if (root.children[i] !== el) root.insertBefore(el, root.children[i] || null); });
   [...root.children].slice(want.length).forEach((x) => x.remove());
@@ -541,11 +577,12 @@ function renderLanes(s) {
     const pg = native ? 0 : Math.max(0, (svc.backfill.desired || 0) - g.length), pn = Math.max(0, (svc.overflow.desired || 0) - nn.length);
     const slotsList = [...g.map((x) => ["g", x]), ...Array(pg).fill(["g", null]), ...nn.map((x) => ["n", x]), ...Array(pn).fill(["n", null])];
     gTot += g.length; nTot += nn.length; pend += pg + pn;
-    const L = lanes[sv];
-    while (L.length < slotsList.length) { const c = document.createElement("span"); L.push(c); }
-    while (L.length > slotsList.length) L.pop().remove();
+    const chips = lanes[sv];
+    while (chips.length < slotsList.length) { const c = document.createElement("span"); chips.push(c); }
+    while (chips.length > slotsList.length) chips.pop().remove();
     const zg = $(`zg-${sv}`), zn = $(`zn-${sv}`);
-    L.forEach((c, i) => {
+    zg.setAttribute("aria-label", L(`${sv} on G4`));
+    chips.forEach((c, i) => {
       const [z, p] = slotsList[i];
       c.className = `pod a-${sv}${p ? (p.ready ? "" : " starting") : " pending"}`;
       c.title = p ? `${p.name} · ${p.tier || "pod"} on ${p.short}${p.ready ? "" : " · starting"}` : "pending: waiting for a node";
@@ -554,12 +591,12 @@ function renderLanes(s) {
     const w = $(`zw-${sv}`), tg = $(`zt-${sv}`);
     const waiting = native ? (svc.backfill.waiting || 0) : 0, hpa = native ? svc.overflow.hpa : null;
     if (native && SVC_CLASS[sv] === "memory-heavy") {
-      w.hidden = false; w.textContent = "kept off G4 · admission policy";
-      w.title = "Memory-heavy services never backfill on this cluster: a ValidatingAdmissionPolicy bans them from G4, so analytics-overflow holds the whole demand.";
+      w.hidden = false; w.textContent = L("kept off G4 · admission policy");
+      w.title = L("Memory-heavy services never backfill on this cluster: a ValidatingAdmissionPolicy bans them from G4, so analytics-overflow holds the whole demand.");
     } else {
       w.hidden = !waiting;
       w.textContent = `+${waiting} waiting → N4D`;
-      w.title = `${waiting} ${sv}-backfill pod${waiting === 1 ? "" : "s"} found no free G4 slot next to vLLM and wait Pending at priority -100 (by design: the autoscaler ignores them). The ${sv}-overflow HPA runs the same number on N4D.`;
+      w.title = L(`${waiting} ${sv}-backfill pod${waiting === 1 ? "" : "s"} found no free G4 slot next to vLLM and wait Pending at priority -100 (by design: the autoscaler ignores them). The ${sv}-overflow HPA runs the same number on N4D.`);
     }
     tg.hidden = !hpa;
     if (hpa) { tg.textContent = `HPA ${num(hpa.metric)}→${num(hpa.desired)}`; tg.title = `${hpa.name}: colo_overflow_needed = ${num(hpa.metric)} → ${num(hpa.desired)} replicas (min ${hpa.min}, max ${hpa.max})`; }
@@ -582,7 +619,7 @@ function renderScenario(sc) {
     b.classList.toggle("na", !!na);
     b.disabled = running || !!na;
     if (!b.dataset.title) b.dataset.title = b.title;
-    b.title = na || b.dataset.title;
+    b.title = na || L(b.dataset.title);
   });
   const log = $("scen-log");
   log.innerHTML = (sc.log || []).map((e) => `<li class="${esc(e.level)}"><span class="t">+${Math.round(e.elapsed_s)}s</span><span>${esc(e.msg)}</span></li>`).join("") || `<li class="empty">No scenario run yet.</li>`;
@@ -637,8 +674,9 @@ function renderMethod(s) {
     isNative(s)
       ? `<b>Control on this cluster</b>: no controller. <i>svc</i>-backfill replicas = demand; a backfill pod binds only next to a vLLM pod (podAffinity), so a G4 node is eligible iff it runs a Ready vLLM pod. Pods with no slot wait Pending at priority -100, and the <i>svc</i>-overflow HPA (metric colo_overflow_needed, min 1) runs them on N4D. Analytics never backfills (admission policy).`
       : `<b>Control on this cluster</b>: colo-controller splits demand into G4 backfill and N4D overflow every 2 s and runs the TTFT guard.`,
-  ].map((x) => `<li>${x}</li>`).join("");
-  $("cluster").textContent = `${s.cluster.label ? s.cluster.label + " · " : ""}${s.cluster.name} · ${s.cluster.region} · ${s.cluster.project}`;
+  ].map((x) => `<li>${L(x)}</li>`).join("");
+  const ver = (s.demo || {}).version;
+  $("cluster").textContent = `${s.cluster.label ? s.cluster.label + " · " : ""}${s.cluster.name} · ${s.cluster.region} · ${s.cluster.project}${ver ? ` · demo v${ver}` : ""}`;
 }
 
 /* ------------------------------------------------------------------ charts (optional) */
@@ -717,6 +755,7 @@ async function poll() {
     const s = await fetchJSON(api("/api/state"));
     if (cid !== CLUSTER) return; // the presenter switched clusters while this request was in flight
     last = s; lastGoodAt = Date.now();
+    setAccelerator(s.accelerator || (clusterById(cid) || {}).accelerator_profile);
     session = { auth: false, net: null, server: null };
     $("accel").hidden = !(s.demo && s.demo.accelerator_active);
     const parts = [
@@ -745,7 +784,7 @@ function renderClusterSeg() {
   const seg = $("cluster-seg");
   seg.hidden = CLUSTERS.length < 2;
   seg.innerHTML = CLUSTERS.map((c) => `<button type="button" role="radio" data-cluster="${esc(c.id)}" aria-checked="${c.id === CLUSTER}" ` +
-    `title="${esc(`${c.name} · control: ${c.control}`)}">${esc(c.label)}</button>`).join("");
+    `title="${esc(`${c.name} · ${(c.accelerator_profile || ACC_G4).name} · control: ${c.control}`)}">${esc(c.label)}</button>`).join("");
   seg.querySelectorAll("[data-cluster]").forEach((b) => b.addEventListener("click", () => switchCluster(b.dataset.cluster)));
   seg.onkeydown = (e) => { // arrow keys move between the radios
     if (!["ArrowLeft", "ArrowRight"].includes(e.key) || CLUSTERS.length < 2) return;
@@ -768,6 +807,7 @@ function resetView() {
 function switchCluster(id, push = true) {
   if (!clusterById(id) || id === CLUSTER) return;
   CLUSTER = id;
+  setAccelerator(clusterById(id).accelerator_profile);
   try { localStorage.setItem(CLUSTER_KEY, id); } catch (e) { /* private mode */ }
   if (push) { const u = new URL(location.href); u.searchParams.set("cluster", id); window.history.replaceState(null, "", u); }
   renderClusterSeg(); resetView(); renderConn(); poll();
@@ -779,6 +819,7 @@ async function initClusters() {
     let saved = null;
     try { saved = localStorage.getItem(CLUSTER_KEY); } catch (e) { /* private mode */ }
     if (!clusterById(CLUSTER)) CLUSTER = clusterById(saved) ? saved : j.default;
+    setAccelerator((clusterById(CLUSTER) || {}).accelerator_profile);
     try { localStorage.setItem(CLUSTER_KEY, CLUSTER); } catch (e) { /* private mode */ }
     const u = new URL(location.href);
     if (CLUSTERS.length > 1 && u.searchParams.get("cluster") !== CLUSTER) { u.searchParams.set("cluster", CLUSTER); window.history.replaceState(null, "", u); }
@@ -788,6 +829,9 @@ async function initClusters() {
   renderClusterSeg();
 }
 
+// Capture the G4 originals of the data-acc markup and the scenario button tooltips before anything rewrites them.
+document.querySelectorAll("[data-scenario]").forEach((b) => { b.dataset.title = b.title; });
 initCharts();
+localizeStatic();
 document.querySelectorAll("details").forEach((d) => d.addEventListener("toggle", () => { if (last) renderCharts(); }));
 initClusters().then(() => { poll(); setInterval(poll, POLL_MS); });

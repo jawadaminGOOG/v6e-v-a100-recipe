@@ -214,6 +214,30 @@ What changes on the node:
 - **Rollouts always land.** At normal priority (0) a new agent pod preempts a priority -100 backfill pod on a full node; that pod is covered on N4D.
 - **Watch the shared cores.** A heavy agent competes with kubelet and containerd on the shared cores. Raise the reserve (`base/g4-reserve.yaml`) if it uses more than a fraction of a core.
 
+## 3c. TPU v6e as the accelerator host
+
+The same recipe runs with Cloud TPU v6e in place of G4 (`overlays/tpu-v6e`, demo cluster `v6ecluster-jawadamin-us-east5-1126`). `ct6e-standard-1t` (1 chip, 44 vCPU, 176 GiB) is the closest TPU shape to `g4-standard-48` (48 vCPU, 180 GiB), so the backfill sizing carries over.
+
+| | G4 (`overlays/demo`) | TPU v6e (`overlays/tpu-v6e`) |
+|---|---|---|
+| Accelerator pool | `g4-standard-48`, 1 × RTX PRO 6000 | `ct6e-standard-1t`, 1 × v6e, single-host (topology 1x1) (`ACCELERATOR=tpu-v6e`, optional `SPOT=1`) |
+| vLLM | `vllm/vllm-openai`, `nvidia.com/gpu: 1` | `vllm/vllm-tpu`, `google.com/tpu: 1`, TPU node selectors (GKE requires both) |
+| Extra toleration | — | `google.com/tpu` on backfill, the reserve, the node agent and customer DaemonSets |
+| Everything else | ComputeClasses, backfill affinity, overflow HPAs, rules, VAP | identical |
+
+Zone check: `gcloud compute machine-types list` shows `ct6e-*` in `us-west8-a`, but GKE rejects v6e node pools there (`CONDITION_NOT_MET: Unsupported TPU configuration`, on-demand and Spot, 1t and 4t). The demo cluster therefore runs in `us-east5` (zones a/b), with its own N4D quota.
+
+The accelerator pool keeps the recipe's class identifiers (`compute-class=g4-gpu`, `colo.role=g4`), so only vLLM and one toleration differ. The admission policy treats `google.com/tpu` exactly like `nvidia.com/gpu`: only the serving workload in `inference` may request it, and a `gke-tpu-accelerator` selector or affinity counts as targeting the accelerator host.
+
+```bash
+PROJECT=... CLUSTER=... REGION=... SUFFIX=... G4_ZONES=<zones with v6e> N4D_ZONES=... ACCELERATOR=tpu-v6e \
+  bash g4_colo/recipe-native/infra/create-node-pools.sh
+python3 g4_colo/recipe-native/base/gen_colo_services.py --cluster <your-cluster> --out g4_colo/recipe-native/overlays/tpu-v6e
+kubectl apply -k g4_colo/recipe-native/overlays/tpu-v6e
+# Demo UI only: the read/scale RBAC for the Cloud Run demo identity (ServiceAccount, Roles, Bindings from demo/k8s.yaml,
+# not its in-cluster Deployment). Without it the demo shows "list nodes: Forbidden" for this cluster.
+```
+
 ## 4. Deploy
 
 ```bash
@@ -243,4 +267,5 @@ Shared with `recipe/` and kept identical by `check_sync.py`: `base/vllm.yaml`, `
 | `base/g4-reserve.yaml` | 2 shared cores held per G4 node |
 | `base/node-agent.yaml` | Demo telemetry only (read-only) |
 | `overlays/demo`, `overlays/production-template` | Environment settings |
+| `overlays/tpu-v6e` | TPU v6e accelerator host: vLLM TPU patch + `google.com/tpu` toleration (section 3c) |
 | `tests/lag_probe.py`, `tests/gate_native.py` | Live measurements behind section 2 |

@@ -30,7 +30,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
-from state import summarize
+from state import localize, summarize
 
 log = logging.getLogger("demo.scenarios")
 
@@ -198,8 +198,19 @@ UNAVAILABLE_REASON = {
 }
 
 
-def scenarios_for(recipe: str | None) -> dict[str, dict[str, Any]]:
-    return SCENARIOS_BY_RECIPE.get(recipe or "controller", SCENARIOS)
+def localize_scenarios(scenarios: dict[str, dict[str, Any]], prof: dict | None) -> dict[str, dict[str, Any]]:
+    """A copy of `scenarios` with title, note and msg text rewritten for the accelerator profile (state.localize).
+    G4 profiles get the same dict back, so G4 clusters keep their text exactly."""
+    if not prof or prof.get("id") == "g4":
+        return scenarios
+    return {name: {**sc, "title": localize(sc.get("title"), prof),
+                   "steps": [{**st, **{k: localize(st[k], prof) for k in ("note", "msg") if k in st}}
+                             for st in sc.get("steps", [])]}
+            for name, sc in scenarios.items()}
+
+
+def scenarios_for(recipe: str | None, prof: dict | None = None) -> dict[str, dict[str, Any]]:
+    return localize_scenarios(SCENARIOS_BY_RECIPE.get(recipe or "controller", SCENARIOS), prof)
 
 OPS = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq, "!=": operator.ne}
 
@@ -270,8 +281,11 @@ class ScenarioRunner:
                  state_fn: Callable[[], Awaitable[dict]] | None = None,
                  on_action: Callable[[], None] | None = None,
                  on_finish: Callable[[], Awaitable[Any]] | None = None,
-                 scenarios: dict[str, dict[str, Any]] | None = None):
+                 scenarios: dict[str, dict[str, Any]] | None = None,
+                 accelerator: dict | None = None):
         self.backend = backend
+        # Accelerator display profile: banner labels and log lines say "TPU v6e nodes", not "G4 nodes", on a TPU cluster.
+        self.accelerator = accelerator
         # Scenario set for this cluster's recipe (SCENARIOS or NATIVE_SCENARIOS); one runner per cluster.
         self.scenarios = SCENARIOS if scenarios is None else scenarios
         self.poll_s = poll_s
@@ -321,7 +335,8 @@ class ScenarioRunner:
 
     def _log(self, msg: str, level: str = "info", **extra):
         t = time.time()
-        self.log.append({"t": t, "time": _iso(t), "elapsed_s": round(t - self.started, 1), "level": level, "msg": msg, **extra})
+        self.log.append({"t": t, "time": _iso(t), "elapsed_s": round(t - self.started, 1), "level": level,
+                         "msg": localize(msg, self.accelerator), **extra})
 
     async def _metrics(self) -> dict:
         return summarize(await self.state_fn())
@@ -350,7 +365,7 @@ class ScenarioRunner:
                 ok = lv is not None and rv is not None and OPS[op](lv, rv)
             except TypeError:
                 ok = False
-            out.append({"metric": metric, "label": METRIC_LABELS.get(metric, metric), "value": lv, "op": op, "target": rv, "ok": bool(ok)})
+            out.append({"metric": metric, "label": localize(METRIC_LABELS.get(metric, metric), self.accelerator), "value": lv, "op": op, "target": rv, "ok": bool(ok)})
         return out
 
     def _check(self, m: dict, conds: list, mode: str) -> tuple[bool, list[str]]:

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Two-cluster smoke test: both recipes healthy, no regressions, no cross-contamination.
+"""Three-cluster smoke test: both recipes (and the TPU v6e variant of the native one) healthy, no regressions, no
+cross-contamination.
 
 Read-mostly. One write: a +2 demand nudge on each cluster, reverted, to prove a change on one cluster never moves
-the other. Exit 0 = all checks pass. Writes a JSON verdict next to the bench runs.
+the others. Exit 0 = all checks pass. Writes a JSON verdict next to the bench runs.
 
     python3 smoke.py [--demo http://127.0.0.1:8093] [--out ../../.agents/bench/smoke.json]
 """
@@ -19,7 +20,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 CTX = {"controller": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726",
-       "native": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126"}
+       "native": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126",
+       "tpu": "gke_northam-ce-mlai-tpu_us-east5_v6ecluster-jawadamin-us-east5-1126"}
+NATIVE = ("native", "tpu")  # clusters running g4_colo/recipe-native/ (tpu: overlays/tpu-v6e)
 NAME = {k: v.rsplit("_", 1)[1] for k, v in CTX.items()}
 PROJECT = "northam-ce-mlai-tpu"
 RESULTS: list[dict] = []
@@ -109,6 +112,16 @@ def main():
           and not k("controller", "get", "autoscalingmetric", "-A", "--ignore-not-found", check_=False).strip())
     ams = kj("native", "get", "autoscalingmetric", "-A")["items"]
     check("native: 2 AutoscalingMetrics", len(ams) == 2, ",".join(a["metadata"]["name"] for a in ams))
+    check("tpu: no colo-controller", not k("tpu", "-n", "colo-system", "get", "deploy", "colo-controller",
+                                         "--ignore-not-found"))
+    ams_tpu = kj("tpu", "get", "autoscalingmetric", "-A")["items"]
+    check("tpu: 2 AutoscalingMetrics", len(ams_tpu) == 2, ",".join(a["metadata"]["name"] for a in ams_tpu))
+    v = [p for p in kj("tpu", "-n", "inference", "get", "pods", "-l", "app=vllm")["items"] if ready(p)]
+    tnodes = {n["metadata"]["name"]: n["metadata"]["labels"] for n in kj("tpu", "get", "nodes")["items"]}
+    check("tpu: vLLM Ready on a TPU v6e node with google.com/tpu: 1",
+          v and all(p["spec"]["containers"][0]["resources"]["limits"].get("google.com/tpu") == "1"
+                    and tnodes.get(p["spec"].get("nodeName"), {}).get("cloud.google.com/gke-tpu-accelerator") == "tpu-v6e-slice"
+                    for p in v), f"{len(v)} Ready")
 
     # 2. HPAs -----------------------------------------------------------------------------------------------------
     for c in CTX:
@@ -117,10 +130,10 @@ def main():
         check(f"{c}: vLLM HPA scaleDown window 120 s and ScalingActive",
               h["spec"]["behavior"]["scaleDown"]["stabilizationWindowSeconds"] == 120 and conds.get("ScalingActive") == "True",
               f"min={h['spec'].get('minReplicas')} max={h['spec']['maxReplicas']} metric={h['spec']['metrics'][0]['pods']['metric']['name']}")
-    for s in ("sandbox", "toolcall"):
-        h = kj("native", "-n", "colo-svc", "get", "hpa", f"{s}-overflow")
+    for c, s in [(c, s) for c in NATIVE for s in ("sandbox", "toolcall")]:
+        h = kj(c, "-n", "colo-svc", "get", "hpa", f"{s}-overflow")
         conds = {x["type"]: x["status"] for x in h["status"].get("conditions", [])}
-        check(f"native: {s}-overflow HPA min 0, tolerance 0, ScalingActive",
+        check(f"{c}: {s}-overflow HPA min 0, tolerance 0, ScalingActive",
               h["spec"].get("minReplicas") == 0 and conds.get("ScalingActive") == "True"
               and str(h["spec"]["behavior"]["scaleUp"].get("tolerance")) == "0", h["spec"]["metrics"][0]["external"]["metric"]["name"])
 
@@ -147,20 +160,22 @@ def main():
 
     # 4. metrics isolation ----------------------------------------------------------------------------------------
     clusters = {r["metric"].get("cluster") for r in promql('count by (cluster) (kube_pod_info{container="kube-state-metrics",exported_namespace="colo-svc"})')}
-    check("GMP: colo kube-state-metrics series only from the native cluster", clusters <= {NAME["native"]}, str(clusters))
+    natives = {NAME[c] for c in NATIVE}
+    check("GMP: colo kube-state-metrics series only from the native-recipe clusters", clusters <= natives, str(clusters))
     clusters = {r["metric"].get("cluster") for r in promql("count by (cluster) (colo_overflow_needed)")}
-    check("GMP: colo_overflow_needed only from the native cluster", clusters == {NAME["native"]}, str(clusters))
-    q = json.dumps([a["spec"] for a in ams])
-    check("native AutoscalingMetric queries scoped to the native cluster only",
-          NAME["native"] in q and NAME["controller"] not in q and q.count("cluster=") == q.count(f'cluster=\\"{NAME["native"]}\\"'),
-          f"{q.count('cluster=')} cluster selectors")
+    check("GMP: colo_overflow_needed only from the native-recipe clusters", clusters == natives, str(clusters))
+    for c, items in (("native", ams), ("tpu", ams_tpu)):
+        q = json.dumps([a["spec"] for a in items])
+        check(f"{c} AutoscalingMetric queries scoped to its own cluster only",
+              NAME[c] in q and all(NAME[o] not in q for o in CTX if o != c)
+              and q.count("cluster=") == q.count(f'cluster=\\"{NAME[c]}\\"'), f"{q.count('cluster=')} cluster selectors")
 
     # 5. demand isolation: nudge one cluster, the other must not move ---------------------------------------------
     def toolcall_total(c):
         r = deploy_replicas(c)
         return r.get("toolcall-backfill", 0) + (r.get("toolcall-overflow", 0) if c == "controller" else 0)
 
-    for a, b in (("native", "controller"), ("controller", "native")):
+    for a, b in (("native", "controller"), ("controller", "native"), ("tpu", "native"), ("native", "tpu")):
         dem_a, pod_a = demand(a)
         before_a, before_b, dem_b = toolcall_total(a), toolcall_total(b), demand(b)[0]
         set_toolcall(a, dem_a["toolcall"] + 2, pod_a)
@@ -183,11 +198,14 @@ def main():
             st = json.load(urllib.request.urlopen(f"{args.demo}/api/state?cluster={c}", timeout=20))
             nodes = {n.get("name", "") for n in st.get("nodes") or []}
             own = {n["metadata"]["name"] for n in kj(c, "get", "nodes")["items"]}
-            other = {n["metadata"]["name"] for n in kj("controller" if c == "native" else "native", "get", "nodes")["items"]}
-            check(f"demo {c}: 0 errors, own nodes only, correct control kind",
+            other = {n["metadata"]["name"] for o in CTX if o != c for n in kj(o, "get", "nodes")["items"]}
+            accel = st.get("accelerator") or {}
+            accel = accel.get("id") or accel.get("key") if isinstance(accel, dict) else accel
+            check(f"demo {c}: 0 errors, own nodes only, correct control kind and accelerator",
                   not st.get("errors") and nodes and nodes <= own and not (nodes & other)
-                  and (st.get("control") or {}).get("kind", "controller") == ("native" if c == "native" else "controller"),
-                  f"errors={st.get('errors')} nodes={len(nodes)} control={(st.get('control') or {}).get('kind')}")
+                  and (st.get("control") or {}).get("kind", "controller") == ("native" if c in NATIVE else "controller")
+                  and (accel in (None, "g4") if c != "tpu" else accel == "tpu-v6e"),
+                  f"errors={st.get('errors')} nodes={len(nodes)} control={(st.get('control') or {}).get('kind')} accel={accel}")
         except Exception as e:  # noqa: BLE001
             check(f"demo {c} reachable", False, str(e))
     since = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")

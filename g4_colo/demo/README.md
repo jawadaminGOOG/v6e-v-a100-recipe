@@ -49,7 +49,7 @@ Environment variables:
 | `DEMO_KUBE_CONTEXT` | current | kubeconfig context to use (single-cluster mode) |
 | `DEMO_LOADGEN_RATE_IS_TOTAL` | `0` | `1` if each loadgen replica's `/stats.rate` is already the cluster total (default: per-replica share, summed) |
 | `DEMO_SCENARIO_TIME_SCALE` | `1` | multiplies scenario `wait`/`timeout` durations |
-| `DEMO_PRICE_G4_HR`, `DEMO_PRICE_VCPU_HR`, `DEMO_PRICE_GIB_HR`, `DEMO_PRICE_N4D16_HR` | 1.98, 0.0131, 0.00149, 16·vCPU+64·GiB | cost-ticker prices (USD/hr) |
+| `DEMO_PRICE_G4_HR`, `DEMO_PRICE_V6E_HR`, `DEMO_PRICE_VCPU_HR`, `DEMO_PRICE_GIB_HR`, `DEMO_PRICE_N4D16_HR` | 1.98, 2.70 (on-demand; Spot ≈ 1.35), 0.0131, 0.00149, 16·vCPU+64·GiB | cost-ticker prices (USD/hr) |
 | `DEMO_N4D_ALLOC_CPU`, `DEMO_N4D_ALLOC_MEM_GIB` | 15.89, 57.0 | n4d-standard-16 allocatable for the all-N4D counterfactual when no N4D node is up (otherwise read from a live N4D node, minus its daemonset requests) |
 | `DEMO_FAST_SCALE` | `1` | **demo accelerator, demo-only**: on a rate change, patch HPA `vllm` `minReplicas` (2 above `DEMO_FAST_SCALE_RPS`=700, else 1) and the Deployment scale so scale-out shows in seconds. `minReplicas` is reset to 1 when the rate drops, when any scenario ends or is cancelled, and on app shutdown. The UI shows a badge whenever the live HPA has `minReplicas > 1`. Set `0` for a production-like run where only the HPA scales vLLM. |
 | `DEMO_EVENTS_TTL_S` | `10` | how often cluster events are re-listed (scoped by a reason field selector, limit 200) |
@@ -65,18 +65,24 @@ scenario on one cluster never locks the other.
 |---|---|---|---|
 | `controller` | `g4cluster-jawadamin-us-west8-0726` | `g4_colo/recipe/` | Control: colo-controller |
 | `native` | `g4cluster-jawadamin-us-west8-1126` | `g4_colo/recipe-native/` | Control: HPA + scheduler |
+| `tpu` | `v6ecluster-jawadamin-us-east5-1126` (TPU v6e, ct6e-standard-1t) | `g4_colo/recipe-native/` | Control: HPA + scheduler |
 
 ```bash
 gcloud container clusters get-credentials g4cluster-jawadamin-us-west8-1126 --region us-west8 --project northam-ce-mlai-tpu
 DEMO_CLUSTERS='[
  {"id":"controller","label":"With colo-controller","recipe":"controller","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"},
- {"id":"native","label":"Native K8s only","recipe":"native","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126"}
+ {"id":"native","label":"Native K8s only","recipe":"native","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126"},
+ {"id":"tpu","label":"TPU v6e · native","recipe":"native","accelerator":"tpu-v6e","context":"gke_northam-ce-mlai-tpu_us-east5_v6ecluster-jawadamin-us-east5-1126","name":"v6ecluster-jawadamin-us-east5-1126"}
 ]' python -m uvicorn app:app --port 8088
 DEMO_MOCK=1 python -m uvicorn app:app --port 8088   # both clusters simulated
 ```
 
 * Entry fields: `id`, `label`, `recipe` (`controller`|`native`), and `context` **or** `endpoint` + `ca_cert`
-  (base64 PEM, Cloud Run with ADC); optional `name`, `region`, `project`. The first entry is the default.
+  (base64 PEM, Cloud Run with ADC); optional `name`, `region`, `project`, and `accelerator` (`g4`, the default,
+  or `tpu-v6e`). `accelerator` sets the accelerator-host price, its vCPU fallback (48 / 44) and every G4/GPU word
+  the page shows (`state.ACCELERATORS`): on `tpu-v6e` the page says "TPU v6e", "v6e #1" and "TPU load". The TPU
+  node pool keeps the recipe's class labels (`compute-class=g4-gpu`, `colo.role=g4`), so placement is unchanged.
+  With `DEMO_MOCK=1` the simulator emulates the entry's accelerator. The first entry is the default.
   A `context` entry uses only that context (no fallback to another cluster's credentials). A cluster whose
   credentials fail to load shows an error banner; the other cluster keeps working.
 * **What differs on `native`** (no colo-controller, no `colo-config`): demand = `spec.replicas` of

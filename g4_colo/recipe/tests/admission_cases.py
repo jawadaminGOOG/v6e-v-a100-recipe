@@ -36,11 +36,15 @@ def affinity(key, values, op="In"):
         "nodeSelectorTerms": [{"matchExpressions": [expr]}]}}}
 
 
-def pod(name, ns, prio=None, cpu_req="2", cpu_lim="2", mem_req="1Gi", mem_lim="1Gi", gpu=False, g4=True, **spec_extra):
+def pod(name, ns, prio=None, cpu_req="2", cpu_lim="2", mem_req="1Gi", mem_lim="1Gi", gpu=False, g4=True, tpu=False,
+        **spec_extra):
     res = {"requests": {"cpu": cpu_req, "memory": mem_req}, "limits": {"cpu": cpu_lim, "memory": mem_lim}}
     if gpu:
         res["requests"]["nvidia.com/gpu"] = 1
         res["limits"]["nvidia.com/gpu"] = 1
+    if tpu:  # overlays/tpu-v6e: the accelerator host is a Cloud TPU v6e node
+        res["requests"]["google.com/tpu"] = 1
+        res["limits"]["google.com/tpu"] = 1
     spec = {"containers": [{"name": "c", "image": "registry.k8s.io/pause:3.10", "resources": res}]}
     if g4:
         spec.update(copy.deepcopy(G4))
@@ -130,6 +134,20 @@ CASES = [
     ("reject: affinity gke-accelerator Exists, non-expendable",
      pod("b8", "colo-svc", prio="colo-overflow", g4=False,
          affinity=affinity("cloud.google.com/gke-accelerator", None, op="Exists")), False),
+    # --- TPU accelerator host (overlays/tpu-v6e): google.com/tpu counts as an accelerator like nvidia.com/gpu ---
+    ("reject: TPU request outside inference", pod("p1", "colo-svc", prio="colo-backfill", tpu=True), False),
+    # GKE's own TPU admission check (tpu-accelerator-topology-constraints) requires both TPU node selectors.
+    ("accept: TPU workload in inference", pod("p2", "inference", prio="gpu-serving", cpu_req="8", cpu_lim="8",
+                                              mem_req="64Gi", mem_lim="64Gi", tpu=True, nodeSelector={
+                                                  "cloud.google.com/compute-class": "g4-gpu",
+                                                  "cloud.google.com/gke-tpu-accelerator": "tpu-v6e-slice",
+                                                  "cloud.google.com/gke-tpu-topology": "1x1"}), True),
+    ("reject: nodeSelector cloud.google.com/gke-tpu-accelerator, non-expendable",
+     pod("p3", "colo-svc", prio="colo-overflow", g4=False,
+         nodeSelector={"cloud.google.com/gke-tpu-accelerator": "tpu-v6e-slice"}), False),
+    ("reject: affinity gke-tpu-accelerator Exists, non-expendable",
+     pod("p4", "colo-svc", prio="colo-overflow", g4=False,
+         affinity=affinity("cloud.google.com/gke-tpu-accelerator", None, op="Exists")), False),
     ("reject: nodeName set, non-expendable",
      pod("b9", "colo-svc", prio="colo-overflow", g4=False, nodeName=NODE), False),
     ("reject: compliant backfill but runtimeClassName gvisor on G4 (cpuset bypass)",

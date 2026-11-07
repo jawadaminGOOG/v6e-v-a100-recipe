@@ -17,9 +17,9 @@
 <div class="pane">
 
 <header class="top">
-  <h1>G4 colo</h1>
+  <h1 data-acc>G4 colo</h1>
   <div class="seg" id="cluster-seg" role="radiogroup" aria-label="Cluster" hidden></div>
-  <p class="lede">Spare GPU-node cores run CPU services. Only the excess goes to N4D.</p>
+  <p class="lede" data-acc>Spare GPU-node cores run CPU services. Only the excess goes to N4D.</p>
   <span class="spacer"></span>
   <span class="pill ctl" id="ctl-chip" hidden><span class="ctl-k">Control:</span> <b id="ctl-label"></b></span>
   <span id="accel" class="pill warn" hidden title="The demo set the vLLM HPA minReplicas to 2 so scale-out shows in seconds. It is reset to 1 when the rate drops, when a scenario ends, and on shutdown.">Demo accelerator: HPA min 2</span>
@@ -32,10 +32,10 @@
 <section id="story" class="story" aria-labelledby="story-h">
   <h2 id="story-h" class="sr-only">Summary</h2>
   <div class="stmt win" id="s-reclaim">
-    <span class="say">Reclaimed on G4</span>
+    <span class="say" data-acc>Reclaimed on G4</span>
     <span class="big"><span id="h-reclaim">–</span><small>vCPU</small></span>
-    <div class="vis-bar" id="vis-budget" role="img" aria-label="G4 vCPU budget"><i class="v"></i><i class="r"></i><i class="b"></i><i class="f"></i></div>
-    <span class="vis-key">G4 CPU: <i class="k v"></i>vLLM <i class="k r"></i>reclaimed <i class="k f"></i>free</span>
+    <div class="vis-bar" id="vis-budget" data-acc role="img" aria-label="G4 vCPU budget"><i class="v"></i><i class="r"></i><i class="b"></i><i class="f"></i></div>
+    <span class="vis-key" data-acc>G4 CPU: <i class="k v"></i>vLLM <i class="k r"></i>reclaimed <i class="k f"></i>free</span>
   </div>
   <div class="stmt win" id="s-saved">
     <span class="say">Saved vs CPU on N4D</span>
@@ -44,7 +44,7 @@
     <span class="vis-key"><i class="k run"></i>N4D running <i class="k avoid"></i>avoided by colo</span>
   </div>
   <div class="stmt gpu">
-    <span class="say">GPU serving, live</span>
+    <span class="say" data-acc>GPU serving, live</span>
     <div class="pair" id="s-ttft">
       <span><span class="big" id="h-p99">–<small>ms</small></span><span class="lim" id="h-lim">TTFT p99</span></span>
       <svg class="spark" id="sp-ttft" role="img" aria-label="TTFT p99 trend against the guard threshold"></svg>
@@ -64,7 +64,7 @@
       <legend class="sr-only">Manual controls</legend>
       <p class="lock" id="manual-lock" hidden>Locked while a scenario runs.</p>
       <div class="grp">
-        <h3>GPU load</h3>
+        <h3 data-acc>GPU load</h3>
         <div class="field">
           <label for="rate">vLLM requests/s <output id="rate-out" for="rate">0</output></label>
           <input type="range" id="rate" min="0" max="1400" step="10" value="300">
@@ -90,10 +90,10 @@
       </div>
       <div class="grp" id="guard-grp">
         <h3>Latency guard</h3>
-        <p class="na" id="guard-na" hidden>Not used here: memory-heavy services are kept off G4 by admission policy.</p>
+        <p class="na" id="guard-na" data-acc hidden>Not used here: memory-heavy services are kept off G4 by admission policy.</p>
         <div class="guard-row" id="guard-row">
           <input type="checkbox" id="guard" class="switch" role="switch" aria-describedby="guard-sub">
-          <label for="guard"><span id="guard-label">Guard</span><small id="guard-sub">moves analytics off a G4 node when its TTFT p99 passes the threshold</small></label>
+          <label for="guard"><span id="guard-label">Guard</span><small id="guard-sub" data-acc>moves analytics off a G4 node when its TTFT p99 passes the threshold</small></label>
         </div>
       </div>
     </fieldset>
@@ -107,8 +107,8 @@
         <button class="btn sm" type="button" data-preset="light" aria-pressed="false">Light</button>
       </div>
       <div class="scen-list" id="scen-list" aria-label="Scenarios (keys 1–4)">
-        <button class="scen" type="button" data-scenario="gpu-scale-out" title="Load spike adds a G4 node; its spare cores fill"><span class="k">1</span><b>GPU scale-out</b></button>
-        <button class="scen" type="button" data-scenario="gpu-scale-in" title="G4 node released; CPU pods keep running on N4D"><span class="k">2</span><b>GPU scale-in</b></button>
+        <button class="scen" type="button" data-scenario="gpu-scale-out" title="Load spike adds a G4 node; its spare cores fill"><span class="k">1</span><b data-acc>GPU scale-out</b></button>
+        <button class="scen" type="button" data-scenario="gpu-scale-in" title="G4 node released; CPU pods keep running on N4D"><span class="k">2</span><b data-acc>GPU scale-in</b></button>
         <button class="scen" type="button" data-scenario="cpu-scale-out" title="Extra CPU demand spills to N4D, never to GPU"><span class="k">3</span><b>CPU scale-out</b></button>
         <button class="scen" type="button" data-scenario="guard-integer-vs-memory" title="Memory-heavy work is moved off G4 when TTFT rises"><span class="k">4</span><b>Latency guard</b></button>
       </div>
@@ -149,7 +149,7 @@
     </div>
     <div id="nodes" class="nodes" aria-labelledby="nodes-h"></div>
     <div class="lanes" id="lanes" aria-label="Where each CPU service runs">
-      <span></span><span class="zh">on G4 spare cores</span><span class="zh" id="zh-n">on N4D</span>
+      <span></span><span class="zh" data-acc>on G4 spare cores</span><span class="zh" id="zh-n">on N4D</span>
     </div>
   </main>
 </div>
@@ -160,8 +160,8 @@
     <div class="charts">
       <figure><figcaption>TTFT (ms)</figcaption><div class="chart-box"><canvas id="c-ttft" role="img" aria-label="TTFT p50 and p99 against the guard threshold and baseline"></canvas></div></figure>
       <figure><figcaption>Requests per second</figcaption><div class="chart-box"><canvas id="c-rps" role="img" aria-label="Achieved vs target requests per second"></canvas></div></figure>
-      <figure><figcaption>vLLM replicas and nodes</figcaption><div class="chart-box"><canvas id="c-scale" role="img" aria-label="vLLM replicas, G4 and N4D node counts"></canvas></div></figure>
-      <figure><figcaption>CPU pods on G4 vs N4D</figcaption><div class="chart-box"><canvas id="c-svc" role="img" aria-label="CPU pods on G4 backfill vs N4D overflow"></canvas></div></figure>
+      <figure><figcaption>vLLM replicas and nodes</figcaption><div class="chart-box"><canvas id="c-scale" data-acc role="img" aria-label="vLLM replicas, G4 and N4D node counts"></canvas></div></figure>
+      <figure><figcaption data-acc>CPU pods on G4 vs N4D</figcaption><div class="chart-box"><canvas id="c-svc" data-acc role="img" aria-label="CPU pods on G4 backfill vs N4D overflow"></canvas></div></figure>
       <figure><figcaption>Cost per hour: with colo vs CPU on N4D</figcaption><div class="chart-box"><canvas id="c-cost" role="img" aria-label="Fleet cost per hour with colo vs without colo"></canvas></div></figure>
     </div>
   </details>

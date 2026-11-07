@@ -1,0 +1,11 @@
+# TPU v6e demo settings (native recipe): the single place for this overlay's environment values that are not images.
+# local-config: kustomize reads this ConfigMap for `replacements` and never emits it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: colo-settings
+  annotations: {config.kubernetes.io/local-config: "true"}
+data:
+  g4NodePool: v6etpu-jawadamin-us-east5-1126       # accelerator ComputeClass (g4-gpu) pool: ct6e-standard-1t, 1x1
+  n4dNodePool: n4dcpu-jawadamin-us-east5-1126      # ComputeClass n4d-cpu pool
+  model: Qwen/Qwen3-1.7B-Base                      # vLLM --model and loadgen MODEL (same model as the G4 demos)

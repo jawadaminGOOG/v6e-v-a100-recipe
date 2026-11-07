@@ -23,12 +23,15 @@ from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from backend import cluster_info, get_backends, get_cluster_specs  # noqa: E402
+from backend import accelerator_of, cluster_info, get_backends, get_cluster_specs  # noqa: E402
 from scenarios import SCENARIOS, UNAVAILABLE_REASON, ScenarioRunner, resolve_name, scenarios_for  # noqa: E402
-from state import GUARD_NA_REASON, UnsupportedOnRecipe  # noqa: E402
+from state import GUARD_NA_REASON, UnsupportedOnRecipe, localize  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("demo")
+
+# Demo release, shown in the page footer and in /api/state and /api/clusters.
+DEMO_VERSION = "0.6.0"
 
 STATIC = Path(__file__).resolve().parent / "static"
 ERROR_LOG_INTERVAL_S = float(os.environ.get("DEMO_ERROR_LOG_INTERVAL_S", "30"))
@@ -65,8 +68,9 @@ class ClusterCtx:
         self.spec = spec
         self.info = cluster_info(spec)
         self.recipe = spec["recipe"]
+        self.accel = accelerator_of(spec)
         self.backend = backend
-        self.scenarios = scenarios_for(self.recipe)
+        self.scenarios = scenarios_for(self.recipe, self.accel)
         # Coalesce concurrent /api/state polls (several tabs + scenario runner) to one fetch per second.
         self.cache: dict = {"t": 0.0, "state": None}
         self.lock = asyncio.Lock()
@@ -77,6 +81,7 @@ class ClusterCtx:
             on_action=self.invalidate,
             on_finish=self.restore_accelerator,
             scenarios=self.scenarios,
+            accelerator=self.accel,
         )
 
     async def current_state(self) -> dict:
@@ -164,7 +169,7 @@ async def lifespan(_app: FastAPI):
             log.exception("HPA restore on shutdown failed (cluster %s)", ctx.id)
 
 
-app = FastAPI(title="G4 colo at scale demo", lifespan=lifespan)
+app = FastAPI(title="G4 colo at scale demo", version=DEMO_VERSION, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -172,7 +177,7 @@ async def _action(ctx: ClusterCtx, coro, what: str):
     try:
         res = await coro
     except UnsupportedOnRecipe as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
+        raise HTTPException(status_code=409, detail=localize(str(e), ctx.accel)) from e
     except Exception as e:  # noqa: BLE001
         log.exception("%s failed (cluster %s)", what, ctx.id)
         raise HTTPException(status_code=502, detail=f"{what} failed: {type(e).__name__}: {e}") from e
@@ -187,19 +192,22 @@ def _manual_allowed(ctx: ClusterCtx):
 
 def _guard_allowed(ctx: ClusterCtx, what: str):
     if ctx.recipe == "native":
-        raise HTTPException(409, f"{what} is not available on cluster {ctx.id!r} (native recipe): {GUARD_NA_REASON}")
+        raise HTTPException(409, f"{what} is not available on cluster {ctx.id!r} (native recipe): "
+                                 f"{localize(GUARD_NA_REASON, ctx.accel)}")
 
 
 def _demo_info(ctx: ClusterCtx, st: dict) -> dict:
     hpa = (st.get("vllm") or {}).get("hpa") or {}
     return {
+        "version": DEMO_VERSION,
         "fast_scale": bool(getattr(ctx.backend, "fast_scale", False)),
         # Read from the live HPA so a value left by another instance (or a crashed one) also shows.
         # The recipe ships minReplicas=1, so anything above 1 was forced by the demo accelerator.
         "accelerator_active": (hpa.get("min") or 1) > 1,
         "hpa_min": hpa.get("min"),
         "scenarios_available": list(ctx.scenarios),
-        "scenarios_unavailable": {n: UNAVAILABLE_REASON.get((ctx.recipe, n), "not available on this cluster")
+        "scenarios_unavailable": {n: localize(UNAVAILABLE_REASON.get((ctx.recipe, n), "not available on this cluster"),
+                                              ctx.accel)
                                   for n in SCENARIOS if n not in ctx.scenarios},
     }
 
@@ -213,7 +221,9 @@ async def index():
 async def api_clusters():
     return {
         "default": DEFAULT_CLUSTER,
-        "clusters": [{**c.info, "control": "HPA + scheduler" if c.recipe == "native" else "colo-controller",
+        "version": DEMO_VERSION,
+        "clusters": [{**c.info, "accelerator_profile": c.accel,
+                      "control": "HPA + scheduler" if c.recipe == "native" else "colo-controller",
                       "guard_available": c.recipe != "native",
                       "scenario_running": c.runner.running} for c in CTXS.values()],
     }
@@ -296,7 +306,9 @@ async def api_scenario(name: str, cluster: str | None = Query(None)):
             full = resolve_name(name)
         except KeyError:
             raise HTTPException(404, str(e)) from e
-        raise HTTPException(409, UNAVAILABLE_REASON.get((ctx.recipe, full), f"{full} is not available on cluster {ctx.id!r}")) from e
+        raise HTTPException(409, localize(UNAVAILABLE_REASON.get((ctx.recipe, full),
+                                                                 f"{full} is not available on cluster {ctx.id!r}"),
+                                          ctx.accel)) from e
     try:
         return ctx.runner.start(name)
     except RuntimeError as e:

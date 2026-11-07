@@ -1,0 +1,37 @@
+# vLLM on one TPU v6e chip (ct6e-standard-1t, 1x1 slice) instead of one RTX PRO 6000. Same model, port, context
+# length, API-server count and 8-core Guaranteed host slice as base/vllm.yaml; only the TPU build, its device
+# request, its node selector/toleration and its first-start compile budget differ.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: vllm, namespace: inference}
+spec:
+  template:
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-tpu-accelerator: tpu-v6e-slice
+        cloud.google.com/gke-tpu-topology: 1x1
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
+      - {key: google.com/tpu, operator: Exists, effect: NoSchedule}
+      containers:
+      - name: vllm
+        command: ["vllm", "serve"]
+        args:
+        - --model=Qwen/Qwen3-1.7B-Base
+        - --port=8000
+        - --max-model-len=4096
+        - --gpu-memory-utilization=0.9
+        - --enable-prefix-caching
+        - --api-server-count=4
+        - --tensor-parallel-size=1
+        env:
+        # XLA compile cache on the node's hostPath volume: a restart on the same node skips recompilation.
+        - {name: VLLM_XLA_CACHE_PATH, value: /hf/xla_cache}
+        resources:
+          requests: {cpu: "8", memory: 64Gi, nvidia.com/gpu: null, google.com/tpu: 1}
+          limits: {cpu: "8", memory: 64Gi, nvidia.com/gpu: null, google.com/tpu: 1}
+        # First start on a node compiles the XLA graphs for every batch/sequence bucket (minutes, not seconds).
+        startupProbe:
+          httpGet: {path: /health, port: 8000}
+          periodSeconds: 2
+          failureThreshold: 900

@@ -1,0 +1,65 @@
+# TPU v6e overlay (native recipe): the same colo stack with Cloud TPU v6e as the accelerator host instead of G4, as
+# run on the demo cluster v6ecluster-jawadamin-us-east5-1126.
+#   ACCELERATOR=tpu-v6e bash g4_colo/recipe-native/infra/create-node-pools.sh   (accelerator pool: ct6e-standard-1t)
+#   kubectl apply -k g4_colo/recipe-native/overlays/tpu-v6e
+#
+# What changes versus overlays/demo, and nothing else:
+#   - vLLM runs the TPU build (vllm/vllm-tpu) on 1 v6e chip with 8 exclusive host cores, like the G4 slice.
+#   - Every pod that lands on the accelerator host also tolerates GKE's TPU taint (google.com/tpu=present).
+# The accelerator pool keeps the recipe's class identifiers (ComputeClass g4-gpu, label colo.role=g4), so the
+# backfill affinity, admission policy, overflow rules and HPAs are byte-identical to the G4 recipe. The admission
+# policy treats google.com/tpu like nvidia.com/gpu: only the serving workload may request it.
+# ct6e-standard-1t: 44 vCPU / 176 GiB per host, close to g4-standard-48 (48 vCPU / 180 GiB), so the same backfill
+# sizing applies (vLLM 8 + shared reserve 2 + backfill slots).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base
+- settings.yaml
+# Overflow HPA metric source for this cluster: python3 base/gen_colo_services.py --cluster <name> --out overlays/tpu-v6e
+- autoscaling-metric.yaml
+components:
+# Example customer DaemonSet on the accelerator host + N4D (README "Customer DaemonSets on G4").
+- ../../../recipe/components/customer-daemonset
+images:
+- name: colo-registry.invalid/colo-worker
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-worker
+  newTag: v0.2.4
+- name: colo-registry.invalid/colo-loadgen
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-loadgen
+  newTag: v0.2.4
+- name: colo-registry.invalid/colo-node-agent
+  newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
+  newTag: v0.2.4
+- name: vllm/vllm-openai
+  newName: docker.io/vllm/vllm-tpu
+  newTag: v0.33.0
+patches:
+- path: vllm-tpu.yaml
+# GKE taints every TPU node google.com/tpu=present:NoSchedule. Add the toleration to every pod that runs on the
+# accelerator host: backfill, the shared-core reserve, the demo node agent and the example customer DaemonSet.
+- target: {kind: Deployment, namespace: colo-svc, name: ".*-backfill"}
+  patch: &tputol |-
+    - op: add
+      path: /spec/template/spec/tolerations/-
+      value: {key: google.com/tpu, operator: Exists, effect: NoSchedule}
+- target: {kind: DaemonSet, namespace: colo-system, name: "colo-g4-reserve|colo-node-agent"}
+  patch: *tputol
+- target: {kind: DaemonSet, namespace: colo-agents, name: sample-node-agent}
+  patch: *tputol
+replacements:
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.g4NodePool}
+  targets:
+  - select: {kind: ComputeClass, name: g4-gpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.n4dNodePool}
+  targets:
+  - select: {kind: ComputeClass, name: n4d-cpu}
+    fieldPaths: [spec.priorities.0.nodepools.0]
+- source: {kind: ConfigMap, name: colo-settings, fieldPath: data.model}
+  targets:
+  - select: {kind: Deployment, name: vllm}
+    fieldPaths: ['spec.template.spec.containers.[name=vllm].args.0']
+    options: {delimiter: "=", index: 1}
+  - select: {kind: Deployment, name: loadgen}
+    fieldPaths: ['spec.template.spec.containers.[name=loadgen].env.[name=MODEL].value']

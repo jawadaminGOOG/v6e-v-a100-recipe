@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAYS = {
     "demo": {"colo-worker", "colo-loadgen", "colo-node-agent"},
     "production-template": {"colo-worker"},
+    "tpu-v6e": {"colo-worker", "colo-loadgen", "colo-node-agent"},
 }
 OUR_IMAGE_MARKERS = ("colo-registry.invalid/", "/colo-")
 WORKLOAD_KINDS = {"Deployment", "DaemonSet", "StatefulSet", "Job", "CronJob", "Pod", "ReplicaSet"}

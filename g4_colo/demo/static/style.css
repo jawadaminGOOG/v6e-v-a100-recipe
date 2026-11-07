@@ -240,7 +240,7 @@ details.more > * + * { margin-top: 0.7rem; }
 .llc.has-vllm { border-color: #c4c8e8; }
 .llc.has-mem { border-color: #efcfb2; }
 .llc-h { font-size: 0.72rem; color: var(--faint); font-weight: 600; margin: 0 1px 3px; }
-.tiles { display: grid; grid-template-columns: repeat(8, var(--tile)); grid-auto-rows: var(--tile-h); gap: 3px; }
+.tiles { display: grid; grid-template-columns: repeat(var(--llc-cols, 8), var(--tile)); /* JS: cores in this L3 (6 in the last of a 44-vCPU host) */ grid-auto-rows: var(--tile-h); gap: 3px; }
 .cpu { font-style: normal; position: relative; border-radius: 3px; overflow: hidden; background: var(--tint, #fff); box-shadow: inset 0 0 0 1px rgba(22,24,27,.08); transition: background-color .7s var(--ease), opacity .6s; }
 .cpu .fill { position: absolute; inset: 0; background: var(--fillc, #d3d1cb); transform-origin: 50% 100%; transform: scaleY(0); transition: transform 1.25s var(--ease), background-color .7s var(--ease); }
 .cpu .lt { position: absolute; left: 0; right: 0; top: 3px; text-align: center; font-size: calc(var(--tile) * .34); font-weight: 700; color: var(--inkc, transparent); line-height: 1; z-index: 1; }

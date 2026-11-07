@@ -5,11 +5,18 @@ One process can show several clusters. `DEMO_CLUSTERS` is a JSON list, one entry
     [{"id": "controller", "label": "With colo-controller", "recipe": "controller",
       "context": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"},
      {"id": "native", "label": "Native K8s only", "recipe": "native",
-      "context": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126"}]
+      "context": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126"},
+     {"id": "tpu", "label": "TPU v6e · native", "recipe": "native", "accelerator": "tpu-v6e",
+      "context": "gke_northam-ce-mlai-tpu_us-east5_v6ecluster-jawadamin-us-east5-1126",
+      "name": "v6ecluster-jawadamin-us-east5-1126", "region": "us-east5"}]
 
 Each entry takes either `context` (kubeconfig) or `endpoint` + `ca_cert` (base64 PEM; Cloud Run with ADC), plus
 optional `name`, `region`, `project` for the footer. `recipe` is `controller` (g4_colo/recipe/) or `native`
-(g4_colo/recipe-native/). The first entry is the default.
+(g4_colo/recipe-native/). Optional `accelerator` is the accelerator host the recipe runs on: `g4` (default;
+g4-standard-48, 1 RTX PRO 6000) or `tpu-v6e` (ct6e-standard-1t, 1 TPU v6e chip, 44 vCPU). It sets the node price
+(DEMO_PRICE_G4_HR / DEMO_PRICE_V6E_HR), the host vCPU fallback and every G4/GPU word the UI shows (state.ACCELERATORS);
+the role classification is unchanged (the TPU node pool keeps compute-class g4-gpu / colo.role=g4). In DEMO_MOCK=1 the
+simulator emulates that accelerator. The first entry is the default.
 
 Without DEMO_CLUSTERS: one `controller` cluster from DEMO_KUBE_CONTEXT, or GKE_ENDPOINT/GKE_CA_CERT, or the current
 kubeconfig context / in-cluster account (the pre-multi-cluster behaviour). DEMO_MOCK=1 simulates every cluster;
@@ -24,7 +31,7 @@ import os
 import re
 from typing import Any
 
-from state import CLUSTER, RECIPES, build_state
+from state import ACCELERATORS, CLUSTER, DEFAULT_ACCELERATOR, RECIPES, accel_profile, build_state
 
 log = logging.getLogger("demo.backend")
 
@@ -58,10 +65,14 @@ def _normalize(entry: dict, idx: int) -> dict:
         raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}): set context or endpoint, not both")
     if endpoint and not (entry.get("ca_cert") or os.environ.get("GKE_CA_CERT")):
         raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}): endpoint needs ca_cert (base64 PEM)")
+    accel = str(entry.get("accelerator") or DEFAULT_ACCELERATOR)
+    if accel not in ACCELERATORS:
+        raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}).accelerator must be one of {list(ACCELERATORS)}, got {accel!r}")
     return {
         "id": cid,
         "label": str(entry.get("label") or DEFAULT_LABELS.get(recipe, cid)),
         "recipe": recipe,
+        "accelerator": accel,
         "context": ctx,
         "endpoint": endpoint,
         "ca_cert": entry.get("ca_cert") or None,
@@ -101,7 +112,13 @@ def parse_clusters(env: dict | None = None) -> list[dict]:
 def cluster_info(spec: dict) -> dict:
     """What /api/state and /api/clusters expose (never the endpoint or CA)."""
     return {"id": spec["id"], "label": spec["label"], "recipe": spec["recipe"], "name": spec["name"],
-            "region": spec["region"], "project": spec["project"]}
+            "region": spec["region"], "project": spec["project"],
+            "accelerator": spec.get("accelerator") or DEFAULT_ACCELERATOR}
+
+
+def accelerator_of(spec: dict) -> dict:
+    """Display profile of a cluster spec's accelerator host (state.ACCELERATORS)."""
+    return accel_profile(spec.get("accelerator"))
 
 
 class UnavailableBackend:
