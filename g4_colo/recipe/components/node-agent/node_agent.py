@@ -1,12 +1,16 @@
 """colo-node-agent: per-node CPU ownership and utilisation view.
 
 GET /cpus    {"node", "ncpu", "cpu_manager_state", "busy": [% per CPU over the
-              last ~2 s], "mem_used_gib", "mem_total_gib", "sample_window_s"}
+              last ~2 s], "mem_used_gib", "mem_total_gib", "sample_window_s",
+              "topology": {"model", "l3_kib", "cpus": [{"id", "core", "thread", "llc"}]}}
 GET /healthz {"ok": true}
 
 Reads (read-only hostPath mounts):
   HOST_PROC     (default /host/proc)                 stat, meminfo
   KUBELET_DIR   (default /host/var/lib/kubelet)      cpu_manager_state
+  SYS_CPU       (default /sys/devices/system/cpu)    thread siblings and L3 (cache/index3) sharing, i.e. the real
+                                                     L3 domains: 8/8/8 cores on g4-standard-48, 8/7/7 on
+                                                     ct6e-standard-1t (sysfs CPU topology is not namespaced)
 No hostPID needed: /proc/stat and /proc/meminfo are host-global.
 """
 
@@ -21,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOST_PROC = os.environ.get("HOST_PROC", "/host/proc")
 KUBELET_DIR = os.environ.get("KUBELET_DIR", "/host/var/lib/kubelet")
+SYS_CPU = os.environ.get("SYS_CPU", "/sys/devices/system/cpu")
 NODE_NAME = os.environ.get("NODE_NAME", os.uname().nodename)
 PORT = int(os.environ.get("PORT", "8080"))
 SAMPLE_INTERVAL_S = float(os.environ.get("SAMPLE_INTERVAL_S", "0.5"))
@@ -122,7 +127,63 @@ class Sampler(threading.Thread):
 SAMPLER = Sampler()
 
 
+def parse_cpulist(text: str) -> list[int]:
+    """'0-7,22-29' -> [0..7, 22..29]."""
+    out: list[int] = []
+    for part in text.strip().split(","):
+        if not part:
+            continue
+        a, _, b = part.partition("-")
+        out.extend(range(int(a), int(b or a) + 1))
+    return out
+
+
+def read_topology(sys_cpu: str = SYS_CPU, proc: str = HOST_PROC) -> dict | None:
+    """Physical core, hyperthread and L3 domain of every CPU, from sysfs.
+
+    core   = rank of the CPU's lowest sibling among all cores (0..ncores-1)
+    thread = position of the CPU in its sibling list (0 or 1)
+    llc    = rank of the CPU's L3 sharing set (cache/index3/shared_cpu_list) by its lowest CPU
+    None when sysfs has no CPU topology (the demo then falls back to 8 cores per L3).
+    """
+    try:
+        ids = sorted(int(d[3:]) for d in os.listdir(sys_cpu) if d.startswith("cpu") and d[3:].isdigit())
+        sib, l3 = {}, {}
+        for c in ids:
+            sib[c] = tuple(parse_cpulist(read(f"{sys_cpu}/cpu{c}/topology/thread_siblings_list")))
+            try:
+                l3[c] = tuple(parse_cpulist(read(f"{sys_cpu}/cpu{c}/cache/index3/shared_cpu_list")))
+            except OSError:
+                l3[c] = tuple(ids)
+        core_rank = {m: i for i, m in enumerate(sorted({min(v) for v in sib.values()}))}
+        llc_rank = {m: i for i, m in enumerate(sorted({min(v) for v in l3.values()}))}
+        cpus = [{"id": c, "core": core_rank[min(sib[c])], "thread": sib[c].index(c) if c in sib[c] else 0,
+                 "llc": llc_rank[min(l3[c])]} for c in ids]
+    except (OSError, ValueError):
+        return None
+    model, l3_kib = None, None
+    try:
+        for line in read(os.path.join(proc, "cpuinfo")).splitlines():
+            if line.startswith("model name"):
+                model = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+    try:
+        size = read(f"{sys_cpu}/cpu{ids[0]}/cache/index3/size").strip()
+        l3_kib = int(size[:-1]) * (1024 if size.endswith("M") else 1) if size[-1] in "KM" else int(size) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return {"model": model, "l3_kib": l3_kib, "cpus": cpus}
+
+
+TOPOLOGY = None  # read once at first request: CPU topology does not change while the node runs
+
+
 def cpus_payload() -> dict:
+    global TOPOLOGY
+    if TOPOLOGY is None:
+        TOPOLOGY = read_topology() or {}
     try:
         cms = json.loads(read(os.path.join(KUBELET_DIR, "cpu_manager_state")))
     except (OSError, ValueError) as e:
@@ -148,6 +209,7 @@ def cpus_payload() -> dict:
         "mem_total_gib": total,
         "time": time.time(),
         "error": SAMPLER.error or None,
+        "topology": TOPOLOGY or None,
     }
 
 

@@ -32,7 +32,7 @@ images:
   newTag: v0.2.7
 - name: colo-registry.invalid/colo-node-agent
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/colo-node-agent
-  newTag: v0.2.4
+  newTag: v0.2.5
 # Private mirror of the public vllm/vllm-openai image (same tag).
 - name: vllm/vllm-openai
   newName: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/vllm-openai

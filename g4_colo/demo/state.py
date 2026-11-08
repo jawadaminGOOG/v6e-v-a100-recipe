@@ -537,9 +537,11 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
                     else:
                         owner[c] = {"pod": uid[:8], "ns": None, "app": None, "tier": None, "container": cname, "cat": "system"}
         cpus = []
+        # Real topology from the node agent (sysfs) when it reports one; otherwise assume 8 cores per L3.
+        topo = {t["id"]: (t["core"], t["thread"], t["llc"]) for t in ((agent.get("topology") or {}).get("cpus") or [])}
         if agent:
             for c in range(ncpu):
-                core, thread, llc = _cpu_topology(ncpu, c)
+                core, thread, llc = topo.get(c) or _cpu_topology(ncpu, c)
                 o = owner.get(c)
                 cpus.append(
                     {
@@ -573,6 +575,9 @@ def build_state(raw: dict, mode: str = "live", recipe: str = "controller", clust
                 "created": n.get("created"),
                 "age_s": _age_s(n.get("created"), now),
                 "alloc_cpu": parse_cpu(alloc.get("cpu")),
+                "cpu_model": (agent.get("topology") or {}).get("model"),
+                "l3_kib": (agent.get("topology") or {}).get("l3_kib"),
+                "topology_source": "sysfs" if topo else "assumed",
                 "alloc_mem_gib": round(parse_mem_gib(alloc.get("memory")), 1),
                 "ncpu": ncpu,
                 "cpus": cpus,

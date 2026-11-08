@@ -183,3 +183,23 @@ def test_tpu_scenario_banner_and_log_localized():
     assert snap["status"] == "failed"
     assert "TPU v6e nodes" in snap["error"]
     assert _offenders(snap) == [], _offenders(snap)
+
+
+def _l3_cores(node):
+    return [len({c["core"] for c in node["cpus"] if c["llc"] == l}) for l in sorted({c["llc"] for c in node["cpus"]})]
+
+
+def test_core_map_uses_real_l3_domains_v6e_8_7_7_and_g4_8_8_8():
+    # Measured on the live nodes: ct6e-standard-1t (EPYC 9B14) 44 vCPU in L3 domains of 8/7/7 cores;
+    # g4-standard-48 (EPYC 9B45) 48 vCPU in 8/8/8. The core map must follow the agent's topology, not 8 per L3.
+    st = asyncio.run(_tpu_backend().state())
+    host = next(n for n in st["nodes"] if n["role"] == "g4")
+    assert _l3_cores(host) == [8, 7, 7] and host["topology_source"] == "sysfs" and host["cpu_model"] == "AMD EPYC 9B14"
+    assert {c["id"] for c in host["cpus"] if c["llc"] == 1} == set(range(8, 15)) | set(range(30, 37))
+    g4 = asyncio.run(be.make_backend(_specs()[1], mock=True).state())
+    assert _l3_cores(next(n for n in g4["nodes"] if n["role"] == "g4")) == [8, 8, 8]
+    assert _l3_cores(next(n for n in g4["nodes"] if n["role"] == "n4d")) == [8]
+
+
+def test_core_map_falls_back_to_8_per_l3_without_agent_topology():
+    assert [state._cpu_topology(44, c)[2] for c in (7, 8, 15, 16, 21)] == [0, 1, 1, 2, 2]

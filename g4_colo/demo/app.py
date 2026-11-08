@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("demo")
 
 # Demo release, shown in the page footer and in /api/state and /api/clusters.
-DEMO_VERSION = "0.6.0"
+DEMO_VERSION = "0.6.1"
 
 STATIC = Path(__file__).resolve().parent / "static"
 ERROR_LOG_INTERVAL_S = float(os.environ.get("DEMO_ERROR_LOG_INTERVAL_S", "30"))

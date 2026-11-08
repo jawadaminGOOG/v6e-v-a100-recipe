@@ -383,26 +383,38 @@ function cpuKinds(n) {
   return kinds;
 }
 
+// L3 domains, columns and rows come from the node's real CPU topology (node agent, sysfs): e.g. 8/8/8 physical cores
+// on g4-standard-48 (EPYC 9B45) and 8/7/7 on ct6e-standard-1t (EPYC 9B14). One column per physical core, one row per
+// hyperthread. Rebuilt when the topology signature changes (see coreMapKey).
+function coreMapKey(n) { return (n.cpus || []).map((c) => `${c.id}:${c.core}:${c.thread}:${c.llc}`).join(","); }
 function buildCoreMap(n) {
   const root = document.createElement("div");
   root.className = "cmap";
-  const half = n.ncpu / 2, nllc = Math.ceil(half / 8);
+  root._key = coreMapKey(n);
   root._tiles = [];
   root._llcs = [];
-  for (let l = 0; l < nllc; l++) {
-    const cores = [...Array(8).keys()].map((i) => l * 8 + i).filter((c) => c < half);
+  const byLlc = new Map();
+  for (const c of n.cpus || []) {
+    if (!byLlc.has(c.llc)) byLlc.set(c.llc, new Map());
+    const cores = byLlc.get(c.llc);
+    if (!cores.has(c.core)) cores.set(c.core, []);
+    cores.get(c.core)[c.thread] = c.id;
+  }
+  for (const l of [...byLlc.keys()].sort((a, b) => a - b)) {
+    const cores = [...byLlc.get(l).keys()].sort((a, b) => a - b);
+    const nthreads = Math.max(...cores.map((k) => byLlc.get(l).get(k).length));
     const g = document.createElement("div");
     g.className = "llc";
     g.innerHTML = `<div class="llc-h">L3 ${l}</div><div class="tiles" style="--llc-cols:${cores.length}"></div>`;
-    g._cores = `cores ${cores[0]}–${cores[cores.length - 1]}`;
+    g._cores = `${cores.length} cores (${cores.length * nthreads} vCPU), cores ${cores[0]}–${cores[cores.length - 1]}`;
     const grid = g.lastChild;
-    for (const t of [0, 1]) for (const c of cores) {
-      const id = c + t * half;
+    for (let t = 0; t < nthreads; t++) for (const k of cores) {
+      const id = byLlc.get(l).get(k)[t];
       const el = document.createElement("i");
       el.className = "cpu a-free";
       el.innerHTML = `<i class="fill"></i><b class="lt"></b>`;
       grid.appendChild(el);
-      root._tiles[id] = { el, fill: el.firstChild, tag: el.lastChild, app: "free", llc: l };
+      if (id !== undefined) root._tiles[id] = { el, fill: el.firstChild, tag: el.lastChild, app: "free", llc: root._llcs.length };
     }
     root.appendChild(g); root._llcs.push(g);
   }
@@ -500,13 +512,17 @@ function renderNodes(s) {
     const type = n.instance_type || (n.role === "g4" ? ACC.machine : "n4d-standard-16");
     const cpuPods = (n.pods || []).filter((p) => SVCS.includes(p.app)).length;
     const bits = [`${label} · ${type} · ${n.zone || ""}`, n.name];
+    if (n.cpus && n.cpus.length) {
+      const doms = [...new Set(n.cpus.map((c) => c.llc))].map((l) => new Set(n.cpus.filter((c) => c.llc === l).map((c) => c.core)).size);
+      bits.push(`${n.cpus.length} vCPU · ${n.cpu_model || "CPU"} · ${doms.length} L3 domains of ${doms.join("/")} cores${n.l3_kib ? ` · ${Math.round(n.l3_kib / 1024)} MiB L3 each` : ""}${n.topology_source === "assumed" ? " (assumed)" : ""}`);
+    }
     if (n.role === "g4") bits.push(`TTFT p99 ${n.ttft_p99_ms != null ? num(n.ttft_p99_ms) + " ms" : "–"} · p50 ${n.ttft_p50_ms != null ? num(n.ttft_p50_ms) + " ms" : "–"} · ${n.achieved_rps ? num(n.achieved_rps) : "–"} rps`, `${cpuPods}${slots ? ` of ${slots}` : ""} CPU pods`);
     else bits.push(`${cpuPods} overflow pods`);
     (n.blocks || []).forEach((b) => bits.push(`guard: no ${b} pods`));
     el.title = bits.join("\n");
     const host = el.querySelector(".map");
     if (n.cpus && n.cpus.length) {
-      if (!host._map || host._ncpu !== n.cpus.length) { host.innerHTML = ""; host._map = buildCoreMap(n); host._ncpu = n.cpus.length; host.appendChild(host._map); }
+      if (!host._map || host._map._key !== coreMapKey(n)) { host.innerHTML = ""; host._map = buildCoreMap(n); host.appendChild(host._map); }
       updateCoreMap(host._map, n, label);
     } else {
       host._map = null; host._ncpu = 0;
@@ -669,7 +685,7 @@ function renderMethod(s) {
     `<b>Saved vs CPU on N4D</b>: without colo, every CPU pod running now (${cf.pods ?? "–"} pods: G4 backfill plus N4D overflow; ${num(cf.vcpu, 1)} vCPU, ${num(cf.mem_gib, 1)} GiB requested) would run on N4D. Packed first-fit-decreasing onto n4d-standard-16 nodes (${num(cf.node_cpu, 2)} vCPU, ${num(cf.node_mem_gib, 1)} GiB usable each after daemonsets) they need ${cf.n4d_nodes ?? "–"} nodes. ${cf.n4d_nodes_now ?? "–"} N4D nodes run today, so colo saves ${cf.saved_nodes ?? "–"} × ${money(p.n4d16_hr)}/hr = ${money(cf.saved_per_hour)}/hr. Free room on running N4D nodes is counted, and the warm buffer is treated as free.`,
     `<b>Fleet now</b>: ${(s.counts || {}).g4 || 0} G4 × ${money(p.g4_hr)} + ${(s.counts || {}).n4d || 0} N4D × ${money(p.n4d16_hr)} = ${money(c.per_hour)}/hr. Without colo: same G4 + ${cf.n4d_nodes ?? "–"} N4D = ${money(cf.fleet_per_hour)}/hr.`,
     `<b>Reclaimed</b>: CPU requests of Running backfill pods on Ready G4 nodes. <b>Spare</b>: G4 allocatable minus vLLM and system-pod requests.`,
-    `<b>Core map</b>: one tile per vCPU from the node agent; columns are the 8 physical cores of an L3 domain, rows the two hyperthreads. Fill height is the CPU's busy %. Grey tiles are the kubelet reserve plus daemonset requests.`,
+    `<b>Core map</b>: one tile per vCPU from the node agent; columns are the physical cores of each L3 cache domain as the node reports them (8/8/8 on a G4 host, 8/7/7 on a TPU v6e host), rows the two hyperthreads. Fill height is the CPU's busy %. Grey tiles are the kubelet reserve plus daemonset requests.`,
     `<b>Prices</b> are list unit prices set in the demo config (DEMO_PRICE_*), not a quote.`,
     isNative(s)
       ? `<b>Control on this cluster</b>: no controller. <i>svc</i>-backfill replicas = demand; a backfill pod binds only next to a vLLM pod (podAffinity), so a G4 node is eligible iff it runs a Ready vLLM pod. Pods with no slot wait Pending at priority -100, and the <i>svc</i>-overflow HPA (metric colo_overflow_needed, min 1) runs them on N4D. Analytics never backfills (admission policy).`

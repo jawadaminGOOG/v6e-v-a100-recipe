@@ -70,6 +70,24 @@ def _lognormal_hist(total: int, p50: float, p99: float) -> list[int]:
     return counts
 
 
+
+# Measured on the live nodes (sysfs cache/index3/shared_cpu_list): physical cores per L3 domain.
+MOCK_L3_CORES = {"g4": [8, 8, 8], "tpu-v6e": [8, 7, 7], "n4d": [8]}
+MOCK_CPU_MODEL = {"g4": "AMD EPYC 9B45", "tpu-v6e": "AMD EPYC 9B14", "n4d": "AMD EPYC 9B45"}
+
+
+def _mock_topology(ncpu: int, kind: str) -> dict:
+    """Node-agent topology payload: siblings (c, c+ncpu/2), L3 domains as measured for this machine type."""
+    half = ncpu // 2
+    sizes = MOCK_L3_CORES.get(kind) if sum(MOCK_L3_CORES.get(kind, [])) == half else [8] * (half // 8) + ([half % 8] if half % 8 else [])
+    llc_of, core = {}, 0
+    for l, k in enumerate(sizes):
+        for _ in range(k):
+            llc_of[core] = l
+            core += 1
+    return {"model": MOCK_CPU_MODEL.get(kind), "l3_kib": 32768,
+            "cpus": [{"id": c, "core": c % half, "thread": c // half, "llc": llc_of[c % half]} for c in range(ncpu)]}
+
 class MockBackend:
     mode = "mock"
     recipe = "controller"
@@ -529,6 +547,7 @@ class MockBackend:
                     "checksum": 0,
                 },
                 "busy": busy,
+                "topology": _mock_topology(half * 2, self.accel["id"] if n["role"] == "g4" else "n4d"),
                 "mem_used_gib": round(10 + sum(64 if uid_kind.get(u) == "vllm" else 4 for u in set(n["cores"].values())) * 0.8, 1),
             }
 
