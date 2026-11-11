@@ -1,0 +1,339 @@
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 832 470" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ 
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 470 
+L 832 470 
+L 832 0 
+L 0 0 
+L 0 470 
+z
+" style="fill: none"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 91.52 399.5 
+L 798.72 399.5 
+L 798.72 23.5 
+L 91.52 23.5 
+L 91.52 399.5 
+z
+" style="fill: none"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 91.52 399.5 
+L 91.52 23.5 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="mfef8646e79" d="M 0 0 
+L 0 3.5 
+" style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#mfef8646e79" x="91.52" y="399.5" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="91.52" y="421.7" transform="rotate(-0 91.52 421.7)">0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 268.32 399.5 
+L 268.32 23.5 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#mfef8646e79" x="268.32" y="399.5" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="268.32" y="421.7" transform="rotate(-0 268.32 421.7)">25</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 445.12 399.5 
+L 445.12 23.5 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#mfef8646e79" x="445.12" y="399.5" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="445.12" y="421.7" transform="rotate(-0 445.12 421.7)">50</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 621.92 399.5 
+L 621.92 23.5 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#mfef8646e79" x="621.92" y="399.5" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="621.92" y="421.7" transform="rotate(-0 621.92 421.7)">75</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_9">
+      <path d="M 798.72 399.5 
+L 798.72 23.5 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#mfef8646e79" x="798.72" y="399.5" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="798.72" y="421.7" transform="rotate(-0 798.72 421.7)">100 %</text>
+     </g>
+    </g>
+    <g id="text_6">
+     <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="445.12" y="445.85" transform="rotate(-0 445.12 445.85)">spare host vCPU put to work (colo %, of 40)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_11">
+      <path d="M 91.52 372.651438 
+L 798.72 372.651438 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_12">
+      <defs>
+       <path id="ma7fcd78d69" d="M 0 0 
+L -3.5 0 
+" style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="372.651438" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="380.251438" transform="rotate(-0 84.52 380.251438)">$1.30</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_13">
+      <path d="M 91.52 324.131227 
+L 798.72 324.131227 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_14">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="324.131227" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="331.731227" transform="rotate(-0 84.52 331.731227)">$1.40</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_15">
+      <path d="M 91.52 275.611016 
+L 798.72 275.611016 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_16">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="275.611016" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="283.211016" transform="rotate(-0 84.52 283.211016)">$1.50</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_17">
+      <path d="M 91.52 227.090805 
+L 798.72 227.090805 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_18">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="227.090805" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="234.690805" transform="rotate(-0 84.52 234.690805)">$1.60</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_19">
+      <path d="M 91.52 178.570594 
+L 798.72 178.570594 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_20">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="178.570594" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_11">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="186.170594" transform="rotate(-0 84.52 186.170594)">$1.70</text>
+     </g>
+    </g>
+    <g id="ytick_6">
+     <g id="line2d_21">
+      <path d="M 91.52 130.050383 
+L 798.72 130.050383 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_22">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="130.050383" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_12">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="137.650383" transform="rotate(-0 84.52 137.650383)">$1.80</text>
+     </g>
+    </g>
+    <g id="ytick_7">
+     <g id="line2d_23">
+      <path d="M 91.52 81.530172 
+L 798.72 81.530172 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_24">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="81.530172" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_13">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="89.130172" transform="rotate(-0 84.52 89.130172)">$1.90</text>
+     </g>
+    </g>
+    <g id="ytick_8">
+     <g id="line2d_25">
+      <path d="M 91.52 33.009961 
+L 798.72 33.009961 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_26">
+      <g>
+       <use xlink:href="#ma7fcd78d69" x="91.52" y="33.009961" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_14">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="84.52" y="40.609961" transform="rotate(-0 84.52 40.609961)">$2.00</text>
+     </g>
+    </g>
+    <g id="text_15">
+     <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="34.895" y="211.5" transform="rotate(-90 34.895 211.5)">G4 effective $/hr</text>
+    </g>
+   </g>
+   <g id="FillBetweenPolyCollection_1">
+    <defs>
+     <path id="m1737ca4620" d="M 626.486902 -70.5 
+L 626.486902 -171.521408 
+L 798.72 -171.521408 
+L 798.72 -70.5 
+L 798.72 -70.5 
+L 626.486902 -70.5 
+z
+"/>
+    </defs>
+    <g clip-path="url(#p9223df37c7)">
+     <use xlink:href="#m1737ca4620" x="0" y="470" style="fill: #489b6e; fill-opacity: 0.1"/>
+    </g>
+   </g>
+   <g id="line2d_27">
+    <path d="M 91.52 42.714004 
+L 126.88 59.618445 
+L 162.24 76.522887 
+L 197.6 93.43218 
+L 232.96 110.336622 
+L 268.32 127.241063 
+L 303.68 144.145505 
+L 339.04 161.049946 
+L 374.4 177.95924 
+L 409.76 194.863681 
+L 445.12 211.768123 
+L 480.48 228.672564 
+L 515.84 245.577006 
+L 551.2 262.486299 
+L 586.56 279.390741 
+L 621.92 296.295182 
+L 657.28 313.199624 
+L 692.64 330.104065 
+L 728 347.013359 
+L 763.36 363.9178 
+L 798.72 380.822242 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke: #489b6e; stroke-width: 3.5; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_28">
+    <path d="M 91.52 298.478592 
+L 798.72 298.478592 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke-dasharray: 15,10; stroke-dashoffset: 0; stroke: #e2625e; stroke-width: 2.5"/>
+   </g>
+   <g id="line2d_29">
+    <path d="M 626.486902 399.5 
+L 626.486902 23.5 
+" clip-path="url(#p9223df37c7)" style="fill: none; stroke-dasharray: 2.4,3.6; stroke-dashoffset: 0; stroke: #111314; stroke-opacity: 0.55; stroke-width: 1.2"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 91.52 399.5 
+L 91.52 23.5 
+" style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 91.52 399.5 
+L 798.72 399.5 
+" style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="98.592" y="288.406166" transform="rotate(-0 98.592 288.406166)">AWS g7e.2xlarge, 3-yr No Upfront  $1.453/hr</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'Figtree'; text-anchor: start; fill: #489b6e" x="112.736" y="36.523195" transform="rotate(-0 112.736 36.523195)">G4 3-yr CUD  $1.98/hr, nothing colocated</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 17px; font-family: 'Figtree'; fill: #111314" transform="translate(535.113496 78.272088)">break-even</text>
+    <text style="font-size: 17px; font-family: 'Figtree'; fill: #111314" transform="translate(570.47084 98.672088)">75.6 %</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; fill: #111314" transform="translate(589.11625 376.111418)">measured 90 %</text>
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; fill: #111314" transform="translate(638.787813 397.711418)">$1.353/hr</text>
+   </g>
+   <g id="line2d_30">
+    <defs>
+     <path id="m0d59935e2a" d="M 0 6.5 
+C 1.72382 6.5 3.377269 5.815119 4.596194 4.596194 
+C 5.815119 3.377269 6.5 1.72382 6.5 0 
+C 6.5 -1.72382 5.815119 -3.377269 4.596194 -4.596194 
+C 3.377269 -5.815119 1.72382 -6.5 0 -6.5 
+C -1.72382 -6.5 -3.377269 -5.815119 -4.596194 -4.596194 
+C -5.815119 -3.377269 -6.5 -1.72382 -6.5 0 
+C -6.5 1.72382 -5.815119 3.377269 -4.596194 4.596194 
+C -3.377269 5.815119 -1.72382 6.5 0 6.5 
+z
+" style="stroke: #111314; stroke-width: 1.5"/>
+    </defs>
+    <g clip-path="url(#p9223df37c7)">
+     <use xlink:href="#m0d59935e2a" x="728" y="347.011418" style="fill: #e2b540; stroke: #111314; stroke-width: 1.5"/>
+    </g>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p9223df37c7">
+   <rect x="91.52" y="23.5" width="707.2" height="376"/>
+  </clipPath>
+ </defs>
+</svg>

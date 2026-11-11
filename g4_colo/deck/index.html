@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23E2B540'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/deck.css">
+</head>
+<body>
+<main class="stage" aria-roledescription="slide deck" aria-label="Maximizing CPU Utilization on GCP GPU and TPU machines with GKE">
+
+<!-- ============================================================ 1 · Title -->
+<section class="slide" data-accent="yellow" aria-label="Title">
+  <div class="s1-blob" aria-hidden="true"></div>
+  <h1 class="s1-title">Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</h1>
+  <div class="s1-who"><b>Jawad Amin</b> and <b>Karim Roukoz</b> · AI Infra GTM at Google</div>
+  <p class="s1-snip">GPU and TPU hosts ship with dozens of idle vCPU. GKE can put them to work without hurting serving latency.</p>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes"><ul><li>Title only. The numbers behind the snippet are on the next slide.</li></ul></aside>
+</section>
+
+<!-- ============================================================ 2 · The idle half (motivation) -->
+<section class="slide" data-accent="yellow" aria-label="The idle half: motivation">
+  <h2>The idle half of the host<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede m-claim">Customers pay for that host CPU either way, then buy separate CPU nodes for their services. <strong>Our claim:</strong> GKE can fill the idle cores with those services, protect serving latency, and overflow the rest to N4D automatically.</p>
+  <div class="hosts m-hosts">
+    <div class="host">
+      <div class="host-name">g4-standard-48<span>1 × RTX PRO 6000 · 48 vCPU</span></div>
+      <div class="tiles" id="strip-g4" role="img" aria-label="48 vCPU: 8 vLLM, 40 idle, of which 36 put to work and 4 kept for kubelet and the shared reserve"></div>
+      <div class="host-num"><b>40</b><span>of 48 vCPU idle next to the GPU. We put 36 to work.</span></div>
+    </div>
+    <div class="host">
+      <div class="host-name">ct6e-standard-1t<span>1 × TPU v6e · 44 vCPU</span></div>
+      <div class="tiles" id="strip-v6e" role="img" aria-label="44 vCPU: 8 vLLM, 36 idle"></div>
+      <div class="host-num"><b>36</b><span>of 44 vCPU idle next to the TPU. We put <span data-c="v6e_reclaimed">32</span> to work.</span></div>
+    </div>
+    <div class="key"><span><i style="background:var(--blue)"></i>vLLM, 8 exclusive vCPU</span><span><i style="background:var(--yellow)"></i>idle, put to work by colocation</span><span><i style="background:color-mix(in srgb, var(--yellow) 32%, var(--ground))"></i>idle, kept for kubelet and the shared-core reserve</span></div>
+  </div>
+  <p class="prior">Prior work (F. Iezzi, <i>The Idle Half of a GPU Pod</i>) found the host of a g4-standard-384 about 94 % idle during inference.<sup><a href="https://medium.com/google-cloud/the-idle-half-of-a-gpu-pod-8ec3ffaddc4c" target="_blank" rel="noopener" aria-label="Footnote 1: The Idle Half of a GPU Pod on Medium">1</a></sup><br><span class="fn" style="font-size:18px"><sup>1</sup> <a href="https://medium.com/google-cloud/the-idle-half-of-a-gpu-pod-8ec3ffaddc4c" target="_blank" rel="noopener">medium.com/google-cloud/the-idle-half-of-a-gpu-pod-8ec3ffaddc4c</a></span></p>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>8 of 48 vCPU for vLLM:</b> vLLM Deployment requests 8 CPU, Guaranteed (<code>g4_colo/recipe-native/base/vllm.yaml</code>); pinned to CPUs 1–4 + 25–28 (<code>.agents/bench/sweep1_merged/native.samples.jsonl</code>, field <code>cpu.vllm_cpus</code>).</li>
+      <li><b>Definition used on every slide:</b> spare = host vCPU − vLLM's 8. G4 48 − 8 = 40; v6e 44 − 8 = 36.</li>
+      <li><b>G4, 36 of 40 put to work (90 %):</b> 18 backfill pods × 2 vCPU, the full-node point of the sweep (<code>.agents/bench/sweep1_merged/native.marks.json</code>, phase backfill, pods 18; <code>pricing.json</code> <code>measured.g4.reclaimed_vcpu</code>). The other 4: kubelet/system 2 (allocatable 46, <code>alloc_cpu</code> in /api/state) + shared-core reserve 2 (<code>base/g4-reserve.yaml</code>); shared CPUs <code>0,23-24,47</code> (<code>native.samples.jsonl</code> <code>cpu.shared</code>).</li>
+      <li><b>v6e, <span data-c="v6e_reclaimed">32</span> of 36 put to work (<span data-c="v6e_pct">89</span> %):</b> <span data-c="v6e_pods">16</span> pods × 2 vCPU (<code>bench_compare/sweep.py</code> V6E_PROFILE, <code>pricing.json</code> <code>measured.tpu.reclaimed_vcpu</code>). The other 4: kubelet/system (allocatable 43.82, <code>measured.tpu.allocatable_vcpu</code>) + 2-CPU shared reserve, on cores 0 and 21.</li>
+      <li><b>Strips:</b> tiles grouped by L3 domain from sysfs (node agent v0.2.5): 8/8/8 cores on EPYC 9B45, 8/7/7 on EPYC 9B14 (<code>bench_compare/sweep.py</code> L3, L3_V6E).</li>
+      <li><b>Prior work:</b> 94 % idle = CPU user 5.5 % on g4-standard-384 during inference (Iezzi, Medium; <code>scratch/deck/federico_key_facts.md</code>). Only this one line is used.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ 2 · Inside the host -->
+<section class="slide" data-accent="blue" aria-label="Inside the host, G4 vs v6e">
+  <h2>Inside the host: G4 vs v6e<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede">To scale, one tile per vCPU. vLLM owns 4 whole cores in L3 0; each backfill pod owns one whole core.</p>
+  <div class="s2-wrap" style="top:262px;height:560px"><svg id="s2svg" viewBox="0 0 1664 560" role="img" aria-label="Block diagrams of g4-standard-48 and ct6e-standard-1t"></svg></div>
+  <div class="callout" style="position:absolute;left:var(--pad);right:var(--pad);top:832px">
+    <b>Exclusive cores isolate compute, not cache or memory.</b> Each L3 slice is shared by its 7–8 cores, and memory bandwidth by the whole host (red dashes). That is where we measured the interference: memory-bandwidth-bound neighbours raised vLLM TTFT p99 by 124 %, integer neighbours by 6 % (slide 5). So the recipe keeps memory-heavy services off accelerator hosts.
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>Topology:</b> sysfs via node agent v0.2.5 (<code>g4_colo/recipe/components/node-agent/node_agent.py</code>, tests in <code>tests/test_node_agent.py</code>: EPYC 9B14, L3 8/7/7, 32768 KiB). G4: EPYC 9B45, 3 × 8 cores, SMT sibling = cpu + 24; v6e: sibling = cpu + 22 (<code>bench_compare/sweep.py</code> lines 31–35).</li>
+      <li><b>Memory/NUMA:</b> g4-standard-48 180 GB, ct6e-standard-1t 176 GiB, 1 NUMA node each (<code>recipe-native/README.md</code> §3c; <code>tpu-gke-vs-gpu-readme.md</code>).</li>
+      <li><b>Accelerators:</b> RTX PRO 6000 96 GB GDDR7; TPU v6e 32 GiB HBM per chip (public specs). Box width ∝ accelerator memory.</li>
+      <li><b>vLLM CPUs:</b> G4 1–4 + 25–28, one L3 (<code>native.samples.jsonl</code> <code>cpu.vllm_cpus</code>, <code>vllm_l3: 1</code>); v6e 1–4 + 23–26, one L3 (<code>.agents/bench/v6e_sweep1/tpu.samples.jsonl</code>, <code>tpu.cpus.jsonl</code> owner map).</li>
+      <li><b>Backfill:</b> 18 pods on G4 (cores 5–22), <span data-c="v6e_pods">16</span> on v6e, 2 vCPU Guaranteed each → static CPU manager gives whole cores. Shared pool G4 <code>0,23-24,47</code> (<code>native.samples.jsonl</code> <code>cpu.shared</code>).</li>
+      <li><b>+124 % / +6 %:</b> TTFT p99 at 95 % colo, fotonik3d vs 14 integer SPEC benchmarks (<code>g4_colo/results/analysis/vllm_phase_impact_split.csv</code>, level 38, metric ttft_p99: 123.8 % and 6.1 %).</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ 3 · How it works on GKE (step-through) -->
+<section class="slide" data-accent="green" data-steps="4" aria-label="How it works on GKE">
+  <h2>How it works on GKE<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede">vLLM keeps 8 vCPU, CPU services fill the rest, and GKE reacts when either demand changes.</p>
+  <div class="flow-wrap"><svg id="flowsvg" viewBox="0 0 1664 600" role="img" aria-label="Simplified flow: accelerator host, CPU services, overflow to CPU nodes, GKE autoscaling, guardrails"></svg></div>
+  <div class="steps">
+    <ol>
+      <li data-step="1"><b>LLM traffic rises</b> → request-rate metric → vLLM HPA adds a replica → GKE adds an accelerator node → waiting CPU pods land on its spare cores.</li>
+      <li data-step="2"><b>CPU demand rises</b> → pods that don't fit wait → overflow metric → overflow HPA → GKE adds an N4D node and runs them there.</li>
+      <li data-step="3"><b>Guardrails keep serving safe:</b> vLLM's cores are exclusive, memory-heavy services never land on accelerator hosts, only serving can use the GPU or TPU.</li>
+    </ol>
+    <div class="step-ctl">
+      <button type="button" class="st-prev" aria-label="Previous step"><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2.5 5 8l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <span class="st-dots" role="group" aria-label="Steps"></span>
+      <button type="button" class="st-next" aria-label="Next step"><svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5 11 8l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>Presenting:</b> → / Space steps through 0 (overview) → 1 → 2 → 3, then moves to the next slide; ← steps back. Click a dot to jump. The static frame (Slides, screenshots) is step 3 with every path drawn.</li>
+      <li><b>Step 1</b> (GPU/TPU scale-out): vLLM HPA on the AutoscalingMetric request rate, 700 req/s per pod (<code>g4_colo/recipe-native/base/vllm.yaml</code>); Cluster Autoscaler adds a node via the accelerator ComputeClass (<code>base/cluster.yaml</code>); backfill pods (priority −100, required podAffinity to vLLM, <code>base/colo-services.yaml</code>) bind as soon as vLLM is there. Measured: 2nd vLLM Ready 269 s, new node's slots 100 % filled at once (<code>.agents/bench/sweep1_merged/summary.json</code>, README §1b).</li>
+      <li><b>Step 2</b> (CPU scale-out): overflow metric <code>colo_overflow_needed = backfill desired − effective</code> through Managed Prometheus + kube-state-metrics (<code>base/rules.yaml</code>, <code>base/ksm.yaml</code>); overflow HPA minReplicas 0 on ComputeClass n4d-cpu. Measured: demand 18 → 40 fully covered in 88 s; 0 accelerator nodes added for CPU demand (README §2).</li>
+      <li><b>Step 3</b>: ValidatingAdmissionPolicy colo-g4-guard (<code>base/guardrails.yaml</code>); static CPU manager gives vLLM and each 2-vCPU pod whole exclusive cores; 2-CPU shared reserve (<code>base/g4-reserve.yaml</code>). Why memory-heavy is banned: slide 5 (+124 % TTFT p99 next to memory-bandwidth-bound work).</li>
+      <li>Component detail: appendix slide.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ 4 · G4 controlled experiment -->
+<section class="slide" data-accent="red" aria-label="What we measured: G4 controlled experiment">
+  <h2>Measured: G4 controlled experiment<span class="dot" aria-hidden="true"></span></h2>
+  <div class="kpis kstrip" id="kpi-exp"></div>
+  <div class="grid2 g-exp">
+    <div class="fig"><h3>vLLM's 8 cores stay calm while the neighbours run flat out <small>per-CPU busy, 1 s · dark = busy</small></h3><div class="svg" data-svg="exp_heatmap"></div></div>
+    <div class="col">
+      <div class="fig"><h3>vLLM change vs alone <small>5 runs, 95 % CI · <span class="tg">integer</span> · <span class="ty">lbm</span> · <span class="tr">fotonik3d</span></small></h3><div class="svg" data-svg="exp_delta"></div></div>
+      <div class="fig"><h3>TTFT tail, p90 to p99.9 <small>black = vLLM alone</small></h3><div class="svg" data-svg="exp_cdf"></div></div>
+    </div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li>Setup: vLLM (Qwen3-1.7B) at 625 req/s open loop on g4-standard-48 next to SPEC CPU 2026 rate copies on 20 or 38 vCPU (50 % / 95 % colo), Guaranteed pods on exclusive cores; 5 interleaved runs per cell (<code>g4_colo/experiment.json</code>).</li>
+      <li>Node busy 5 → 46 → 80 %: <code>g4_colo/results/analysis/cells.csv</code>, mean cpu_busy_pct by kind/level.</li>
+      <li>Change vs alone: <code>results/analysis/vllm_phase_impact_split.csv</code> (CI = wider of bootstrap and Welch). TTFT p99 at 95 %: integer +6.1 %, lbm +15.3 %, fotonik3d +123.8 %; tokens/s within ±0.2 % everywhere.</li>
+      <li>Heatmap: <code>results/cells/vllm_solo-r1/telemetry.csv</code> and <code>colo-L38-r1/telemetry.csv</code> (busy0–47); vLLM CPUs 1–4, 25–28; system 0, 24.</li>
+      <li>CDFs: <code>results/analysis/latency_quantiles.csv</code>. Extra charts exported but not on the slide: <code>charts/exp_spec_forest.png</code> (SPEC runtime next to vLLM, <code>spec_impact.csv</code>), <code>charts/exp_node_util.png</code>.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ 5 · Native G4 on GKE -->
+<section class="slide" data-accent="red" data-replay="g4" aria-label="What we measured: native recipe, G4 on GKE">
+  <h2>Measured: native recipe, G4 on GKE<span class="dot" aria-hidden="true"></span></h2>
+  <div class="kpis kstrip" id="kpi-g4"></div>
+  <div class="grid2 g-nat">
+    <div class="col">
+      <div class="fig"><h3>TTFT p99 stays inside its budget with the node full</h3><div class="svg" data-svg="g4_latency"></div></div>
+      <div class="row2">
+        <div class="fig"><h3>CPU spike: <span class="tg">G4 cores</span> first, <span class="tr">N4D</span> after</h3><div class="svg" data-svg="g4_spike"></div></div>
+        <div class="fig"><h3>GPU scale-out and in: CPU pods follow vLLM</h3><div class="svg" data-svg="g4_gpu"></div></div>
+      </div>
+    </div>
+    <div class="replay" id="rp-g4"></div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li>Data: <code>.agents/bench/sweep1_merged/native.*</code> (SOURCES.md explains the merge). Charts: <code>deck_charts.py</code> native_set.</li>
+      <li>TTFT p99 20 → 26 ms with 18 CPU pods at 450 req/s (marks phase backfill); budget 1.5 × solo = 30 ms. Load curve: phase load, pods 0 and 18.</li>
+      <li>Node CPU busy 4.3 → 72.2 %, vLLM CPUs 25 → 35 % (marks all_busy / vllm_busy; chart exported as <code>charts/g4_nodebusy.png</code>).</li>
+      <li>CPU spike 18 → 40 pods covered in 88 s, N4D empty 38 s after the drop (step_down.covered_after_s, step_end.drained_after_s). 2nd vLLM Ready 269 s; node removed 597 s after the load drop; CPU pods Ready ≥ demand in 100 % of scale-in samples.</li>
+      <li><b>Replay:</b> scenario runs of the demo web app's scenario engine (cpu-scale-out, gpu-scale-out, gpu-scale-in), played through the app's core-map renderer; the live web app shows the real clusters. Fit plays a scenario in about 22 s (idle stretches skipped); 1× / 4× / 8× are multiples of recorded time. Static key frame: <code>keyframes/replay-g4-*.png</code>.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ 6 · Native v6e on GKE -->
+<section class="slide" data-accent="red" data-replay="v6e" aria-label="What we measured: native recipe, TPU v6e on GKE">
+  <h2>Measured: native recipe, TPU v6e on GKE<span class="dot" aria-hidden="true"></span></h2>
+  <div class="kpis kstrip" id="kpi-v6e"></div>
+  <div class="grid2 g-nat">
+    <div class="col">
+      <div class="fig"><h3>TTFT p99 stays inside its budget with the node full</h3><div class="svg" data-svg="v6e_latency"></div></div>
+      <div class="row2">
+        <div class="fig"><h3>CPU spike: <span class="tg">v6e cores</span> first, <span class="tr">N4D</span> after</h3><div class="svg" data-svg="v6e_spike"></div></div>
+        <div class="fig"><h3>TPU scale-out and in: CPU pods follow vLLM</h3><div class="svg" data-svg="v6e_gpu"></div></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="replay short" id="rp-v6e"></div>
+      <div class="fig" id="v6e-heat"><h3>Per-CPU busy on the v6e host <small><span class="tb">vLLM</span> · <span class="tg">CPU pods</span> · x = minutes</small></h3><div class="svg" data-svg="v6e_heatmap"></div></div>
+    </div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li>Data: <code>.agents/bench/v6e_sweep1/tpu.*</code>, rate 200 req/s, <span data-c="v6e_pods">16</span> CPU pods, load 50–400 req/s (<code>bench_compare/sweep.py</code> V6E_PROFILE). Same chart code and units as slide 6.</li>
+      <li>Per-CPU heatmap: <code>tpu.cpus.jsonl</code> (node agent v0.2.5, 1 s); vLLM CPUs 1–4 + 23–26 (one L3).</li>
+      <li>Final v6e numbers (<code>.agents/bench/v6e_sweep1/summary.md</code>, <code>tpu.marks.json</code>; built with <code>DECK_V6E_FINAL=1</code>): TTFT p99 50 → 50 ms from 0 to <span data-c="v6e_pods">16</span> CPU pods at 200 req/s (52 ms at 4 and 8). Load ladder, vLLM alone: 24 / 30 / 48 / 100 ms at 50 / 100 / 200 / 300 req/s, saturated at 400 (one v6e replica serves ~330 req/s); with <span data-c="v6e_pods">16</span> pods (retest): 26 / 32 / 52 / 92 ms at 50 / 100 / 200 / 300 req/s; both saturate at 400. Host CPU busy 4 → 71 %.</li>
+      <li>CPU spike 16 → 38 pods all Running in 97 s; N4D empty 36 s after the drop (step_down.covered_after_s, step_end.drained_after_s). Forced scale-out (HPA min 2): new node 111 s, 2nd vLLM Ready 468 s incl. XLA compile; node removed 427 s after the load drop; CPU pods Ready ≥ demand 100 % during scale-in. Natural-HPA scale-out was not measured (one v6e replica cannot reach the 700 req/s target), so no chart for it.</li>
+      <li>Recipe includes an IRQ-affinity pin for the TPU's interrupts and a liveness check; both were added after stalls seen at full backfill in earlier runs.</li>
+      <li><b>Replay:</b> scenario runs of the demo web app's engine for the TPU v6e profile; the live web app shows the real cluster.</li>
+    </ul>
+  </aside>
+</section>
+<!-- ============================================================ 7 · What it saves -->
+<section class="slide" data-accent="yellow" aria-label="What it saves">
+  <h2>What it saves<span class="dot" aria-hidden="true"></span></h2>
+  <div class="s5">
+    <div class="headline">
+      <div class="big">Avoids <em><span data-g="g4.usd_mo">$501</span>/mo</em> per G4 host and <em><span data-g="v6e.usd_mo">$445</span>/mo</em> per TPU v6e host of N4D spend</div>
+      <p>At the colo we measured (36 of 40 spare vCPU on G4, <span data-c="v6e_reclaimed">32</span> of 36 on v6e), N4D and host both on 3-yr CUD: <span data-g="g4.pct_host">34.7 %</span> and <span data-g="v6e.pct_host">50 %</span> of the host's own price.</p>
+    </div>
+    <div class="headline">
+      <div class="big">Same GPU as AWS g7e.2xlarge, effectively <em><span data-w="g4_effective">$1.35</span>/hr</em> vs <span data-w="aws">$1.45</span></div>
+      <p>G4 adds 40 vCPU and 116 GiB on the host. Put 90 % of them to work and its 3-yr price drops <span data-w="pct">6.9 %</span> below AWS 3-yr No Upfront.</p>
+    </div>
+    <div>
+      <table class="gtable" id="gtable" aria-label="Avoided N4D spend per host"></table>
+      <p class="fn">Spare = host vCPU − vLLM's 8 (G4 40, v6e 36). Light, typical and full = 25, 60 and 90 % of spare; N4D priced as n4d-standard-16 on the same purchase option as the host; 730 h/month. G4 in us-west8, v6e in us-east5, public list prices.</p>
+    </div>
+    <div>
+      <div class="fig"><div class="svg" data-svg="what_you_get"></div></div>
+      <p class="fn" id="wyg-fn"></p>
+    </div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>Script, headline A (avoided spend):</b> "A GPU or TPU host has far more vCPU than vLLM needs: about 40 spare on G4 and 36 on TPU v6e. With GKE colocation we put 90 % of them to work, running CPU services that would otherwise need their own N4D VMs. That avoids about $500 a month per G4 host and <span data-g="v6e.usd_mo">$445</span> a month per TPU v6e host at 3-yr CUD prices, which is <span data-g="g4.pct_host">35 %</span> and <span data-g="v6e.pct_host">50 %</span> of the host's price. At on-demand prices the figures are about $1,100 and $990."</li>
+      <li><b>Script, headline B (G4 vs AWS):</b> "On a 3-yr commitment, G4 costs $1.98/hr against $1.45/hr for AWS g7e.2xlarge on a 3-yr No Upfront Savings Plan. G4 includes 40 more vCPU, and once you use 76 % of them, G4 is the cheaper choice. At our measured 90 %, G4 effectively costs $1.35/hr, 6.9 % less than AWS No Upfront."</li>
+      <li><b>Required footnote for B:</b> "Compared with AWS 3-yr No Upfront. Against Partial Upfront ($1.345/hr), break-even is 91 % and G4 is 0.6 % more expensive at 90 %. Against All Upfront ($1.265/hr), G4 does not break even, even at 100 % (+1.5 %)."</li>
+      <li>Scripts and caveats: <code>scratch/deck/pricing/summary.md</code>.</li>
+      <li>All numbers: <code>scratch/deck/pricing/</code> (pricing agent; every value in <code>pricing.json</code> carries its source URL or sheet cell).</li>
+      <li><b><span data-g="g4.usd_mo">$501</span> / <span data-g="v6e.usd_mo">$445</span> per month, <span data-g="g4.pct_host">34.7 %</span> / <span data-g="v6e.pct_host">50 %</span>:</b> <code>guidance.csv</code>, 3-yr CUD, level measured (36 of 40 vCPU G4, <span data-c="v6e_reclaimed">32</span> of 36 vCPU v6e) × n4d-standard-16 3-yr resource CUD $0.01906 per vCPU-hr (<code>derived.n4d_per_vcpu_hr.res3y</code>) × 730 h. Host prices: G4 $1.97945/hr (<code>gcp.g4_standard_48.us-west8.res3y</code>), v6e $1.22/hr (<code>gcp.tpu_v6e.us-east5.res3y</code>).</li>
+      <li><b>Table:</b> <code>guidance.csv</code> rows 3-yr CUD, light/typical/full (25/60/90 % of spare: G4 40, v6e 36). On-demand and 1-yr rows are in <code>guidance.md</code>.</li>
+      <li><b>What you get (headline B visual):</b> machine specs and prices from <code>scratch/deck/pricing/what_you_get.json</code> (pricing agent). Cards are drawn to scale per resource (same scale for both machines in a row); green = G4 resources beyond the AWS shape. Waterfall: G4 3-yr $1.98 (sheet D4) − value of the extra vCPU + RAM put to work at the measured 90 % (0.90 × V, V = $0.69684 for the 40 spare vCPU + 116 GiB, sheet F8) = $1.353/hr effective (<code>result.g4_effective_at_measured</code>), vs AWS g7e.2xlarge 3-yr No Upfront $1.45287/hr (sheet D5). Break-even 75.6 % (sheet B11) is in the notes only.</li>
+      <li><b>Footnote:</b> Partial Upfront $1.34525 → 91.1 %; All Upfront $1.26453 → 102.7 %; Flex-CUD V $0.836 → 63.0 % (<code>result.break_even_colo*</code>). Both headlines are shown with equal weight (user decision).</li>
+      <li>Spare base is the same everywhere: host vCPU − vLLM's 8 (G4 40, v6e 36); the sheet's 40 (48 − 8 vCPU of g7e.2xlarge) matches G4. Measured: G4 36/40 = 90 %, v6e <span data-c="v6e_reclaimed">32</span>/36 = <span data-c="v6e_pct">89</span> %.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ Appendix · recipe components -->
+<section class="slide" data-accent="green" data-appendix="1" aria-label="Appendix: recipe components">
+  <h2 style="top:84px">Appendix: recipe components<span class="dot" aria-hidden="true"></span></h2>
+  <div class="s3-wrap" style="top:190px;height:722px"><svg id="s3svg" viewBox="0 0 1720 750" role="img" aria-label="Block diagram of the native GKE recipe"></svg></div>
+  <p class="s3-variant"><b>Controller variant</b> (g4_colo/recipe/): a small colo-controller makes the same split in a 2 s loop. It covered our CPU spike 18 s sooner and emptied N4D 26 s sooner, but it is custom code.</p>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>Recipe:</b> <code>g4_colo/recipe-native/README.md</code> §1–1b; manifests <code>base/vllm.yaml</code> (Deployment + HPA, AutoscalingMetric request-rate, 700 req/s per pod, scale-down window 120 s), <code>base/colo-services.yaml</code> (backfill priority −100 + required podAffinity to app=vllm; overflow on ComputeClass n4d-cpu + HPAs minReplicas 0, tolerance 0), <code>base/rules.yaml</code> (ClusterRules: colo_backfill_desired / effective / colo_overflow_needed), <code>base/ksm.yaml</code> (kube-state-metrics, 5 s), <code>base/cluster.yaml</code> (PriorityClasses, ComputeClasses, consolidationDelayMinutes 3), <code>base/guardrails.yaml</code> (VAP colo-g4-guard, quota, NetworkPolicies), <code>base/g4-reserve.yaml</code> (2-CPU Burstable reserve DaemonSet).</li>
+      <li><b>~15 s:</b> overflow HPA reaction 14–16 s on GKE 1.37 (<code>README.md</code> §2 table, <code>N0_lag_v2_gke137.json</code>).</li>
+      <li><b>Customer DaemonSets:</b> README §3b: namespace label <code>colo.gke.io/g4-daemonsets: allowed</code>, created by the DaemonSet controller identity, no GPU; gVisor banned.</li>
+      <li><b>Controller variant 18 s / 26 s:</b> <code>.agents/bench/sweep1_merged/summary.json</code>: step_covered_after_s 70.3 vs 88.3, step_drained_after_s 12.3 vs 38.5.</li>
+      <li>Requires GKE ≥ 1.37 for HPA scale to zero, ≥ 1.36.2 for AutoscalingMetric PromQL (Preview) (README §3).</li>
+    </ul>
+  </aside>
+</section>
+
+
+</main>
+<div class="pager" aria-live="polite"></div>
+<div class="notes-panel" role="complementary" aria-label="Speaker notes"></div>
+<script src="js/deck_data.js"></script>
+<script src="js/replay.js"></script>
+<script src="js/deck.js"></script>
+</body>
+</html>

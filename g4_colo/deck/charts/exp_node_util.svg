@@ -1,0 +1,195 @@
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 400 230" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ 
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 230 
+L 400 230 
+L 400 0 
+L 0 0 
+L 0 230 
+z
+" style="fill: none"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 100 202.4 
+L 372 202.4 
+L 372 18.4 
+L 100 18.4 
+L 100 202.4 
+z
+" style="fill: none"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 100 202.4 
+L 100 18.4 
+" clip-path="url(#p8e8b1a2648)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="m16949c7514" d="M 0 0 
+L 0 3.5 
+" style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m16949c7514" x="100" y="202.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="100" y="224.6" transform="rotate(-0 100 224.6)">0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 168 202.4 
+L 168 18.4 
+" clip-path="url(#p8e8b1a2648)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m16949c7514" x="168" y="202.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="168" y="224.6" transform="rotate(-0 168 224.6)">25</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 236 202.4 
+L 236 18.4 
+" clip-path="url(#p8e8b1a2648)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#m16949c7514" x="236" y="202.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="236" y="224.6" transform="rotate(-0 236 224.6)">50</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 304 202.4 
+L 304 18.4 
+" clip-path="url(#p8e8b1a2648)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#m16949c7514" x="304" y="202.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="304" y="224.6" transform="rotate(-0 304 224.6)">75</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_9">
+      <path d="M 372 202.4 
+L 372 18.4 
+" clip-path="url(#p8e8b1a2648)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#m16949c7514" x="372" y="202.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="372" y="224.6" transform="rotate(-0 372 224.6)">100 %</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_11">
+      <defs>
+       <path id="m9c20b1ecc6" d="M 0 0 
+L -3.5 0 
+" style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m9c20b1ecc6" x="100" y="46.555448" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_6">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="93" y="54.155448" transform="rotate(-0 93 54.155448)">vLLM alone</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m9c20b1ecc6" x="100" y="110.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="93" y="118" transform="rotate(-0 93 118)">50 % colo</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_13">
+      <g>
+       <use xlink:href="#m9c20b1ecc6" x="100" y="174.244552" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="93" y="181.844552" transform="rotate(-0 93 181.844552)">95 % colo</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 100 66.347259 
+L 114.165394 66.347259 
+L 114.165394 26.763636 
+L 100 26.763636 
+z
+" clip-path="url(#p8e8b1a2648)" style="fill: #a1a39a"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 100 130.191811 
+L 223.644415 130.191811 
+L 223.644415 90.608189 
+L 100 90.608189 
+z
+" clip-path="url(#p8e8b1a2648)" style="fill: #489b6e; fill-opacity: 0.5"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 100 194.036364 
+L 317.126847 194.036364 
+L 317.126847 154.452741 
+L 100 154.452741 
+z
+" clip-path="url(#p8e8b1a2648)" style="fill: #489b6e"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 100 202.4 
+L 100 18.4 
+" style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 100 202.4 
+L 372 202.4 
+" style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="118.245394" y="52.855448" transform="rotate(-0 118.245394 52.855448)">5 %</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="227.724415" y="116.7" transform="rotate(-0 227.724415 116.7)">45 %</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="321.206847" y="180.544552" transform="rotate(-0 321.206847 180.544552)">80 %</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p8e8b1a2648">
+   <rect x="100" y="18.4" width="272" height="184"/>
+  </clipPath>
+ </defs>
+</svg>

@@ -11,9 +11,13 @@ Phases (identical on both clusters):
   step      CPU demand step at 450 rps: 9/9 (fits G4) -> 20/20 (22 overflow) for 240 s -> 9/9 for 300 s
   gpu       GPU scale-out/in: HPA min 1 max 2, demand 18/18, 1200 rps until 2 vLLM Ready + 120 s, then 300 rps
             until a G4 node is removed (max 900 s)
-  restore   puts back each cluster's pre-sweep demand, rate and HPA min/max
+  restore   puts back each cluster's pre-sweep demand, rate and HPA min/max (or the profile's "restore" values)
 
-    python3 sweep.py --out ../../.agents/bench/<run> [--phases setup,backfill,load,step,gpu]
+The numbers above are the G4 profile. `--clusters tpu` runs the same phases on the TPU v6e native cluster with
+V6E_PROFILE (16 backfill slots, rates scaled to one v6e replica, forced HPA min 2 for the scale-out). `--cpu-1s`
+adds <cluster>.cpus.jsonl: per-CPU busy % of the vLLM node every second (for heatmaps).
+
+    python3 sweep.py --out ../../.agents/bench/<run> [--phases setup,backfill,load,step,gpu] [--clusters tpu --cpu-1s]
 """
 from __future__ import annotations
 
@@ -24,18 +28,39 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+L3 = [set(range(0, 8)) | set(range(24, 32)), set(range(8, 16)) | set(range(32, 40)),
+      set(range(16, 24)) | set(range(40, 48))]  # g4-standard-48 (EPYC 9B45): 3 CCX x 8 cores + SMT siblings
+# ct6e-standard-1t (EPYC 9B14, 44 vCPU): 22 cores in L3 groups of 8/7/7, SMT sibling of cpu N is N+22 (sysfs).
+L3_V6E = [set(range(0, 8)) | set(range(22, 30)), set(range(8, 15)) | set(range(30, 37)),
+          set(range(15, 22)) | set(range(37, 44))]
+
+# Per-cluster experiment profile. G4 values are the original sweep1 constants; the TPU v6e profile is scaled to the
+# v6e host (16 backfill slots, not 18) and to one v6e vLLM replica's throughput (~330 completed rps, so the vLLM
+# HPA's 700 rps/pod target can never be reached by load alone: gpu_mode "force" raises HPA minReplicas to 2 instead,
+# exactly what the demo's fast-scale switch does).
+G4_PROFILE = {"rate": 450, "backfill": (0, 4, 8, 12, 16, 18), "load_pods": (0, 18), "load_rates": (200, 450, 700, 1000, 1200),
+              "step_lo": (9, 9), "step_hi": (20, 20), "gpu_demand": (18, 18), "gpu_hi": 1200, "gpu_lo": 300,
+              "gpu_mode": "hpa", "warm_ms": 100, "l3": L3}
+V6E_PROFILE = {"rate": 200, "backfill": (0, 4, 8, 12, 16), "load_pods": (0, 16), "load_rates": (50, 100, 200, 300, 400),
+               "step_lo": (8, 8), "step_hi": (19, 19), "gpu_demand": (16, 16), "gpu_hi": 600, "gpu_lo": 300,
+               "gpu_mode": "force", "warm_ms": 400, "l3": L3_V6E,
+               # restore to the demo's steady state rather than whatever was live before the sweep
+               "restore": {"demand": [10, 10, 2], "hpa": [1, 2], "rate": 300.0}}
 CLUSTERS = {
-    "controller": {"ctx": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726", "port": 8197},
-    "native": {"ctx": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126", "port": 8196},
+    "controller": {"ctx": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726", "port": 8197,
+                   "recipe": "controller", "profile": G4_PROFILE},
+    "native": {"ctx": "gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-1126", "port": 8196,
+               "recipe": "native", "profile": G4_PROFILE},
+    "tpu": {"ctx": "gke_northam-ce-mlai-tpu_us-east5_v6ecluster-jawadamin-us-east5-1126", "port": 8198,
+            "recipe": "native", "profile": V6E_PROFILE},
 }
 SVCS = ("sandbox", "toolcall", "analytics")
 BUCKET_MS = 2
-L3 = [set(range(0, 8)) | set(range(24, 32)), set(range(8, 16)) | set(range(32, 40)),
-      set(range(16, 24)) | set(range(40, 48))]  # g4-standard-48 (EPYC 9B45): 3 CCX x 8 cores + SMT siblings
 
 
 def log(name, msg):
@@ -77,7 +102,9 @@ def pct(h, q):
 class Cluster:
     def __init__(self, name, out: Path):
         self.name, self.ctx, self.port = name, CLUSTERS[name]["ctx"], CLUSTERS[name]["port"]
-        self.recipe = name
+        self.recipe = CLUSTERS[name]["recipe"]
+        self.P = CLUSTERS[name]["profile"]
+        self.cpu_fh = open(out / f"{name}.cpus.jsonl", "a")  # per-CPU busy % of the vLLM node(s) at 1 s
         self.proxy = subprocess.Popen(["kubectl", "--context", self.ctx, "proxy", "--port", str(self.port)],
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(2)
@@ -89,7 +116,16 @@ class Cluster:
         self.stop = False
 
     # ------------------------------------------------------------------ io
-    def http(self, path, body=None, timeout=8.0):
+    def http(self, path, body=None, timeout=8.0, tries=4):
+        for i in range(tries):
+            try:
+                return self._http(path, body, timeout)
+            except urllib.error.HTTPError as e:
+                if e.code < 500 or i == tries - 1:
+                    raise
+                time.sleep(2)
+
+    def _http(self, path, body=None, timeout=8.0):
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}",
                                      data=None if body is None else json.dumps(body).encode(),
                                      method="GET" if body is None else ("PATCH" if isinstance(body, tuple) else "POST"),
@@ -97,9 +133,15 @@ class Cluster:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read() or b"null")
 
-    def kubectl(self, *args):
-        return subprocess.run(["kubectl", "--context", self.ctx, *args], capture_output=True, text=True,
-                              check=True).stdout
+    def kubectl(self, *args, tries=6):
+        # retried: GKE control planes return 503s for a few seconds at a time (seen on the v6e cluster)
+        for i in range(tries):
+            r = subprocess.run(["kubectl", "--context", self.ctx, *args], capture_output=True, text=True)
+            if r.returncode == 0:
+                return r.stdout
+            log(self.name, f"kubectl {' '.join(args[:4])} failed ({i + 1}/{tries}): {r.stderr.strip()[:200]}")
+            time.sleep(5)
+        raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
 
     def mark(self, phase, **kw):
         m = {"t": time.time(), "phase": phase, **kw}
@@ -209,7 +251,7 @@ class Cluster:
                         vset |= parse_cpuset(v["vllm"])
                 busy = d.get("busy") or []
                 cpu[p["spec"]["nodeName"]] = {
-                    "vllm_cpus": sorted(vset), "vllm_l3": sum(1 for dom in L3 if vset & dom),
+                    "vllm_cpus": sorted(vset), "vllm_l3": sum(1 for dom in self.P["l3"] if vset & dom),
                     "vllm_busy": round(sum(busy[i] for i in vset) / len(vset), 1) if vset and busy else None,
                     "all_busy": round(sum(busy) / len(busy), 1) if busy else None,
                     "shared": (d.get("cpu_manager_state") or {}).get("defaultCpuSet"),
@@ -231,6 +273,81 @@ class Cluster:
             except Exception as e:  # noqa: BLE001
                 log(self.name, f"sample error {type(e).__name__}: {e}")
             time.sleep(max(0.2, 2.0 - (time.time() - t0)))
+
+    def run_hangwatch(self, out: Path):
+        """Detect a vLLM pod that stops completing requests while load is offered (seen on vLLM-TPU): 3 consecutive
+        2 s samples with 0 ok and >0 errors in the loadgen window. Marks "hang" with the container restart count and
+        saves the vLLM log tail; marks "hang_end" when the pod (or its replacement) serves again."""
+        hung: dict[str, float] = {}
+        streak: dict[str, int] = {}
+        seen = 0
+        while not self.stop:
+            time.sleep(2)
+            with self.lock:
+                new = self.samples[seen:]
+                seen = len(self.samples)
+            for smp in new:
+                for vp, d in smp["lg"].items():
+                    bad = (d.get("ok") or 0) == 0 and (d.get("err") or 0) > 0
+                    streak[vp] = streak.get(vp, 0) + 1 if bad else 0
+                    if streak[vp] == 3 and vp not in hung:
+                        hung[vp] = smp["t"]
+                        try:
+                            pod = json.loads(self.kubectl("-n", "inference", "get", "pod", vp, "-o", "json", tries=2))
+                            restarts = sum(c.get("restartCount", 0) for c in pod["status"].get("containerStatuses", []))
+                            tail = self.kubectl("-n", "inference", "logs", vp, "--tail=300", "--timestamps", tries=2)
+                        except Exception as e:  # noqa: BLE001
+                            restarts, tail = None, f"log capture failed: {e}"
+                        f = out / f"hang_{vp}_{int(smp['t'])}.log"
+                        f.write_text(tail)
+                        cpu = smp["cpu"].get(d.get("node") or "", {})
+                        self.mark("hang", pod=vp, node=d.get("node"), since=smp["t"] - 4, restarts=restarts, log=f.name,
+                                  bf_pods=sum(v["bf_ready_on"].get(d.get("node"), 0) for v in smp["svc"].values()),
+                                  rate=(smp["rates"] or [None])[0], vllm_busy=cpu.get("vllm_busy"),
+                                  all_busy=cpu.get("all_busy"))
+                    elif vp in hung and (d.get("ok") or 0) > 0:
+                        info = {}
+                        try:
+                            pod = json.loads(self.kubectl("-n", "inference", "get", "pod", vp, "-o", "json", tries=2))
+                            cs = (pod["status"].get("containerStatuses") or [{}])[0]
+                            info = {"restarts": cs.get("restartCount"),
+                                    "last_terminated": ((cs.get("lastState") or {}).get("terminated") or {}).get("finishedAt"),
+                                    "last_reason": ((cs.get("lastState") or {}).get("terminated") or {}).get("reason"),
+                                    "started_at": ((cs.get("state") or {}).get("running") or {}).get("startedAt")}
+                        except Exception:  # noqa: BLE001
+                            pass
+                        self.mark("hang_end", pod=vp, hung_s=round(smp["t"] - hung.pop(vp), 1), **info)
+                # a hung pod replaced by a new one (liveness restart keeps the name; a delete does not)
+                for vp in [v for v in hung if v not in smp["lg"]]:
+                    self.mark("hang_end", pod=vp, hung_s=round(smp["t"] - hung.pop(vp), 1), reason="pod gone")
+
+    def run_cpus(self):
+        """1 s per-CPU busy % of every node running a Ready vLLM pod (node agent /cpus; its busy % is a 2 s window
+        refreshed every 0.5 s). Also records the CPU-manager owner of each CPU so a heatmap can label vLLM rows."""
+        while not self.stop:
+            t0 = time.time()
+            try:
+                s = self.samples[-1] if self.samples else None
+                nodes = set(s["vllm_ready_nodes"]) if s else set()
+                pods = self.http("/api/v1/namespaces/colo-system/pods?labelSelector=app%3Dcolo-node-agent", timeout=4)["items"]
+                for p in pods:
+                    node = p["spec"].get("nodeName")
+                    if node not in nodes or not ready(p):
+                        continue
+                    d = self.http(f"/api/v1/namespaces/colo-system/pods/{p['metadata']['name']}:8080/proxy/cpus", timeout=3)
+                    ents = (d.get("cpu_manager_state") or {}).get("entries") or {}
+                    excl = {}
+                    for uid, conts in ents.items():
+                        for cname, cs in conts.items():
+                            for c in parse_cpuset(cs):
+                                excl[c] = cname
+                    self.cpu_fh.write(json.dumps({"t": round(t0, 2), "node": node, "busy": d.get("busy"),
+                                                  "window_s": d.get("window_s"), "owner": excl,
+                                                  "pods_bf": bf_on_vllm_node(s) if s else None}) + "\n")
+                self.cpu_fh.flush()
+            except Exception as e:  # noqa: BLE001
+                log(self.name, f"cpu sample error {type(e).__name__}: {e}")
+            time.sleep(max(0.05, 1.0 - (time.time() - t0)))
 
     def last(self):
         while not self.samples:
@@ -274,21 +391,23 @@ def bf_on_vllm_node(s):
 
 
 def warm(C):
-    return C.wait(lambda s: all((v["p99"] or 9999) < 100 for x in C.samples[-30:] for v in x["lg"].values())
-                  and len(C.samples) >= 30 and all(x["lg"] for x in C.samples[-30:]), 600, "warm: 60 s of p99 < 100 ms")
+    ms = C.P["warm_ms"]
+    return C.wait(lambda s: all((v["p99"] or 9999) < ms for x in C.samples[-30:] for v in x["lg"].values())
+                  and len(C.samples) >= 30 and all(x["lg"] for x in C.samples[-30:]), 600, f"warm: 60 s of p99 < {ms} ms")
 
 
 def phase_setup(C):
     C.mark("setup")
     C.set_hpa(1, 1)
     C.set_demand(0, 0, 0)
-    C.set_rate(450)
+    C.set_rate(C.P["rate"])
     C.wait(lambda s: s["vllm_total"] == 1 and len(s["vllm_ready_nodes"]) == 1, 900, "1 vLLM Ready")
     warm(C)
 
 
 def phase_backfill(C):
-    for n in (0, 4, 8, 12, 16, 18):
+    C.set_rate(C.P["rate"])
+    for n in C.P["backfill"]:
         C.set_demand((n + 1) // 2, n // 2, 0)
         C.wait(lambda s, n=n: bf_on_vllm_node(s) == n, 300, f"{n} backfill pods on the vLLM node")
         time.sleep(30)
@@ -297,15 +416,15 @@ def phase_backfill(C):
         res = C.pooled(t0, time.time())
         s = C.last()
         cpu = s["cpu"].get(vllm_node(s) or "", {})
-        C.mark("backfill", pods=bf_on_vllm_node(s), t0=t0, t1=time.time(), ttft=res,
+        C.mark("backfill", pods=bf_on_vllm_node(s), rate=C.P["rate"], t0=t0, t1=time.time(), ttft=res,
                vllm_l3=cpu.get("vllm_l3"), vllm_busy=cpu.get("vllm_busy"), all_busy=cpu.get("all_busy"))
 
 
 def phase_load(C):
-    for n in (0, 18):
+    for n in C.P["load_pods"]:
         C.set_demand((n + 1) // 2, n // 2, 0)
         C.wait(lambda s, n=n: bf_on_vllm_node(s) == n, 300, f"{n} backfill pods")
-        for rate in (200, 450, 700, 1000, 1200):
+        for rate in C.P["load_rates"]:
             C.set_rate(rate)
             time.sleep(30)
             t0 = time.time()
@@ -315,7 +434,10 @@ def phase_load(C):
             cpu = s["cpu"].get(vllm_node(s) or "", {})
             C.mark("load", pods=n, rate=rate, t0=t0, t1=time.time(), ttft=res, errs=s["errs"],
                    vllm_busy=cpu.get("vllm_busy"))
-    C.set_rate(450)
+        # past saturation the client-side backlog keeps TTFT pegged for a while: let it drain before moving on
+        C.set_rate(C.P["rate"])
+        warm(C)
+    C.set_rate(C.P["rate"])
 
 
 def covered(s, d):
@@ -323,18 +445,19 @@ def covered(s, d):
 
 
 def phase_step(C):
-    C.set_rate(450)
-    C.set_demand(9, 9, 0)
-    C.wait(lambda s: covered(s, {"sandbox": 9, "toolcall": 9}), 600, "9/9 covered")
+    (lo_s, lo_t), (hi_s, hi_t) = C.P["step_lo"], C.P["step_hi"]
+    C.set_rate(C.P["rate"])
+    C.set_demand(lo_s, lo_t, 0)
+    C.wait(lambda s: covered(s, {"sandbox": lo_s, "toolcall": lo_t}), 600, f"{lo_s}/{lo_t} covered")
     time.sleep(30)
     t_up = time.time()
-    C.mark("step_up", demand=[20, 20])
-    C.set_demand(20, 20, 0)
-    t_cov = C.wait(lambda s: covered(s, {"sandbox": 20, "toolcall": 20}), 600, "20/20 covered")
+    C.mark("step_up", demand=[hi_s, hi_t], demand_lo=[lo_s, lo_t])
+    C.set_demand(hi_s, hi_t, 0)
+    t_cov = C.wait(lambda s: covered(s, {"sandbox": hi_s, "toolcall": hi_t}), 600, f"{hi_s}/{hi_t} covered")
     time.sleep(max(0, 240 - (time.time() - t_up)))
     t_down = time.time()
-    C.mark("step_down", demand=[9, 9], covered_after_s=t_cov and round(t_cov - t_up, 1))
-    C.set_demand(9, 9, 0)
+    C.mark("step_down", demand=[lo_s, lo_t], covered_after_s=t_cov and round(t_cov - t_up, 1))
+    C.set_demand(lo_s, lo_t, 0)
     t_drain = C.wait(lambda s: all(s["svc"][k]["of_total"] == 0 for k in ("sandbox", "toolcall")), 300,
                      "overflow drained")
     time.sleep(max(0, 300 - (time.time() - t_down)))
@@ -342,29 +465,52 @@ def phase_step(C):
 
 
 def phase_gpu(C):
+    ds, dt = C.P["gpu_demand"]
+    force = C.P["gpu_mode"] == "force"
     C.set_hpa(1, 2)
-    C.set_rate(450)
-    C.set_demand(18, 18, 0)
-    C.wait(lambda s: len(s["vllm_ready_nodes"]) == 1 and covered(s, {"sandbox": 18, "toolcall": 18}), 900,
-           "1 vLLM, 18/18 covered")
+    C.set_rate(C.P["rate"])
+    C.set_demand(ds, dt, 0)
+    C.wait(lambda s: len(s["vllm_ready_nodes"]) == 1 and covered(s, {"sandbox": ds, "toolcall": dt}), 900,
+           f"1 vLLM, {ds}/{dt} covered")
     time.sleep(10)
     first = set(C.last()["g4"])
     t0 = time.time()
-    C.mark("gpu_out", rate=1200)
-    C.set_rate(1200)
-    t_v2 = C.wait(lambda s: len(s["vllm_ready_nodes"]) >= 2, 900, "2nd vLLM Ready")
+    C.mark("gpu_out", rate=C.P["gpu_hi"], demand=[ds, dt], mode=C.P["gpu_mode"])
+    if force:  # the demo's fast-scale: HPA minReplicas 2 at the same moment as the load spike
+        C.set_hpa(2, 2)
+    C.set_rate(C.P["gpu_hi"])
+    t_v2 = C.wait(lambda s: len(s["vllm_ready_nodes"]) >= 2, 1500, "2nd vLLM Ready")
+    t_n2 = next((s["t"] for s in C.samples if s["t"] >= t0 and len(s["g4"]) > len(first)), None)
     time.sleep(120)
     t1 = time.time()
-    C.mark("gpu_in", rate=300, vllm2_ready_after_s=t_v2 and round(t_v2 - t0, 1),
-           new_nodes=sorted(set(C.last()["g4"]) - first))
-    C.set_rate(300)
+    C.mark("gpu_in", rate=C.P["gpu_lo"], vllm2_ready_after_s=t_v2 and round(t_v2 - t0, 1),
+           node_added_after_s=t_n2 and round(t_n2 - t0, 1), new_nodes=sorted(set(C.last()["g4"]) - first))
+    if force:
+        C.set_hpa(1, 2)
+    C.set_rate(C.P["gpu_lo"])
     g4_now = len(C.last()["g4"])
-    t_gone = C.wait(lambda s: len(s["g4"]) < g4_now, 900, "a G4 node removed")
+    t_gone = C.wait(lambda s: len(s["g4"]) < g4_now, 1200, "an accelerator node removed")
     time.sleep(30)
     C.mark("gpu_end", node_removed_after_s=t_gone and round(t_gone - t1, 1))
 
 
-PHASES = {"setup": phase_setup, "backfill": phase_backfill, "load": phase_load, "step": phase_step, "gpu": phase_gpu}
+def phase_soak(C):
+    """Long fixed-load windows to see whether vLLM-TPU hangs correlate with backfill: P["soak_pods"] x soak_s at
+    soak_rate. TTFT pooled over the whole window; hangs are marked by run_hangwatch."""
+    C.set_rate(C.P.get("soak_rate", 100))
+    for n in C.P.get("soak_pods", (0, 16)):
+        C.set_demand((n + 1) // 2, n // 2, 0)
+        C.wait(lambda s, n=n: bf_on_vllm_node(s) == n, 300, f"{n} backfill pods")
+        t0 = time.time()
+        C.mark("soak_start", pods=n, rate=C.P.get("soak_rate", 100))
+        time.sleep(C.P.get("soak_s", 600))
+        res = C.pooled(t0, time.time())
+        hangs = [m for m in C.marks if m["phase"] == "hang" and m["t"] >= t0]
+        C.mark("soak", pods=n, rate=C.P.get("soak_rate", 100), t0=t0, t1=time.time(), ttft=res, hangs=len(hangs))
+    C.set_rate(C.P["rate"])
+
+
+PHASES = {"soak": phase_soak, "setup": phase_setup, "backfill": phase_backfill, "load": phase_load, "step": phase_step, "gpu": phase_gpu}
 
 
 def drive(C, phases, saved):
@@ -389,20 +535,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--phases", default="setup,backfill,load,step,gpu")
-    ap.add_argument("--clusters", default="controller,native")
+    ap.add_argument("--clusters", default="controller,native", help=f"comma list of {sorted(CLUSTERS)}")
+    ap.add_argument("--override", default="", help='JSON merged into every selected profile, e.g. {"load_pods": [16]}')
+    ap.add_argument("--cpu-1s", action="store_true", help="also record per-CPU busy %% of the vLLM node at 1 s")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cl = [Cluster(n, out) for n in args.clusters.split(",")]
+    if args.override:
+        for C in cl:
+            C.P = {**C.P, **json.loads(args.override)}
+            log(C.name, f"profile override {args.override}")
     saved = {}
     for C in cl:
         saved[C.name] = {"demand": list(C.get_demand()), "hpa": list(C.get_hpa()), "rate": C.get_rate()}
         log(C.name, f"saved pre-sweep state {saved[C.name]}")
     json.dump(saved, open(out / "pre_sweep_state.json", "w"), indent=1)
     samplers = [threading.Thread(target=C.run, daemon=True) for C in cl]
+    samplers += [threading.Thread(target=C.run_hangwatch, args=(out,), daemon=True) for C in cl]
+    if args.cpu_1s:
+        samplers += [threading.Thread(target=C.run_cpus, daemon=True) for C in cl]
     for t in samplers:
         t.start()
-    drivers = [threading.Thread(target=drive, args=(C, args.phases.split(","), saved[C.name])) for C in cl]
+    restore = {C.name: C.P.get("restore", saved[C.name]) for C in cl}
+    drivers = [threading.Thread(target=drive, args=(C, args.phases.split(","), restore[C.name])) for C in cl]
     for t in drivers:
         t.start()
     for t in drivers:

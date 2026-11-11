@@ -1,0 +1,471 @@
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 832 420" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ 
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 420 
+L 832 420 
+L 832 0 
+L 0 0 
+L 0 420 
+z
+" style="fill: none"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 24.2112 232.848 
+L 379.3088 232.848 
+Q 399.4848 232.848 399.4848 221.088 
+L 399.4848 14.112 
+Q 399.4848 2.352 379.3088 2.352 
+L 24.2112 2.352 
+Q 4.0352 2.352 4.0352 14.112 
+L 4.0352 221.088 
+Q 4.0352 232.848 24.2112 232.848 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #a1a39a; fill-opacity: 0.12"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 20.176 102.312 
+L 383.344 102.312 
+L 383.344 94.08 
+L 20.176 94.08 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 20.176 102.312 
+L 383.344 102.312 
+L 383.344 94.08 
+L 20.176 94.08 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #5a82b3"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 20.176 141.12 
+L 383.344 141.12 
+L 383.344 132.888 
+L 20.176 132.888 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 20.176 141.12 
+L 80.704 141.12 
+L 80.704 132.888 
+L 20.176 132.888 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #5a82b3"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 80.704 141.12 
+L 383.344 141.12 
+L 383.344 132.888 
+L 80.704 132.888 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #489b6e"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 20.176 179.928 
+L 383.344 179.928 
+L 383.344 171.696 
+L 20.176 171.696 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 20.176 179.928 
+L 149.3024 179.928 
+L 149.3024 171.696 
+L 20.176 171.696 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #5a82b3"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 149.3024 179.928 
+L 383.344 179.928 
+L 383.344 171.696 
+L 149.3024 171.696 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #489b6e"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 20.176 218.736 
+L 383.344 218.736 
+L 383.344 210.504 
+L 20.176 210.504 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 20.176 218.736 
+L 383.344 218.736 
+L 383.344 210.504 
+L 20.176 210.504 
+z
+" clip-path="url(#pbdf485afa7)" style="fill: #5a82b3"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="20.176" y="29.82" transform="rotate(-0 20.176 29.82)">g4-standard-48</text>
+   </g>
+   <g id="text_2">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="383.344" y="29.82" transform="rotate(-0 383.344 29.82)">$1.98/hr</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 15.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="20.176" y="54.817" transform="rotate(-0 20.176 54.817)">3-yr CUD · 1 × RTX PRO 6000</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="20.176" y="85.376" transform="rotate(-0 20.176 85.376)">GPU memory</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="383.344" y="85.251" transform="rotate(-0 383.344 85.251)">96 GB</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="20.176" y="124.184" transform="rotate(-0 20.176 124.184)">vCPU</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="383.344" y="124.059" transform="rotate(-0 383.344 124.059)">48</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="20.176" y="162.992" transform="rotate(-0 20.176 162.992)">Memory</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="383.344" y="162.867" transform="rotate(-0 383.344 162.867)">180 GiB</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="20.176" y="201.8" transform="rotate(-0 20.176 201.8)">Network</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="383.344" y="201.675" transform="rotate(-0 383.344 201.675)">50 Gbps</text>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_13">
+    <path d="M 452.6912 232.848 
+L 807.7888 232.848 
+Q 827.9648 232.848 827.9648 221.088 
+L 827.9648 14.112 
+Q 827.9648 2.352 807.7888 2.352 
+L 452.6912 2.352 
+Q 432.5152 2.352 432.5152 14.112 
+L 432.5152 221.088 
+Q 432.5152 232.848 452.6912 232.848 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a; fill-opacity: 0.12"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 448.656 102.312 
+L 811.824 102.312 
+L 811.824 94.08 
+L 448.656 94.08 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 448.656 102.312 
+L 811.824 102.312 
+L 811.824 94.08 
+L 448.656 94.08 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 448.656 141.12 
+L 811.824 141.12 
+L 811.824 132.888 
+L 448.656 132.888 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 448.656 141.12 
+L 509.184 141.12 
+L 509.184 132.888 
+L 448.656 132.888 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 448.656 179.928 
+L 811.824 179.928 
+L 811.824 171.696 
+L 448.656 171.696 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 448.656 179.928 
+L 577.7824 179.928 
+L 577.7824 171.696 
+L 448.656 171.696 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 448.656 218.736 
+L 811.824 218.736 
+L 811.824 210.504 
+L 448.656 210.504 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a; fill-opacity: 0.25"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 448.656 218.736 
+L 811.824 218.736 
+L 811.824 210.504 
+L 448.656 210.504 
+z
+" clip-path="url(#p092eed9c57)" style="fill: #a1a39a"/>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="448.656" y="29.82" transform="rotate(-0 448.656 29.82)">AWS g7e.2xlarge</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 18px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="811.824" y="29.82" transform="rotate(-0 811.824 29.82)">$1.45/hr</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 15.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="448.656" y="54.817" transform="rotate(-0 448.656 54.817)">3-yr No Upfront · 1 × RTX PRO 6000</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="448.656" y="85.376" transform="rotate(-0 448.656 85.376)">GPU memory</text>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="811.824" y="85.251" transform="rotate(-0 811.824 85.251)">96 GB</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="448.656" y="124.184" transform="rotate(-0 448.656 124.184)">vCPU</text>
+   </g>
+   <g id="text_18">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="811.824" y="124.059" transform="rotate(-0 811.824 124.059)">8</text>
+   </g>
+   <g id="text_19">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="448.656" y="162.992" transform="rotate(-0 448.656 162.992)">Memory</text>
+   </g>
+   <g id="text_20">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="811.824" y="162.867" transform="rotate(-0 811.824 162.867)">64 GiB</text>
+   </g>
+   <g id="text_21">
+    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="448.656" y="201.8" transform="rotate(-0 448.656 201.8)">Network</text>
+   </g>
+   <g id="text_22">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: end; fill: #111314" x="811.824" y="201.675" transform="rotate(-0 811.824 201.675)">50 Gbps</text>
+   </g>
+  </g>
+  <g id="axes_3">
+   <g id="patch_22">
+    <path d="M 249.6 390.6 
+L 815.36 390.6 
+L 815.36 256.2 
+L 249.6 256.2 
+L 249.6 390.6 
+z
+" style="fill: none"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <path d="M 249.6 390.6 
+L 249.6 256.2 
+" clip-path="url(#p8a456b26f0)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_2">
+      <defs>
+       <path id="m5ed4a9bbc0" d="M 0 0 
+L 0 3.5 
+" style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m5ed4a9bbc0" x="249.6" y="390.6" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_23">
+      <text style="font-size: 13.5px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="249.6" y="410.425" transform="rotate(-0 249.6 410.425)">$0.0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_3">
+      <path d="M 361.247175 390.6 
+L 361.247175 256.2 
+" clip-path="url(#p8a456b26f0)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m5ed4a9bbc0" x="361.247175" y="390.6" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_24">
+      <text style="font-size: 13.5px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="361.247175" y="410.425" transform="rotate(-0 361.247175 410.425)">$0.5</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_5">
+      <path d="M 472.894349 390.6 
+L 472.894349 256.2 
+" clip-path="url(#p8a456b26f0)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_6">
+      <g>
+       <use xlink:href="#m5ed4a9bbc0" x="472.894349" y="390.6" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_25">
+      <text style="font-size: 13.5px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="472.894349" y="410.425" transform="rotate(-0 472.894349 410.425)">$1.0</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_7">
+      <path d="M 584.541524 390.6 
+L 584.541524 256.2 
+" clip-path="url(#p8a456b26f0)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#m5ed4a9bbc0" x="584.541524" y="390.6" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_26">
+      <text style="font-size: 13.5px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="584.541524" y="410.425" transform="rotate(-0 584.541524 410.425)">$1.5</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_9">
+      <path d="M 696.188699 390.6 
+L 696.188699 256.2 
+" clip-path="url(#p8a456b26f0)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_10">
+      <g>
+       <use xlink:href="#m5ed4a9bbc0" x="696.188699" y="390.6" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_27">
+      <text style="font-size: 13.5px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="696.188699" y="410.425" transform="rotate(-0 696.188699 410.425)">$2.0</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_11">
+      <path d="M 807.835874 390.6 
+L 807.835874 256.2 
+" clip-path="url(#p8a456b26f0)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_12">
+      <g>
+       <use xlink:href="#m5ed4a9bbc0" x="807.835874" y="390.6" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_28">
+      <text style="font-size: 13.5px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="807.835874" y="410.425" transform="rotate(-0 807.835874 410.425)">$2.5</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_13"/>
+     <g id="text_29">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="246.1" y="278.335423" transform="rotate(-0 246.1 278.335423)">G4 3-yr CUD</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_14"/>
+     <g id="text_30">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="246.1" y="304.667712" transform="rotate(-0 246.1 304.667712)">− extra 40 vCPU at 90 %</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_15"/>
+     <g id="text_31">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="246.1" y="331" transform="rotate(-0 246.1 331)">− extra 116 GiB at 90 %</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_16"/>
+     <g id="text_32">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="246.1" y="357.332288" transform="rotate(-0 246.1 357.332288)">G4 effective</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_17"/>
+     <g id="text_33">
+      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="246.1" y="383.664577" transform="rotate(-0 246.1 383.664577)">AWS 3-yr No Upfront</text>
+     </g>
+    </g>
+   </g>
+   <g id="patch_23">
+    <path d="M 249.6 279.161755 
+L 691.6 279.161755 
+L 691.6 262.309091 
+L 249.6 262.309091 
+z
+" clip-path="url(#p8a456b26f0)" style="fill: #a1a39a"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 586.294385 305.494044 
+L 691.6 305.494044 
+L 691.6 288.641379 
+L 586.294385 288.641379 
+z
+" clip-path="url(#p8a456b26f0)" style="fill: #489b6e; opacity: 0.55"/>
+   </g>
+   <g id="patch_25">
+    <path d="M 551.558716 331.826332 
+L 586.294385 331.826332 
+L 586.294385 314.973668 
+L 551.558716 314.973668 
+z
+" clip-path="url(#p8a456b26f0)" style="fill: #489b6e; opacity: 0.55"/>
+   </g>
+   <g id="patch_26">
+    <path d="M 249.6 358.158621 
+L 551.558716 358.158621 
+L 551.558716 341.305956 
+L 249.6 341.305956 
+z
+" clip-path="url(#p8a456b26f0)" style="fill: #489b6e"/>
+   </g>
+   <g id="patch_27">
+    <path d="M 249.6 384.490909 
+L 574.017661 384.490909 
+L 574.017661 367.638245 
+L 249.6 367.638245 
+z
+" clip-path="url(#p8a456b26f0)" style="fill: #e2625e"/>
+   </g>
+   <g id="patch_28">
+    <path d="M 249.6 390.6 
+L 815.36 390.6 
+" style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_34">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="698.29883" y="276.510423" transform="rotate(-0 698.29883 276.510423)">$1.98</text>
+   </g>
+   <g id="text_35">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="698.29883" y="302.842712" transform="rotate(-0 698.29883 302.842712)">−$0.47</text>
+   </g>
+   <g id="text_36">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="592.993215" y="329.175" transform="rotate(-0 592.993215 329.175)">−$0.16</text>
+   </g>
+   <g id="text_37">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="558.257546" y="355.507288" transform="rotate(-0 558.257546 355.507288)">$1.35</text>
+   </g>
+   <g id="text_38">
+    <text style="font-weight: 700; font-size: 16.5px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="580.716492" y="381.839577" transform="rotate(-0 580.716492 381.839577)">$1.45</text>
+   </g>
+   <g id="text_39">
+    <text style="font-weight: 700; font-size: 15.5px; font-family: 'Figtree'; text-anchor: start; fill: #489b6e" x="652.041173" y="355.157288" transform="rotate(-0 652.041173 355.157288)">-6.9 % vs AWS</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pbdf485afa7">
+   <rect x="0" y="0" width="403.52" height="235.2"/>
+  </clipPath>
+  <clipPath id="p092eed9c57">
+   <rect x="428.48" y="0" width="403.52" height="235.2"/>
+  </clipPath>
+  <clipPath id="p8a456b26f0">
+   <rect x="249.6" y="256.2" width="565.76" height="134.4"/>
+  </clipPath>
+ </defs>
+</svg>
