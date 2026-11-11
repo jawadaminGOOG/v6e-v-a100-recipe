@@ -125,19 +125,13 @@
   </aside>
 </section>
 
-<!-- ============================================================ 5 · Native G4 on GKE -->
-<section class="slide" data-accent="red" data-replay="g4" aria-label="What we measured: native recipe, G4 on GKE">
-  <h2>Measured: native recipe, G4 on GKE<span class="dot" aria-hidden="true"></span></h2>
-  <div class="kpis kstrip" id="kpi-g4"></div>
-  <div class="grid2 g-nat">
-    <div class="col">
-      <div class="fig"><h3>TTFT p99 stays inside its budget with the node full</h3><div class="svg" data-svg="g4_latency"></div></div>
-      <div class="row2">
-        <div class="fig"><h3>CPU spike: <span class="tg">G4 cores</span> first, <span class="tr">N4D</span> after</h3><div class="svg" data-svg="g4_spike"></div></div>
-        <div class="fig"><h3>GPU scale-out and in: CPU pods follow vLLM</h3><div class="svg" data-svg="g4_gpu"></div></div>
-      </div>
-    </div>
-    <div class="replay" id="rp-g4"></div>
+<!-- ============================================================ G4: serving -->
+<section class="slide" data-accent="red" aria-label="G4: serving stays fast with the node full">
+  <h2>G4: serving stays fast with the node full<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede"><span data-k="g4.full_pods">18</span> CPU pods next to vLLM: TTFT p99 goes from <span data-k="g4.ttft_solo_ms">20</span> to <span data-k="g4.ttft_full_ms">26</span> ms, inside the 1.5× budget, while host CPU use climbs from <span data-k="g4.node_busy_solo">4</span> to <span data-k="g4.node_busy_full">72</span> %.</p>
+  <div class="kpis kstrip k2" id="kpi-g4-a"></div>
+  <div class="grid-a lat-full">
+    <div class="fig"><h3>TTFT p99 as the node fills, and as load rises</h3><div class="svg" data-svg="g4_latency"></div></div>
   </div>
   <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
   <aside class="notes">
@@ -145,37 +139,70 @@
       <li>Data: <code>.agents/bench/sweep1_merged/native.*</code> (SOURCES.md explains the merge). Charts: <code>deck_charts.py</code> native_set.</li>
       <li>TTFT p99 20 → 26 ms with 18 CPU pods at 450 req/s (marks phase backfill); budget 1.5 × solo = 30 ms. Load curve: phase load, pods 0 and 18.</li>
       <li>Node CPU busy 4.3 → 72.2 %, vLLM CPUs 25 → 35 % (marks all_busy / vllm_busy; chart exported as <code>charts/g4_nodebusy.png</code>).</li>
-      <li>CPU spike 18 → 40 pods covered in 88 s, N4D empty 38 s after the drop (step_down.covered_after_s, step_end.drained_after_s). 2nd vLLM Ready 269 s; node removed 597 s after the load drop; CPU pods Ready ≥ demand in 100 % of scale-in samples.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ G4: reacting -->
+<section class="slide" data-accent="red" data-replay="g4" aria-label="G4: GKE reacts when demand changes">
+  <h2>G4: GKE reacts when demand changes<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede">A CPU spike is fully covered in <span data-k="g4.spike_covered_s">88</span> s; when vLLM scales out and in, CPU pods follow the accelerator hosts and demand stays covered <span data-k="g4.scale_ready_pct_all">100</span> % of the run.</p>
+  <div class="kpis kstrip k2" id="kpi-g4-b"></div>
+  <div class="grid-b">
+    <div class="col">
+      <div class="fig"><h3>A new host’s spare cores absorb CPU pods; N4D takes them back when it leaves <small>· demand covered <span data-k="g4.scale_ready_pct_all">100</span> % of the run</small></h3><div class="svg" data-svg="g4_gpu"></div></div>
+      <div class="fig"><h3>CPU spike: <span class="tg">G4 cores</span> first, <span class="tr">N4D</span> after</h3><div class="svg" data-svg="g4_spike"></div></div>
+    </div>
+    <div class="replay" id="rp-g4"></div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li>Data: <code>.agents/bench/sweep1_merged/native.*</code> (SOURCES.md explains the merge). Charts: <code>deck_charts.py</code> native_set.</li>
+      <li>CPU spike 18 → 40 pods covered in 88 s, N4D empty 38 s after the drop (step_down.covered_after_s, step_end.drained_after_s).</li>
+      <li><b>Scale-out/in lanes:</b> source <code><span data-k="g4.gpu_source">.agents/bench/sweep1_merged</span></code> (marks gpu_out / gpu_in / gpu_end; per-node pod placement from samples svc.*.bf_ready_on, N4D from of_ready, offered load from the loadgen target). New host after <span data-k="g4.node_added_s">103</span> s, 2nd vLLM Ready after <span data-k="g4.vllm2_ready_s">269</span> s, host #2 removed <span data-k="g4.node_removed_s">597</span> s after the load drop; CPU pods Ready ≥ demand in <span data-k="g4.scalein_ready_pct">100</span> % of scale-in samples and <span data-k="g4.scale_ready_pct_all">100</span> % of the whole scale-out/in run (the gap is one sample under demand before the new host arrived).</li>
       <li><b>Replay:</b> scenario runs of the demo web app's scenario engine (cpu-scale-out, gpu-scale-out, gpu-scale-in), played through the app's core-map renderer; the live web app shows the real clusters. Fit plays a scenario in about 22 s (idle stretches skipped); 1× / 4× / 8× are multiples of recorded time. Static key frame: <code>keyframes/replay-g4-*.png</code>.</li>
     </ul>
   </aside>
 </section>
 
-<!-- ============================================================ 6 · Native v6e on GKE -->
-<section class="slide" data-accent="red" data-replay="v6e" aria-label="What we measured: native recipe, TPU v6e on GKE">
-  <h2>Measured: native recipe, TPU v6e on GKE<span class="dot" aria-hidden="true"></span></h2>
-  <div class="kpis kstrip" id="kpi-v6e"></div>
-  <div class="grid2 g-nat">
-    <div class="col">
-      <div class="fig"><h3>TTFT p99 stays inside its budget with the node full</h3><div class="svg" data-svg="v6e_latency"></div></div>
-      <div class="row2">
-        <div class="fig"><h3>CPU spike: <span class="tg">v6e cores</span> first, <span class="tr">N4D</span> after</h3><div class="svg" data-svg="v6e_spike"></div></div>
-        <div class="fig"><h3>TPU scale-out and in: CPU pods follow vLLM</h3><div class="svg" data-svg="v6e_gpu"></div></div>
-      </div>
-    </div>
-    <div class="col">
-      <div class="replay short" id="rp-v6e"></div>
-      <div class="fig" id="v6e-heat"><h3>Per-CPU busy on the v6e host <small><span class="tb">vLLM</span> · <span class="tg">CPU pods</span> · x = minutes</small></h3><div class="svg" data-svg="v6e_heatmap"></div></div>
-    </div>
+<!-- ============================================================ TPU v6e: serving -->
+<section class="slide" data-accent="red" aria-label="TPU v6e: serving stays fast with the node full">
+  <h2>TPU v6e: serving stays fast with the node full<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede"><span data-k="v6e.full_pods">16</span> CPU pods next to vLLM on a TPU v6e host: TTFT p99 stays at <span data-k="v6e.ttft_full_ms">50</span> ms (budget 1.5×) while host CPU use climbs from <span data-k="v6e.node_busy_solo">4</span> to <span data-k="v6e.node_busy_full">71</span> %.</p>
+  <div class="kpis kstrip k2" id="kpi-v6e-a"></div>
+  <div class="grid-a lat-heat">
+    <div class="fig"><h3>TTFT p99 as the node fills, and as load rises</h3><div class="svg" data-svg="v6e_latency"></div></div>
+    <div class="fig" id="v6e-heat"><h3>Per-CPU busy on the host <small>colour = owner · shade = busy %</small></h3><div class="svg" data-svg="v6e_heatmap"></div></div>
   </div>
   <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
   <aside class="notes">
     <ul>
       <li>Data: <code>.agents/bench/v6e_sweep1/tpu.*</code>, rate 200 req/s, <span data-c="v6e_pods">16</span> CPU pods, load 50–400 req/s (<code>bench_compare/sweep.py</code> V6E_PROFILE). Same chart code and units as slide 6.</li>
-      <li>Per-CPU heatmap: <code>tpu.cpus.jsonl</code> (node agent v0.2.5, 1 s); vLLM CPUs 1–4 + 23–26 (one L3).</li>
+      <li>Per-CPU heatmap: <code>tpu.cpus.jsonl</code> (node agent v0.2.5, 1 s); vLLM CPUs 1–4 + 23–26 (one L3); window = the 0/4/8/12/16-pod backfill ladder; colour = CPU owner at each second (vLLM blue, CPU pods green, shared/idle gray), shade = busy %.</li>
       <li>Final v6e numbers (<code>.agents/bench/v6e_sweep1/summary.md</code>, <code>tpu.marks.json</code>; built with <code>DECK_V6E_FINAL=1</code>): TTFT p99 50 → 50 ms from 0 to <span data-c="v6e_pods">16</span> CPU pods at 200 req/s (52 ms at 4 and 8). Load ladder, vLLM alone: 24 / 30 / 48 / 100 ms at 50 / 100 / 200 / 300 req/s, saturated at 400 (one v6e replica serves ~330 req/s); with <span data-c="v6e_pods">16</span> pods (retest): 26 / 32 / 52 / 92 ms at 50 / 100 / 200 / 300 req/s; both saturate at 400. Host CPU busy 4 → 71 %.</li>
-      <li>CPU spike 16 → 38 pods all Running in 97 s; N4D empty 36 s after the drop (step_down.covered_after_s, step_end.drained_after_s). Forced scale-out (HPA min 2): new node 111 s, 2nd vLLM Ready 468 s incl. XLA compile; node removed 427 s after the load drop; CPU pods Ready ≥ demand 100 % during scale-in. Natural-HPA scale-out was not measured (one v6e replica cannot reach the 700 req/s target), so no chart for it.</li>
       <li>Recipe includes an IRQ-affinity pin for the TPU's interrupts and a liveness check; both were added after stalls seen at full backfill in earlier runs.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ TPU v6e: reacting -->
+<section class="slide" data-accent="red" data-replay="v6e" aria-label="TPU v6e: GKE reacts when demand changes">
+  <h2>TPU v6e: GKE reacts when demand changes<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede">A CPU spike is fully covered in <span data-k="v6e.spike_covered_s">97</span> s; when vLLM scales out and in, CPU pods follow the TPU hosts and demand stays covered <span data-k="v6e.scale_ready_pct_all">100</span> % of the run.</p>
+  <div class="kpis kstrip k2" id="kpi-v6e-b"></div>
+  <div class="grid-b">
+    <div class="col">
+      <div class="fig"><h3>A new host’s spare cores absorb CPU pods; N4D takes them back when it leaves <small>· demand covered <span data-k="v6e.scale_ready_pct_all">100</span> % of the run</small></h3><div class="svg" data-svg="v6e_gpu"></div></div>
+      <div class="fig"><h3>CPU spike: <span class="tg">v6e cores</span> first, <span class="tr">N4D</span> after</h3><div class="svg" data-svg="v6e_spike"></div></div>
+    </div>
+    <div class="replay" id="rp-v6e"></div>
+  </div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li>Data: <code>.agents/bench/v6e_sweep1/tpu.*</code>, rate 200 req/s, <span data-c="v6e_pods">16</span> CPU pods, load 50–400 req/s (<code>bench_compare/sweep.py</code> V6E_PROFILE). Same chart code and units as slide 6.</li>
+      <li>CPU spike 16 → 38 pods all Running in 97 s; N4D empty 36 s after the drop (step_down.covered_after_s, step_end.drained_after_s). Forced scale-out (HPA min 2), source <code><span data-k="v6e.gpu_source">.agents/bench/v6e_sweep1</span></code>: new node <span data-k="v6e.node_added_s">111</span> s, 2nd vLLM Ready <span data-k="v6e.vllm2_ready_s">468</span> s incl. XLA compile; node removed <span data-k="v6e.node_removed_s">427</span> s after the load drop; CPU pods Ready ≥ demand <span data-k="v6e.scalein_ready_pct">100</span> % during scale-in and <span data-k="v6e.scale_ready_pct_all">100</span> % of the whole scale-out/in run. Natural-HPA scale-out was not measured (one v6e replica cannot reach the 700 req/s target), so no chart for it.</li>
       <li><b>Replay:</b> scenario runs of the demo web app's engine for the TPU v6e profile; the live web app shows the real cluster.</li>
     </ul>
   </aside>

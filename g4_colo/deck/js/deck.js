@@ -245,7 +245,7 @@
       cell(k.ttft_ratio ? `${fmt(k.ttft_ratio, 2)}×` : "–", k.ttft_ratio ? `TTFT p99 with the node full (${fmt(k.ttft_solo_ms)} → ${fmt(k.ttft_full_ms)} ms)` : "TTFT p99 with the node full") +
       cell(k.node_busy_full !== undefined ? `${fmt(k.node_busy_solo)} → ${fmt(k.node_busy_full)} %` : "–", "host CPU busy, alone → node full") +
       cell(k.spike_covered_s ? `${fmt(k.spike_covered_s)} s` : "–", "CPU spike fully covered (N4D boot)") +
-      cell(k.scalein_ready_pct !== undefined ? `${fmt(k.scalein_ready_pct)} %` : "–", "CPU pods Ready ≥ demand during scale-in");
+      cell(k.scalein_ready_pct !== undefined ? `${fmt(k.scalein_ready_pct, Number.isInteger(k.scalein_ready_pct) ? 0 : 1)} %` : "–", "CPU pods Ready ≥ demand during scale-in");
   }
   function kpisExp() {
     const el = $("#kpi-exp"), e = (D.kpi || {}).exp || {}, nb = (D.kpi || {}).exp_node_busy || [];
@@ -408,9 +408,18 @@
   $$(".slide[data-steps]").forEach(initSteps);
   slides.forEach((sl, i) => { const pg = $(".pg", sl); if (pg) pg.textContent = sl.dataset.appendix ? `Appendix · ${i + 1} / ${slides.length}` : `${i + 1} / ${slides.length}`; });
   inject();
+  $$("[data-k]").forEach((e) => { const [h, f] = e.dataset.k.split("."); const v = ((D.kpi || {})[h] || {})[f]; if (v !== undefined && v !== null) e.textContent = typeof v === "number" ? (/ready_pct/.test(f) && !Number.isInteger(v) ? fmt(v, 1) : fmt(v)) : v; });
   kpisExp();
-  kpis("#kpi-g4", D.kpi && D.kpi.g4);
-  kpis("#kpi-v6e", D.kpi && D.kpi.v6e);
+  for (const acc of ["g4", "v6e"]) {
+    const k = (D.kpi && D.kpi[acc]) || {};
+    const a = $(`#kpi-${acc}-a`), b = $(`#kpi-${acc}-b`);
+    if (a) a.innerHTML =
+      cell(k.ttft_ratio ? `${fmt(k.ttft_ratio, 2)}×` : "–", k.ttft_ratio ? `TTFT p99 with the node full (${fmt(k.ttft_solo_ms)} → ${fmt(k.ttft_full_ms)} ms)` : "TTFT p99 with the node full") +
+      cell(k.node_busy_full !== undefined ? `${fmt(k.node_busy_solo)} → ${fmt(k.node_busy_full)} %` : "–", "host CPU busy, vLLM alone → node full");
+    if (b) b.innerHTML =
+      cell(k.spike_covered_s ? `${fmt(k.spike_covered_s)} s` : "–", "CPU spike fully covered (N4D boot)") +
+      cell(k.scale_ready_pct_all !== undefined ? `${fmt(k.scale_ready_pct_all, Number.isInteger(k.scale_ready_pct_all) ? 0 : 1)} %` : "–", "of the scale-out/in run with CPU pods Ready ≥ demand");
+  }
   if (window.DeckReplay) {
     players.g4 = new window.DeckReplay.Player($("#rp-g4"), "g4", (D.replays || {}).g4);
     players.v6e = new window.DeckReplay.Player($("#rp-v6e"), "v6e", (D.replays || {}).v6e);

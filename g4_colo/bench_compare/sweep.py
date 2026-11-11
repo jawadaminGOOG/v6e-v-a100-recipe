@@ -481,7 +481,7 @@ def phase_gpu(C):
     C.set_rate(C.P["gpu_hi"])
     t_v2 = C.wait(lambda s: len(s["vllm_ready_nodes"]) >= 2, 1500, "2nd vLLM Ready")
     t_n2 = next((s["t"] for s in C.samples if s["t"] >= t0 and len(s["g4"]) > len(first)), None)
-    time.sleep(120)
+    time.sleep(C.P.get("gpu_hold_s", 120))
     t1 = time.time()
     C.mark("gpu_in", rate=C.P["gpu_lo"], vllm2_ready_after_s=t_v2 and round(t_v2 - t0, 1),
            node_added_after_s=t_n2 and round(t_n2 - t0, 1), new_nodes=sorted(set(C.last()["g4"]) - first))

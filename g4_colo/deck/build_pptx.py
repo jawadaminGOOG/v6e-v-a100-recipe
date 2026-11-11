@@ -45,7 +45,17 @@ def fill(body):
         if v is None:
             return m.group(0)
         return f"${v:,.0f}" if f == "usd_mo" else f"{v:g} %" if f == "pct_host" else f"{v:g}"
-    return re.sub(r'<span data-g="([\w.]+)">[^<]*</span>', g, body)
+    body = re.sub(r'<span data-g="([\w.]+)">[^<]*</span>', g, body)
+
+    def k(m):
+        h, f = m.group(1).split(".")
+        v = (DD.get("kpi", {}).get(h) or {}).get(f)
+        if v is None:
+            return m.group(0)
+        if isinstance(v, (int, float)):
+            return f"{v:,.1f}" if "ready_pct" in f and float(v) != int(v) else f"{v:,.0f}"
+        return str(v)
+    return re.sub(r'<span data-k="([\w.]+)">[^<]*</span>', k, body)
 
 
 def notes_text(section):

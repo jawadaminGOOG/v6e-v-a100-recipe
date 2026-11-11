@@ -266,3 +266,32 @@ html.shot .step-ctl { display: none; }
 .caveat b { font-weight: 700; }
 .grid2.g-v6e { top: 392px; grid-template-columns: 940px 1fr; }
 .g-v6e .replay.short { height: 400px; }
+
+/* slides 6-7: spike + scale-out/in lanes */
+.row2.r-lanes { grid-template-columns: 420px 1fr; }
+
+.rcol .replay { height: auto; flex: 1; min-height: 0; }
+.g-nat .replay.short { flex: 1; height: auto; min-height: 0; }
+.g-nat .replay.short .rp-k { display: none; }
+.g-nat .replay.short .rp-note { display: none; }
+.g-nat .col { gap: 12px; }
+
+.rcol .replay { flex: 1 1 0; min-height: 0; overflow: hidden; }
+.rcol .replay .rp-note, .rcol .replay .rp-leg { display: none; }
+.g-nat .col > .fig h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-nat .replay.short { overflow: hidden; }
+.grid2.g-nat { grid-template-rows: 100%; }
+.g-nat > .col { min-height: 0; }
+.row2.r-lat { grid-template-columns: 1fr 320px; gap: 20px; }
+.rcol .replay { gap: 8px; padding-bottom: 10px; }
+.rcol .cmap .tl, .rcol .flat { grid-auto-rows: 15px; }
+
+/* split measurement slides (6-9): takeaway lede, 2-KPI strip, big charts */
+.slide .kstrip.k2 { top: 268px; grid-template-columns: repeat(2, 1fr); }
+.grid-a, .grid-b { position: absolute; left: var(--pad); right: var(--pad); top: 384px; bottom: 96px; display: grid; gap: 0 40px; grid-template-rows: 100%; }
+.grid-a.lat-full { grid-template-columns: 1fr; }
+.grid-a.lat-heat { grid-template-columns: 1000px 1fr; }
+.grid-b { grid-template-columns: 1100px 1fr; }
+.grid-b .col { gap: 12px; min-height: 0; }
+.grid-b .replay { height: 100%; min-height: 0; overflow: hidden; }
+.slide h2 { max-width: none; white-space: nowrap; }

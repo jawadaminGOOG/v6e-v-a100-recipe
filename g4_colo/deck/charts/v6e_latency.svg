@@ -1,220 +1,220 @@
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1040 290" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1124 540" xmlns="http://www.w3.org/2000/svg" version="1.1">
  
  <defs>
   <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
  </defs>
  <g id="figure_1">
   <g id="patch_1">
-   <path d="M 0 290 
-L 1040 290 
-L 1040 0 
+   <path d="M 0 540 
+L 1124 540 
+L 1124 0 
 L 0 0 
-L 0 290 
+L 0 540 
 z
 " style="fill: none"/>
   </g>
   <g id="axes_1">
    <g id="patch_2">
-    <path d="M 72.8 237.8 
-L 488.8 237.8 
-L 488.8 40.6 
-L 72.8 40.6 
-L 72.8 237.8 
+    <path d="M 101.16 464.4 
+L 517.04 464.4 
+L 517.04 54 
+L 101.16 54 
+L 101.16 464.4 
 z
 " style="fill: none"/>
    </g>
    <g id="matplotlib.axis_1">
     <g id="xtick_1">
      <g id="line2d_1">
-      <path d="M 92.609524 237.8 
-L 92.609524 40.6 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 120.96381 464.4 
+L 120.96381 54 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_2">
       <defs>
-       <path id="m2348452cd6" d="M 0 0 
+       <path id="m7081b4c9c7" d="M 0 0 
 L 0 3.5 
 " style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </defs>
       <g>
-       <use xlink:href="#m2348452cd6" x="92.609524" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="120.96381" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_1">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="92.609524" y="260" transform="rotate(-0 92.609524 260)">0</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="120.96381" y="490.4" transform="rotate(-0 120.96381 490.4)">0</text>
      </g>
     </g>
     <g id="xtick_2">
      <g id="line2d_3">
-      <path d="M 171.847619 237.8 
-L 171.847619 40.6 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 200.179048 464.4 
+L 200.179048 54 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_4">
       <g>
-       <use xlink:href="#m2348452cd6" x="171.847619" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="200.179048" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_2">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="171.847619" y="260" transform="rotate(-0 171.847619 260)">4</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="200.179048" y="490.4" transform="rotate(-0 200.179048 490.4)">4</text>
      </g>
     </g>
     <g id="xtick_3">
      <g id="line2d_5">
-      <path d="M 251.085714 237.8 
-L 251.085714 40.6 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 279.394286 464.4 
+L 279.394286 54 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_6">
       <g>
-       <use xlink:href="#m2348452cd6" x="251.085714" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="279.394286" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_3">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="251.085714" y="260" transform="rotate(-0 251.085714 260)">8</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="279.394286" y="490.4" transform="rotate(-0 279.394286 490.4)">8</text>
      </g>
     </g>
     <g id="xtick_4">
      <g id="line2d_7">
-      <path d="M 330.32381 237.8 
-L 330.32381 40.6 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 358.609524 464.4 
+L 358.609524 54 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_8">
       <g>
-       <use xlink:href="#m2348452cd6" x="330.32381" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="358.609524" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_4">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="330.32381" y="260" transform="rotate(-0 330.32381 260)">12</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="358.609524" y="490.4" transform="rotate(-0 358.609524 490.4)">12</text>
      </g>
     </g>
     <g id="xtick_5">
      <g id="line2d_9">
-      <path d="M 409.561905 237.8 
-L 409.561905 40.6 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 437.824762 464.4 
+L 437.824762 54 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_10">
       <g>
-       <use xlink:href="#m2348452cd6" x="409.561905" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="437.824762" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_5">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="409.561905" y="260" transform="rotate(-0 409.561905 260)">16</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="437.824762" y="490.4" transform="rotate(-0 437.824762 490.4)">16</text>
      </g>
     </g>
     <g id="text_6">
-     <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="280.8" y="284.15" transform="rotate(-0 280.8 284.15)">CPU pods next to vLLM (2 vCPU each)</text>
+     <text style="font-size: 21px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="309.1" y="519.35" transform="rotate(-0 309.1 519.35)">CPU pods next to vLLM (2 vCPU each)</text>
     </g>
    </g>
    <g id="matplotlib.axis_2">
     <g id="ytick_1">
      <g id="line2d_11">
-      <path d="M 72.8 237.8 
-L 488.8 237.8 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 101.16 464.4 
+L 517.04 464.4 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_12">
       <defs>
-       <path id="m581075a40a" d="M 0 0 
+       <path id="m0b9debf729" d="M 0 0 
 L -3.5 0 
 " style="stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </defs>
       <g>
-       <use xlink:href="#m581075a40a" x="72.8" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="101.16" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_7">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="65.8" y="245.4" transform="rotate(-0 65.8 245.4)">0</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="94.16" y="473.9" transform="rotate(-0 94.16 473.9)">0</text>
      </g>
     </g>
     <g id="ytick_2">
      <g id="line2d_13">
-      <path d="M 72.8 195.730667 
-L 488.8 195.730667 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 101.16 376.848 
+L 517.04 376.848 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_14">
       <g>
-       <use xlink:href="#m581075a40a" x="72.8" y="195.730667" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="101.16" y="376.848" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_8">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="65.8" y="203.330667" transform="rotate(-0 65.8 203.330667)">20</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="94.16" y="386.348" transform="rotate(-0 94.16 386.348)">20</text>
      </g>
     </g>
     <g id="ytick_3">
      <g id="line2d_15">
-      <path d="M 72.8 153.661333 
-L 488.8 153.661333 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 101.16 289.296 
+L 517.04 289.296 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_16">
       <g>
-       <use xlink:href="#m581075a40a" x="72.8" y="153.661333" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="101.16" y="289.296" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_9">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="65.8" y="161.261333" transform="rotate(-0 65.8 161.261333)">40</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="94.16" y="298.796" transform="rotate(-0 94.16 298.796)">40</text>
      </g>
     </g>
     <g id="ytick_4">
      <g id="line2d_17">
-      <path d="M 72.8 111.592 
-L 488.8 111.592 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 101.16 201.744 
+L 517.04 201.744 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_18">
       <g>
-       <use xlink:href="#m581075a40a" x="72.8" y="111.592" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="101.16" y="201.744" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_10">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="65.8" y="119.192" transform="rotate(-0 65.8 119.192)">60</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="94.16" y="211.244" transform="rotate(-0 94.16 211.244)">60</text>
      </g>
     </g>
     <g id="ytick_5">
      <g id="line2d_19">
-      <path d="M 72.8 69.522667 
-L 488.8 69.522667 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 101.16 114.192 
+L 517.04 114.192 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_20">
       <g>
-       <use xlink:href="#m581075a40a" x="72.8" y="69.522667" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="101.16" y="114.192" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_11">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="65.8" y="77.122667" transform="rotate(-0 65.8 77.122667)">80</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="94.16" y="123.692" transform="rotate(-0 94.16 123.692)">80</text>
      </g>
     </g>
     <g id="text_12">
-     <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="37.4875" y="139.2" transform="rotate(-90 37.4875 139.2)">TTFT p99 (ms)</text>
+     <text style="font-size: 21px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="59.831875" y="259.2" transform="rotate(-90 59.831875 259.2)">TTFT p99 (ms)</text>
     </g>
    </g>
    <g id="patch_3">
-    <path d="M 72.8 237.8 
-L 488.8 237.8 
-L 488.8 80.04 
-L 72.8 80.04 
+    <path d="M 101.16 464.4 
+L 517.04 464.4 
+L 517.04 136.08 
+L 101.16 136.08 
 z
-" clip-path="url(#p3b77b875fd)" style="fill: #e2b540; fill-opacity: 0.16"/>
+" clip-path="url(#p54f543bc98)" style="fill: #e2b540; fill-opacity: 0.16"/>
    </g>
    <g id="line2d_21">
-    <path d="M 72.8 80.04 
-L 488.8 80.04 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke-dasharray: 10,8; stroke-dashoffset: 0; stroke: #e2b540; stroke-width: 2"/>
+    <path d="M 101.16 136.08 
+L 517.04 136.08 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke-dasharray: 10,8; stroke-dashoffset: 0; stroke: #e2b540; stroke-width: 2"/>
    </g>
    <g id="line2d_22">
-    <path d="M 92.609524 132.626667 
-L 171.847619 128.419733 
-L 251.085714 128.419733 
-L 330.32381 132.626667 
-L 409.561905 132.626667 
-" clip-path="url(#p3b77b875fd)" style="fill: none; stroke: #489b6e; stroke-width: 3; stroke-linecap: round"/>
+    <path d="M 120.96381 245.52 
+L 200.179048 236.7648 
+L 279.394286 236.7648 
+L 358.609524 245.52 
+L 437.824762 245.52 
+" clip-path="url(#p54f543bc98)" style="fill: none; stroke: #489b6e; stroke-width: 3; stroke-linecap: round"/>
     <defs>
-     <path id="md5420ebda4" d="M 0 3.5 
+     <path id="m76de585728" d="M 0 3.5 
 C 0.928211 3.5 1.81853 3.131218 2.474874 2.474874 
 C 3.131218 1.81853 3.5 0.928211 3.5 0 
 C 3.5 -0.928211 3.131218 -1.81853 2.474874 -2.474874 
@@ -226,198 +226,273 @@ C -1.81853 3.131218 -0.928211 3.5 0 3.5
 z
 " style="stroke: #489b6e"/>
     </defs>
-    <g clip-path="url(#p3b77b875fd)">
-     <use xlink:href="#md5420ebda4" x="92.609524" y="132.626667" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#md5420ebda4" x="171.847619" y="128.419733" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#md5420ebda4" x="251.085714" y="128.419733" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#md5420ebda4" x="330.32381" y="132.626667" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#md5420ebda4" x="409.561905" y="132.626667" style="fill: #489b6e; stroke: #489b6e"/>
+    <g clip-path="url(#p54f543bc98)">
+     <use xlink:href="#m76de585728" x="120.96381" y="245.52" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m76de585728" x="200.179048" y="236.7648" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m76de585728" x="279.394286" y="236.7648" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m76de585728" x="358.609524" y="245.52" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m76de585728" x="437.824762" y="245.52" style="fill: #489b6e; stroke: #489b6e"/>
     </g>
    </g>
    <g id="patch_4">
-    <path d="M 72.8 237.8 
-L 72.8 40.6 
+    <path d="M 101.16 464.4 
+L 101.16 54 
 " style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="patch_5">
-    <path d="M 72.8 237.8 
-L 488.8 237.8 
+    <path d="M 101.16 464.4 
+L 517.04 464.4 
 " style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="text_13">
-    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="92.609524" y="72.8848" transform="rotate(-0 92.609524 72.8848)">budget 1.5 × solo = 75 ms</text>
+    <text style="font-size: 20.8px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="120.96381" y="124.3136" transform="rotate(-0 120.96381 124.3136)">budget 1.5 × solo = 75 ms</text>
    </g>
    <g id="text_14">
-    <text style="font-weight: 700; font-size: 17px; font-family: 'Figtree'; text-anchor: start; fill: #489b6e" x="417.561905" y="140.576667" transform="rotate(-0 417.561905 140.576667)">50 ms</text>
+    <text style="font-weight: 700; font-size: 22.1px; font-family: 'Figtree'; text-anchor: start; fill: #489b6e" x="445.824762" y="255.255" transform="rotate(-0 445.824762 255.255)">50 ms</text>
    </g>
    <g id="text_15">
-    <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="96.609524" y="159.826667" transform="rotate(-0 96.609524 159.826667)">solo 50 ms</text>
+    <text style="font-size: 20.8px; font-family: 'Figtree'; text-anchor: start; fill: #111314; opacity: 0.72" x="124.96381" y="277.28" transform="rotate(-0 124.96381 277.28)">solo 50 ms</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="72.8" y="34.6" transform="rotate(-0 72.8 34.6)">as the node fills, at 200 req/s</text>
+    <text style="font-size: 22.1px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="101.16" y="48" transform="rotate(-0 101.16 48)">as the node fills, at 200 req/s</text>
    </g>
   </g>
   <g id="axes_2">
    <g id="patch_6">
-    <path d="M 592.8 237.8 
-L 956.8 237.8 
-L 956.8 40.6 
-L 592.8 40.6 
-L 592.8 237.8 
+    <path d="M 629.44 464.4 
+L 932.92 464.4 
+L 932.92 54 
+L 629.44 54 
+L 629.44 464.4 
 z
 " style="fill: none"/>
    </g>
    <g id="matplotlib.axis_3">
     <g id="xtick_6">
      <g id="line2d_23">
-      <path d="M 642.386276 237.8 
-L 642.386276 40.6 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 670.781877 464.4 
+L 670.781877 54 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_24">
       <g>
-       <use xlink:href="#m2348452cd6" x="642.386276" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="670.781877" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_17">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="642.386276" y="260" transform="rotate(-0 642.386276 260)">100</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="670.781877" y="490.4" transform="rotate(-0 670.781877 490.4)">100</text>
      </g>
     </g>
     <g id="xtick_7">
      <g id="line2d_25">
-      <path d="M 715.847427 237.8 
-L 715.847427 40.6 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 732.029102 464.4 
+L 732.029102 54 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_26">
       <g>
-       <use xlink:href="#m2348452cd6" x="715.847427" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="732.029102" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_18">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="715.847427" y="260" transform="rotate(-0 715.847427 260)">200</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="732.029102" y="490.4" transform="rotate(-0 732.029102 490.4)">200</text>
      </g>
     </g>
     <g id="xtick_8">
      <g id="line2d_27">
-      <path d="M 789.308577 237.8 
-L 789.308577 40.6 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 793.276327 464.4 
+L 793.276327 54 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_28">
       <g>
-       <use xlink:href="#m2348452cd6" x="789.308577" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="793.276327" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_19">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="789.308577" y="260" transform="rotate(-0 789.308577 260)">300</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="793.276327" y="490.4" transform="rotate(-0 793.276327 490.4)">300</text>
      </g>
     </g>
     <g id="xtick_9">
      <g id="line2d_29">
-      <path d="M 862.769728 237.8 
-L 862.769728 40.6 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 854.523552 464.4 
+L 854.523552 54 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_30">
       <g>
-       <use xlink:href="#m2348452cd6" x="862.769728" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="854.523552" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_20">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="862.769728" y="260" transform="rotate(-0 862.769728 260)">400</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="854.523552" y="490.4" transform="rotate(-0 854.523552 490.4)">400</text>
      </g>
     </g>
     <g id="xtick_10">
      <g id="line2d_31">
-      <path d="M 936.230878 237.8 
-L 936.230878 40.6 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 915.770777 464.4 
+L 915.770777 54 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_32">
       <g>
-       <use xlink:href="#m2348452cd6" x="936.230878" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m7081b4c9c7" x="915.770777" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_21">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="936.230878" y="260" transform="rotate(-0 936.230878 260)">500</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: middle; fill: #111314; opacity: 0.72" x="915.770777" y="490.4" transform="rotate(-0 915.770777 490.4)">500</text>
      </g>
     </g>
     <g id="text_22">
-     <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="774.8" y="284.15" transform="rotate(-0 774.8 284.15)">offered load (requests/s)</text>
+     <text style="font-size: 21px; font-family: 'Figtree'; text-anchor: middle; fill: #111314" x="781.18" y="519.35" transform="rotate(-0 781.18 519.35)">offered load (requests/s)</text>
     </g>
    </g>
    <g id="matplotlib.axis_4">
     <g id="ytick_6">
      <g id="line2d_33">
-      <path d="M 592.8 237.8 
-L 956.8 237.8 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 629.44 464.4 
+L 932.92 464.4 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_34">
       <g>
-       <use xlink:href="#m581075a40a" x="592.8" y="237.8" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="629.44" y="464.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_23">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="585.8" y="245.4" transform="rotate(-0 585.8 245.4)">0</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="473.9" transform="rotate(-0 622.44 473.9)">0</text>
      </g>
     </g>
     <g id="ytick_7">
      <g id="line2d_35">
-      <path d="M 592.8 176.935802 
-L 956.8 176.935802 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 629.44 413.733333 
+L 932.92 413.733333 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_36">
       <g>
-       <use xlink:href="#m581075a40a" x="592.8" y="176.935802" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="629.44" y="413.733333" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_24">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="585.8" y="184.535802" transform="rotate(-0 585.8 184.535802)">50</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="423.233333" transform="rotate(-0 622.44 423.233333)">20</text>
      </g>
     </g>
     <g id="ytick_8">
      <g id="line2d_37">
-      <path d="M 592.8 116.071605 
-L 956.8 116.071605 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 629.44 363.066667 
+L 932.92 363.066667 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_38">
       <g>
-       <use xlink:href="#m581075a40a" x="592.8" y="116.071605" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="629.44" y="363.066667" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_25">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="585.8" y="123.671605" transform="rotate(-0 585.8 123.671605)">100</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="372.566667" transform="rotate(-0 622.44 372.566667)">40</text>
      </g>
     </g>
     <g id="ytick_9">
      <g id="line2d_39">
-      <path d="M 592.8 55.207407 
-L 956.8 55.207407 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+      <path d="M 629.44 312.4 
+L 932.92 312.4 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
      </g>
      <g id="line2d_40">
       <g>
-       <use xlink:href="#m581075a40a" x="592.8" y="55.207407" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+       <use xlink:href="#m0b9debf729" x="629.44" y="312.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
       </g>
      </g>
      <g id="text_26">
-      <text style="font-size: 16px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="585.8" y="62.807407" transform="rotate(-0 585.8 62.807407)">150</text>
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="321.9" transform="rotate(-0 622.44 321.9)">60</text>
+     </g>
+    </g>
+    <g id="ytick_10">
+     <g id="line2d_41">
+      <path d="M 629.44 261.733333 
+L 932.92 261.733333 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_42">
+      <g>
+       <use xlink:href="#m0b9debf729" x="629.44" y="261.733333" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_27">
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="271.233333" transform="rotate(-0 622.44 271.233333)">80</text>
+     </g>
+    </g>
+    <g id="ytick_11">
+     <g id="line2d_43">
+      <path d="M 629.44 211.066667 
+L 932.92 211.066667 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_44">
+      <g>
+       <use xlink:href="#m0b9debf729" x="629.44" y="211.066667" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_28">
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="220.566667" transform="rotate(-0 622.44 220.566667)">100</text>
+     </g>
+    </g>
+    <g id="ytick_12">
+     <g id="line2d_45">
+      <path d="M 629.44 160.4 
+L 932.92 160.4 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_46">
+      <g>
+       <use xlink:href="#m0b9debf729" x="629.44" y="160.4" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_29">
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="169.9" transform="rotate(-0 622.44 169.9)">120</text>
+     </g>
+    </g>
+    <g id="ytick_13">
+     <g id="line2d_47">
+      <path d="M 629.44 109.733333 
+L 932.92 109.733333 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_48">
+      <g>
+       <use xlink:href="#m0b9debf729" x="629.44" y="109.733333" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_30">
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="119.233333" transform="rotate(-0 622.44 119.233333)">140</text>
+     </g>
+    </g>
+    <g id="ytick_14">
+     <g id="line2d_49">
+      <path d="M 629.44 59.066667 
+L 932.92 59.066667 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #a1a39a; stroke-opacity: 0.35; stroke-width: 0.8; stroke-linecap: round"/>
+     </g>
+     <g id="line2d_50">
+      <g>
+       <use xlink:href="#m0b9debf729" x="629.44" y="59.066667" style="fill: #111314; fill-opacity: 0.72; stroke: #111314; stroke-opacity: 0.72; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_31">
+      <text style="font-size: 20px; font-family: 'Figtree'; text-anchor: end; fill: #111314; opacity: 0.72" x="622.44" y="68.566667" transform="rotate(-0 622.44 68.566667)">160</text>
      </g>
     </g>
    </g>
-   <g id="line2d_41">
-    <path d="M 605.655701 208.585185 
-L 642.386276 201.281481 
-L 715.847427 179.37037 
-L 789.308577 116.071605 
-L 862.769728 55.207407 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #5a82b3; stroke-width: 3; stroke-linecap: round"/>
+   <g id="line2d_51">
+    <path d="M 640.158264 403.6 
+L 670.781877 388.4 
+L 732.029102 342.8 
+L 793.276327 211.066667 
+L 854.523552 84.4 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #5a82b3; stroke-width: 3; stroke-linecap: round"/>
     <defs>
-     <path id="m1bf1a1149e" d="M 0 3 
+     <path id="md2f05460b4" d="M 0 3 
 C 0.795609 3 1.55874 2.683901 2.12132 2.12132 
 C 2.683901 1.55874 3 0.795609 3 0 
 C 3 -0.795609 2.683901 -1.55874 2.12132 -2.12132 
@@ -429,23 +504,23 @@ C -1.55874 2.683901 -0.795609 3 0 3
 z
 " style="stroke: #5a82b3"/>
     </defs>
-    <g clip-path="url(#p0b52778d64)">
-     <use xlink:href="#m1bf1a1149e" x="605.655701" y="208.585185" style="fill: #5a82b3; stroke: #5a82b3"/>
-     <use xlink:href="#m1bf1a1149e" x="642.386276" y="201.281481" style="fill: #5a82b3; stroke: #5a82b3"/>
-     <use xlink:href="#m1bf1a1149e" x="715.847427" y="179.37037" style="fill: #5a82b3; stroke: #5a82b3"/>
-     <use xlink:href="#m1bf1a1149e" x="789.308577" y="116.071605" style="fill: #5a82b3; stroke: #5a82b3"/>
-     <use xlink:href="#m1bf1a1149e" x="862.769728" y="55.207407" style="fill: #5a82b3; stroke: #5a82b3"/>
+    <g clip-path="url(#p1468b2c7ca)">
+     <use xlink:href="#md2f05460b4" x="640.158264" y="403.6" style="fill: #5a82b3; stroke: #5a82b3"/>
+     <use xlink:href="#md2f05460b4" x="670.781877" y="388.4" style="fill: #5a82b3; stroke: #5a82b3"/>
+     <use xlink:href="#md2f05460b4" x="732.029102" y="342.8" style="fill: #5a82b3; stroke: #5a82b3"/>
+     <use xlink:href="#md2f05460b4" x="793.276327" y="211.066667" style="fill: #5a82b3; stroke: #5a82b3"/>
+     <use xlink:href="#md2f05460b4" x="854.523552" y="84.4" style="fill: #5a82b3; stroke: #5a82b3"/>
     </g>
    </g>
-   <g id="line2d_42">
-    <path d="M 605.655701 206.150617 
-L 642.386276 198.846914 
-L 715.847427 174.501235 
-L 789.308577 125.809877 
-L 862.769728 55.207407 
-" clip-path="url(#p0b52778d64)" style="fill: none; stroke: #489b6e; stroke-width: 3; stroke-linecap: round"/>
+   <g id="line2d_52">
+    <path d="M 640.158264 398.533333 
+L 670.781877 383.333333 
+L 732.029102 332.666667 
+L 793.276327 231.333333 
+L 854.523552 84.4 
+" clip-path="url(#p1468b2c7ca)" style="fill: none; stroke: #489b6e; stroke-width: 3; stroke-linecap: round"/>
     <defs>
-     <path id="m4dc9d787a5" d="M 0 3 
+     <path id="m719c587598" d="M 0 3 
 C 0.795609 3 1.55874 2.683901 2.12132 2.12132 
 C 2.683901 1.55874 3 0.795609 3 0 
 C 3 -0.795609 2.683901 -1.55874 2.12132 -2.12132 
@@ -457,45 +532,45 @@ C -1.55874 2.683901 -0.795609 3 0 3
 z
 " style="stroke: #489b6e"/>
     </defs>
-    <g clip-path="url(#p0b52778d64)">
-     <use xlink:href="#m4dc9d787a5" x="605.655701" y="206.150617" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#m4dc9d787a5" x="642.386276" y="198.846914" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#m4dc9d787a5" x="715.847427" y="174.501235" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#m4dc9d787a5" x="789.308577" y="125.809877" style="fill: #489b6e; stroke: #489b6e"/>
-     <use xlink:href="#m4dc9d787a5" x="862.769728" y="55.207407" style="fill: #489b6e; stroke: #489b6e"/>
+    <g clip-path="url(#p1468b2c7ca)">
+     <use xlink:href="#m719c587598" x="640.158264" y="398.533333" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m719c587598" x="670.781877" y="383.333333" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m719c587598" x="732.029102" y="332.666667" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m719c587598" x="793.276327" y="231.333333" style="fill: #489b6e; stroke: #489b6e"/>
+     <use xlink:href="#m719c587598" x="854.523552" y="84.4" style="fill: #489b6e; stroke: #489b6e"/>
     </g>
    </g>
    <g id="patch_7">
-    <path d="M 592.8 237.8 
-L 592.8 40.6 
+    <path d="M 629.44 464.4 
+L 629.44 54 
 " style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="patch_8">
-    <path d="M 592.8 237.8 
-L 956.8 237.8 
+    <path d="M 629.44 464.4 
+L 932.92 464.4 
 " style="fill: none; stroke: #111314; stroke-opacity: 0.55; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
-   <g id="text_27">
-    <text style="font-weight: 700; font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #5a82b3" x="870.769728" y="46.807407" transform="rotate(-0 870.769728 46.807407)">vLLM alone</text>
+   <g id="text_32">
+    <text style="font-weight: 700; font-size: 20.8px; font-family: 'Figtree'; text-anchor: start; fill: #5a82b3" x="862.523552" y="77.68" transform="rotate(-0 862.523552 77.68)">vLLM alone</text>
    </g>
-   <g id="text_28">
-    <text style="font-weight: 700; font-size: 16px; font-family: 'Figtree'; text-anchor: start; fill: #489b6e" x="870.769728" y="74.807407" transform="rotate(-0 870.769728 74.807407)">+ 16 CPU pods</text>
+   <g id="text_33">
+    <text style="font-weight: 700; font-size: 20.8px; font-family: 'Figtree'; text-anchor: start; fill: #489b6e" x="862.523552" y="105.68" transform="rotate(-0 862.523552 105.68)">+ 16 CPU pods</text>
    </g>
-   <g id="text_29">
-    <text style="font-size: 15px; font-family: 'Figtree'; fill: #111314; opacity: 0.72" transform="translate(603.72 60.766)">at 400 req/s both saturate</text>
-    <text style="font-size: 15px; font-family: 'Figtree'; fill: #111314; opacity: 0.72" transform="translate(603.72 78.766)">(≥ 2,000 ms, axis capped)</text>
+   <g id="text_34">
+    <text style="font-size: 18.2px; font-family: 'Figtree'; fill: #111314; opacity: 0.72" transform="translate(729.255275 421.594)">400 req/s: both saturate</text>
+    <text style="font-size: 18.2px; font-family: 'Figtree'; fill: #111314; opacity: 0.72" transform="translate(752.295338 443.434)">(≥ 2,000 ms, capped)</text>
    </g>
-   <g id="text_30">
-    <text style="font-size: 17px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="592.8" y="34.6" transform="rotate(-0 592.8 34.6)">as load rises</text>
+   <g id="text_35">
+    <text style="font-size: 22.1px; font-family: 'Figtree'; text-anchor: start; fill: #111314" x="629.44" y="48" transform="rotate(-0 629.44 48)">as load rises</text>
    </g>
   </g>
  </g>
  <defs>
-  <clipPath id="p3b77b875fd">
-   <rect x="72.8" y="40.6" width="416" height="197.2"/>
+  <clipPath id="p54f543bc98">
+   <rect x="101.16" y="54" width="415.88" height="410.4"/>
   </clipPath>
-  <clipPath id="p0b52778d64">
-   <rect x="592.8" y="40.6" width="364" height="197.2"/>
+  <clipPath id="p1468b2c7ca">
+   <rect x="629.44" y="54" width="303.48" height="410.4"/>
   </clipPath>
  </defs>
 </svg>

@@ -319,27 +319,29 @@ def tot(s, key):
 
 
 def native_latency(S, key, title_alone):
-    w, h = 1040, 290
+    w, h = (1124 if S.get("cpus") else 1664), 540
     fig = fig_px(w, h)
+    big = {"xtick.labelsize": 20, "ytick.labelsize": 20, "axes.labelsize": 21}
+    plt.rcParams.update(big)
     bf = marks_of(S, "backfill")
-    ax = fig.add_axes([0.07, 0.18, 0.4, 0.68])
+    ax = fig.add_axes([0.06 if w > 1300 else 0.09, 0.14, 0.4 if w > 1300 else 0.37, 0.76])
     x, y = [m["pods"] for m in bf], [m["ttft"]["p99"] for m in bf]
     solo = y[0]
     ax.axhspan(0, 1.5 * solo, color=a("yellow", 0.16), lw=0)
     ax.axhline(1.5 * solo, color=PAL["yellow"], lw=2, ls=(0, (5, 4)))
-    ax.text(x[0], 1.5 * solo * 1.02, f"budget 1.5 × solo = {1.5 * solo:.0f} ms", fontsize=16, color=PAL["ink"],
+    ax.text(x[0], 1.5 * solo * 1.02, f"budget 1.5 × solo = {1.5 * solo:.0f} ms", fontsize=20.8, color=PAL["ink"],
             va="bottom")
     ax.plot(x, y, "-o", color=PAL["green"], lw=3, ms=7)
     ax.annotate(f"{y[-1]:.0f} ms", (x[-1], y[-1]), xytext=(8, -2), textcoords="offset points",
-                fontsize=17, fontweight="bold", color=PAL["green"], va="center")
-    ax.annotate(f"solo {solo:.0f} ms", (x[0], solo), xytext=(4, -12), textcoords="offset points", fontsize=16,
+                fontsize=22.1, fontweight="bold", color=PAL["green"], va="center")
+    ax.annotate(f"solo {solo:.0f} ms", (x[0], solo), xytext=(4, -12), textcoords="offset points", fontsize=20.8,
                 color=INK2, ha="left", va="top")
     ax.set_ylim(0, max(1.5 * solo, max(y)) * 1.25)
     ax.set_xlim(min(x) - 1, max(x) + 4)
     ax.set_xticks(x)
     ax.set_xlabel("CPU pods next to vLLM (2 vCPU each)")
     ax.set_ylabel("TTFT p99 (ms)")
-    ax.set_title(f"as the node fills, at {S['rate']} req/s", fontsize=17, loc="left")
+    ax.set_title(f"as the node fills, at {S['rate']} req/s", fontsize=22.1, loc="left")
 
     ld = list(marks_of(S, "load"))
     # the full-backfill point at the backfill phase's rate is the same condition; use it if the load ladder lacks it
@@ -347,7 +349,7 @@ def native_latency(S, key, title_alone):
     for m in bf:
         if m["pods"] == pmax and pmax and not any(x["pods"] == pmax and x["rate"] == m.get("rate", S["rate"]) for x in ld):
             ld.append({**m, "rate": m.get("rate", S["rate"])})
-    ax2 = fig.add_axes([0.57, 0.18, 0.35, 0.68])
+    ax2 = fig.add_axes([0.55 if w > 1300 else 0.56, 0.14, 0.36 if w > 1300 else 0.27, 0.76])
     pods = sorted({m["pods"] for m in ld})
     series = []
     for p, col, nm in ((pods[0], PAL["blue"], title_alone), (pods[-1], PAL["green"], f"+ {pods[-1]} CPU pods")):
@@ -361,20 +363,23 @@ def native_latency(S, key, title_alone):
         last = f"{ys[-1]:.0f} ms" if ys[-1] < 1000 else ("" if all(sat_last) else f"≥ {ys[-1]:,.0f} ms, saturated")
         yc = [min(y, cap) for y in ys]
         ax2.plot(xs, yc, "-o", color=col, lw=3, ms=6)
-        ax2.annotate(f"{nm}\n{last}".strip(), (xs[-1], yc[-1]), xytext=(8, 14 if k == 0 else -14) if all(sat_last) else (8, -22 if col == PAL["green"] else 0),
-                     textcoords="offset points", ha="left", va="center", fontsize=16, fontweight="bold", color=col)
+        other = [ys2 for c2, n2, xs2, ys2 in series if n2 != nm]
+        hi_ = bool(other) and yc[-1] >= min(other[0][-1], cap)
+        ax2.annotate(f"{nm}\n{last}".strip(), (xs[-1], yc[-1]), xytext=(8, 14 if k == 0 else -14) if all(sat_last) else (8, 16 if hi_ else -16),
+                     textcoords="offset points", ha="left", va="center", fontsize=20.8, fontweight="bold", color=col)
     if series and all(sat_last):
         x_ = series[0][2][-1]
-        ax2.text(0.03, 0.97, f"at {x_:,.0f} req/s both saturate\n(≥ {series[0][3][-1]:,.0f} ms, axis capped)", transform=ax2.transAxes,
-                 ha="left", va="top", fontsize=15, color=INK2)
+        ax2.text(0.98, 0.04, f"{x_:,.0f} req/s: both saturate\n(≥ {series[0][3][-1]:,.0f} ms, capped)", transform=ax2.transAxes,
+                 ha="right", va="bottom", fontsize=18.2, color=INK2)
     if any(y >= 1000 for *_, ys in series for y in ys):
         ax2.set_ylim(0, cap * 1.08)
     else:
         ax2.set_ylim(bottom=0)
     ax2.set_xlim(right=max(m["rate"] for m in ld) * 1.32)
     ax2.set_xlabel("offered load (requests/s)")
-    ax2.set_title("as load rises", fontsize=17, loc="left")
+    ax2.set_title("as load rises", fontsize=22.1, loc="left")
     save(fig, f"{key}_latency", w, h)
+    plt.rcParams.update({"xtick.labelsize": 16, "ytick.labelsize": 16, "axes.labelsize": 17})
 
 
 def native_node_busy(S, key):
@@ -412,13 +417,13 @@ def placement(ax, S, t0, t1, demand_fn, events, ylim):
                 ha="right" if right else "left", color=PAL["ink"])
     ax.set_ylim(0, ylim)
     ax.set_xlim(-20, x[-1])
-    ax.set_ylabel("CPU pods Ready")
+    ax.set_ylabel("pods Ready")
 
 
 def native_spike(S, key):
-    w, h = 510, 260
+    w, h = 1100, 160
     fig = fig_px(w, h)
-    ax = fig.add_axes([0.13, 0.2, 0.83, 0.72])
+    ax = fig.add_axes([0.06, 0.36, 0.92, 0.58])
     up, dn, end = marks_of(S, "step_up")[0], marks_of(S, "step_down")[0], marks_of(S, "step_end")[0]
     tu, td, te = up["t"], dn["t"], end["t"]
     hi = sum(up.get("demand", [20, 20]))
@@ -434,71 +439,274 @@ def native_spike(S, key):
     return cov, dr
 
 
-def native_gpu(S, key):
-    w, h = 510, 260
-    fig = fig_px(w, h)
-    ax = fig.add_axes([0.13, 0.2, 0.83, 0.72])
+def native_gpu(S, key, host_tag="G4", hatch_note="both ran while the new vLLM started", drains=True):
+    """Scale-out/in as two lanes on one time axis. Top: offered load (loadgen target rps from the samples), vLLM
+    replicas Ready and accelerator nodes. Bottom: Ready CPU pods by where they run (host #1 / host #2 spare cores from
+    each sample's per-node backfill placement, N4D overflow) with the demand line. Numbered phases come from the
+    sweep marks; a hatch marks where Ready pods exceeded demand."""
+    from matplotlib.patches import Circle, Rectangle
+    w, h = 1100, 370
     out, gin, end = marks_of(S, "gpu_out")[0], marks_of(S, "gpu_in")[0], marks_of(S, "gpu_end")[0]
     t0, tin, te = out["t"], gin["t"], end["t"]
     dem = sum(out.get("demand", [18, 18]))
-    win = [s for s in S["samples"] if t0 <= s["t"] <= te]
+    win = [s for s in S["samples"] if t0 - 20 <= s["t"] <= te]
+    host1 = set(win[0]["g4"])
+    x = [s["t"] - t0 for s in win]
+
+    def on(s, hosts, want):
+        n = 0
+        for k in ("sandbox", "toolcall"):
+            for node, c in (s["svc"][k].get("bf_ready_on") or {}).items():
+                if (node in hosts) == want:
+                    n += c
+        return n
+    h1 = [on(s, host1, True) for s in win]
+    h2 = [on(s, host1, False) for s in win]
+    n4 = [tot(s, "of_ready") for s in win]
+    rate = [(s.get("rates") or [None])[0] for s in win]
+    vr = [len(s["vllm_ready_nodes"]) for s in win]
+    nodes = [len(s["g4"]) for s in win]
+    t_node = next((s["t"] - t0 for s in win if s["t"] >= t0 and len(s["g4"]) > len(host1)), gin.get("node_added_after_s"))
     v2 = gin.get("vllm2_ready_after_s") or next((s["t"] - t0 for s in win if len(s["vllm_ready_nodes"]) >= 2), None)
-    gone = (end.get("node_removed_after_s") or 0) + (tin - t0)
-    ev = [(v2, "2nd vLLM Ready"), (tin - t0, "load drops"), (gone, "node removed")]
-    placement(ax, S, t0, te, lambda t: dem, [e for e in ev if e[0] is not None], dem * 1.6)
+    t_in = tin - t0
+    gone = t_in + (end.get("node_removed_after_s") or 0)
     wi = [s for s in S["samples"] if tin <= s["t"] <= te]
     pct = 100 * sum(tot(s, "bf_ready") + tot(s, "of_ready") >= dem for s in wi) / max(1, len(wi))
-    ax.set_xlabel("seconds since LLM load rose")
+    pct_all = 100 * sum(tot(s, "bf_ready") + tot(s, "of_ready") >= dem for s in win if s["t"] >= t0) / max(1, sum(s["t"] >= t0 for s in win))
+
+    fig = fig_px(w, h)
+    L, R = 0.05, 0.8
+    ax1 = fig.add_axes([L, 0.59, R - L, 0.2])
+    ax2 = fig.add_axes([L, 0.15, R - L, 0.41], sharex=ax1)
+    xmax = x[-1]
+    # top lane: load (left axis), vLLM Ready + nodes (right axis)
+    ax1.plot(x, rate, color=PAL["ink"], lw=2.2, drawstyle="steps-post")
+    ax1.set_ylim(0, max(r for r in rate if r) * 1.35)
+    ax1b = ax1.twinx()
+    ax1b.plot(x, vr, color=PAL["blue"], lw=2.6, drawstyle="steps-post")
+    ax1b.plot(x, nodes, color=PAL["warm"], lw=2, ls=(0, (4, 3)), drawstyle="steps-post")
+    ax1b.set_ylim(0, 2.9)
+    ax1b.set_yticks([1, 2])
+    ax1b.tick_params(labelsize=15, colors=INK2)
+    ax1b.spines["top"].set_visible(False)
+    ax1b.grid(False)
+    ax1.text(1.035, 0.92, "accelerator hosts", transform=ax1.transAxes, fontsize=15, color=INK2, va="center")
+    ax1.text(1.035, 0.62, "vLLM replicas Ready", transform=ax1.transAxes, fontsize=15, color=PAL["blue"], fontweight="bold", va="center")
+    ax1.text(1.035, 0.32, "offered load (req/s)", transform=ax1.transAxes, fontsize=15, color=PAL["ink"], va="center")
+    plt.setp(ax1.get_xticklabels(), visible=False)
+    ax1.tick_params(labelsize=15)
+    ax1.yaxis.set_major_locator(ticker.MaxNLocator(2))
+    # bottom lane: where the CPU pods run
+    ax2.stackplot(x, h1, h2, n4, colors=[PAL["green"], a("green", 0.45), a("red", 0.85)], lw=0)
+    ax2.plot(x, [dem] * len(x), color=PAL["ink"], lw=2)
+    over = [h1[i] + h2[i] + n4[i] > dem for i in range(len(x))]
+    runs, st = [], None
+    for i, o in enumerate(over + [False]):
+        if o and st is None:
+            st = i
+        elif not o and st is not None:
+            runs.append((st, i - 1)); st = None
+    top = max(a_ + b_ + c_ for a_, b_, c_ in zip(h1, h2, n4))
+    ylim = max(top, dem) * 1.18
+    # over-demand stretches: before the load drop = the new vLLM starting (or a flap); after = make-before-break
+    t_in_ = tin - t0
+    segs = []
+    for r0, r1 in runs:
+        xa, xb = x[r0], x[r1]
+        if xb - xa < 20:
+            continue
+        if t_node is not None and xb <= t_node:  # pre-scale-out jitter, not the new-host overlap
+            continue
+        if xa < t_in_ < xb:
+            segs += [(xa, t_in_, "pre"), (t_in_, xb, "post")]
+        else:
+            segs.append((xa, xb, "post" if xa >= t_in_ else "pre"))
+    for xa, xb, kind in segs:
+        tot_ = [h1[i] + h2[i] + n4[i] for i in range(len(x))]
+        ax2.fill_between(x, dem, tot_, where=[xa <= xv <= xb and tv > dem for xv, tv in zip(x, tot_)],
+                         facecolor="none", hatch="///", edgecolor=a("ink", 0.4), lw=0, interpolate=True)
+        mins = (xb - xa) / 60
+        flap = "flap" in hatch_note
+        txt = ((hatch_note if flap else f"{hatch_note} (~{mins:.0f} min)") if kind == "pre"
+               else "make-before-break: N4D takes over before host #2 leaves")
+        if (xb - xa) / (xmax - x[0]) > 0.12:  # label only where it fits
+            if kind == "pre" and flap:  # long note: anchor at the stretch start, top row
+                ax2.text(xa, ylim * 0.985, txt, ha="left", va="top", fontsize=14, color=PAL["ink"],
+                         bbox=dict(fc=PAL["ground"], ec="none", pad=1.5))
+            else:
+                ax2.text((xa + xb) / 2, ylim * (0.86 if flap else 0.985), txt, ha="center", va="top", fontsize=14,
+                         color=PAL["ink"], bbox=dict(fc=PAL["ground"], ec="none", pad=1.5))
+    ax2.set_ylim(0, ylim)
+    ax2.set_xlim(x[0], xmax)
+    ax2.set_ylabel("CPU pods", fontsize=16)
+    ax2.set_xlabel("seconds since LLM load rose", fontsize=16)
+    ax2.tick_params(labelsize=15)
+    # numbered phases across both lanes
+    phases = [(0, "load rises"), (t_node, f"new host boots ({t_node:.0f} s)" if t_node else "new host boots"),
+              (v2, (f"2nd vLLM Ready ({v2:.0f} s)" if v2 else "2nd vLLM Ready") + (", N4D drains" if drains else "")),
+              (t_in, "load drops"), (gone, f"host #2 removed (+{gone - t_in:.0f} s)")]
+    for k, (tx, _) in enumerate(phases, 1):
+        if tx is None:
+            continue
+        for ax in (ax1, ax2):
+            ax.axvline(tx, color=a("ink", 0.45), lw=1, ls=(0, (2, 3)))
+        xf = L + (R - L) * (tx - x[0]) / (xmax - x[0])
+        fig.text(xf, 0.835, str(k), ha="center", va="center", fontsize=13, color=PAL["ground"], fontweight="bold",
+                 bbox=dict(boxstyle="circle,pad=0.25", fc=PAL["ink"], ec="none"))
+    # numbered legend: 2 rows x 3 columns under the chart title
+    for j, (k, (tx, lab)) in enumerate([(k, p) for k, p in enumerate(phases, 1) if p[0] is not None]):
+        cx, cy = L + (j % 3) * 0.29, 0.965 - (j // 3) * 0.06
+        fig.text(cx, cy, str(k), ha="center", va="center", fontsize=12, color=PAL["ground"], fontweight="bold",
+                 bbox=dict(boxstyle="circle,pad=0.25", fc=PAL["ink"], ec="none"))
+        fig.text(cx + 0.016, cy, lab, ha="left", va="center", fontsize=15.5, color=PAL["ink"])
+    # pod-location key
+    for j, (col, lab) in enumerate(((a("red", 0.85), "N4D"), (a("green", 0.45), "host #2"), (PAL["green"], "host #1"))):
+        yk = 0.47 - j * 0.075
+        fig.patches.append(Rectangle((R + 0.012, yk - 0.022), 0.014, 0.044, transform=fig.transFigure, fc=col, ec="none"))
+        fig.text(R + 0.032, yk, lab, fontsize=15, va="center")
+    fig.lines.append(plt.Line2D([R + 0.012, R + 0.026], [0.215, 0.215], transform=fig.transFigure, color=PAL["ink"], lw=2.5))
+    fig.text(R + 0.032, 0.215, "demand", fontsize=15, va="center")
     save(fig, f"{key}_gpu", w, h)
-    return v2, end.get("node_removed_after_s"), round(pct, 1)
+    pfloor = lambda v: 100.0 if v >= 100 else min(round(v, 1), 99.9)  # never round a gap up to 100 %
+    return v2, end.get("node_removed_after_s"), pfloor(pct), pfloor(pct_all), t_node
+
+def ladder_window(rows):
+    """Pick the backfill-ladder segment (0 -> max pods in steps) with the most distinct steps; returns (t_start, t_end, steps)."""
+    segs, cur = [], None
+    for i, r in enumerate(rows):
+        p = r.get("pods_bf") or 0
+        if cur is None or (p == 0 and cur["max"] > 0) or p < cur["max"] - 2:
+            if cur and cur["max"] > 0:
+                cur["end"] = r["t"]
+                segs.append(cur)
+            cur = {"start": r["t"], "max": 0, "first": {}, "end": None}
+        if p > cur["max"]:
+            cur["max"] = p
+        if p % 4 == 0 and p not in cur["first"]:
+            cur["first"][p] = r["t"]
+    if cur and cur["max"] > 0:
+        cur["end"] = rows[-1]["t"]
+        segs.append(cur)
+    def steps(s):  # step values that dwell >= 30 s
+        ts = sorted(s["first"].items(), key=lambda kv: kv[1])
+        out = []
+        for j, (p, t) in enumerate(ts):
+            nxt = ts[j + 1][1] if j + 1 < len(ts) else s["end"]
+            if nxt - t >= 30:
+                out.append((p, t))
+        return out
+    best = max(segs, key=lambda s: (len(steps(s)), s["start"]))
+    st = steps(best)
+    t1 = st[1][1] if len(st) > 1 else best["start"]
+    t0 = max(best["start"], t1 - 120)
+    st = [(0, t0)] + [(p, t) for p, t in st if p > 0]
+    return t0, best["end"], st
 
 
 def native_cpu_heatmap(S, key, l3, ncores):
-    w, h = 584, 118
+    w, h = 640, 580
     rows = [r for r in S["cpus"] if r.get("busy")]
     node = max({r["node"] for r in rows}, key=lambda n: sum(r["node"] == n for r in rows))
     rows = [r for r in rows if r["node"] == node]
-    t0 = rows[0]["t"]
+    t0, t1, steps = ladder_window(rows)
+    rows = [r for r in rows if t0 <= r["t"] <= t1]
     times = [(r["t"] - t0) / 60 for r in rows]
     n = len(rows[0]["busy"])
-    busy = {c: [float((r["busy"] or [0] * n)[c] or 0) for r in rows] for c in range(n)}
-    owners = rows[-1].get("owner") or {}
-    vllm = {int(c) for c, cn in owners.items() if "vllm" in str(cn) or cn == "main"}
-    bfs = {int(c) for c, cn in owners.items() if int(c) not in vllm}
+    order = cpu_rows(l3, ncores)
+    import numpy as np
+    base = {"vllm": np.array(to_rgba(PAL["blue"])[:3]), "bf": np.array(to_rgba(PAL["green"])[:3]),
+            "idle": np.array(to_rgba(PAL["warm"])[:3])}
+    white = np.array([1.0, 1.0, 1.0])
+    img = np.zeros((len(order), len(rows), 3))
+    for j, r in enumerate(rows):
+        own = r.get("owner") or {}
+        busy = r["busy"] or [0] * n
+        for i, c in enumerate(order):
+            b = min(max(float(busy[c] or 0) / 100, 0), 1)
+            o = own.get(str(c))
+            kind = "vllm" if o in ("vllm", "main") else ("bf" if o else "idle")
+            f = b if kind != "idle" else 0.22 + 0.78 * b
+            img[i, j] = white * (1 - f) + base[kind] * f
     fig = fig_px(w, h)
-    ax = fig.add_axes([0.11, 0.2, 0.85, 0.77])
-    heatmap_panel(ax, busy, times, l3, ncores, vllm, set(), "", bf=bfs)
+    ax = fig.add_axes([0.25, 0.33, 0.72, 0.56])
+    ax.imshow(img, aspect="auto", interpolation="nearest", extent=(times[0], times[-1], len(order), 0))
+    ax.grid(False)
+    y = 0
+    for i, dom in enumerate(l3):
+        nr = 2 * len(dom)
+        if i:
+            ax.axhline(y, color=PAL["ink"], lw=0.8, alpha=0.55)
+        ax.text(-0.025, 1 - (y + nr / 2) / len(order), f"L3 {i}\ncores\n{dom[0]}–{dom[-1]}",
+                transform=ax.transAxes, ha="right", va="center", fontsize=19, color=INK2, linespacing=1.1)
+        y += nr
+    for p, t in steps:
+        x = (t - t0) / 60
+        if p:
+            ax.axvline(x, color=PAL["ink"], lw=0.8, ls=(0, (3, 3)), alpha=0.6)
+        ax.text(x, -0.8, f"{p}", ha="left", va="bottom",
+                fontsize=20, color=PAL["ink"])
+    ax.text(-0.025, 1.035, "pods", transform=ax.transAxes, fontsize=19, ha="right", color=INK2, va="bottom")
+    ax.set_yticks([])
+    ax.spines[["left", "bottom", "top", "right"]].set_visible(False)
+    ax.set_xlim(times[0], times[-1])
+    ax.set_xticks([x for x in range(0, int(times[-1]) + 1, 2)])
+    ax.set_xlabel("minutes into the backfill ladder", fontsize=20)
+    ax.tick_params(labelsize=19)
+    # colour key: owner swatches as white -> colour ramps, idle as gray
+    kx, ky, kw, kh = 0.04, 0.085, 0.27, 0.035
+    for j, (kind, lab) in enumerate((("vllm", "vLLM"), ("bf", "CPU pods"), ("idle", "shared / idle"))):
+        x = kx + j * 0.33
+        ramp = np.linspace(0, 1, 64)
+        gs = [(0.22 + 0.78 * f if kind == "idle" else f) for f in ramp]
+        cols = [white * (1 - g) + base[kind] * g for g in gs]
+        kax = fig.add_axes([x, ky, kw, kh])
+        kax.imshow([cols], aspect="auto", extent=(0, 1, 0, 1))
+        kax.set_xticks([]); kax.set_yticks([])
+        for s in kax.spines.values():
+            s.set_edgecolor(a("ink", 0.35)); s.set_linewidth(0.6)
+        fig.text(x, ky + kh + 0.012, lab, fontsize=19, va="bottom", color=PAL["ink"])
+    fig.text(0.04, ky - 0.012, "shade = busy %, 0 → 100", fontsize=19, va="top", color=INK2)
     save(fig, f"{key}_heatmap", w, h)
 
 
-def native_set(S, key, label_alone, l3, ncores, profile_rate):
+def native_set(S, key, label_alone, l3, ncores, profile_rate, S_gpu=None):
     """All charts + KPIs for one native sweep. Returns the KPI dict (or None for a placeholder)."""
     if S is None:
-        for nm, w, h in ((f"{key}_latency", 1040, 290), (f"{key}_nodebusy", 760, 200), (f"{key}_spike", 510, 260),
-                         (f"{key}_gpu", 510, 260)):
+        for nm, w, h in ((f"{key}_latency", 1664, 540), (f"{key}_nodebusy", 760, 200), (f"{key}_spike", 1100, 160),
+                         (f"{key}_gpu", 1100, 370)):
             placeholder_chart(nm, w, h, "waiting for the final v6e sweep (incl. scale-out/in rerun)")
         return None
     S["rate"] = profile_rate
     src = str(S["dir"].relative_to(REPO))
     k = {"source": src, "partial": [], "heatmap": False}
 
-    def attempt(fn, name, w, h, need):
-        if not all(marks_of(S, p) for p in need) or (name == "latency" and len(marks_of(S, "backfill")) < 2):
+    def attempt(fn, name, w, h, need, SS=None):
+        SS = SS or S
+        if not all(marks_of(SS, p) for p in need) or (name == "latency" and len(marks_of(SS, "backfill")) < 2):
             placeholder_chart(f"{key}_{name}", w, h, f"sweep phase '{need[-1]}' not finished yet ({src})")
             k["partial"].append(name)
             return None
         return fn()
 
     attempt(lambda: native_latency(S, key, label_alone) if {m["pods"] for m in marks_of(S, "load")} else
-            placeholder_chart(f"{key}_latency", 1040, 290, f"sweep phase 'load' not finished yet ({src})"),
-            "latency", 1040, 290, ["backfill", "load"])
+            placeholder_chart(f"{key}_latency", 1664, 540, f"sweep phase 'load' not finished yet ({src})"),
+            "latency", 1664, 540, ["backfill", "load"])
     attempt(lambda: native_node_busy(S, key), "nodebusy", 760 if not S.get("cpus") else 370, 200, ["backfill"])
-    r = attempt(lambda: native_spike(S, key), "spike", 510, 260, ["step_up", "step_down", "step_end"])
+    r = attempt(lambda: native_spike(S, key), "spike", 1100, 160, ["step_up", "step_down", "step_end"])
     if r:
         k["spike_covered_s"], k["spike_drained_s"] = r
-    r = attempt(lambda: native_gpu(S, key), "gpu", 510, 260, ["gpu_out", "gpu_in", "gpu_end"])
+    # scale-out/in run: the dedicated rerun when given (G4 on the fixed recipe: DECK_G4_SCALE2=1), else this sweep
+    Sg = S_gpu or S
+    if key == "v6e":
+        gargs = ("v6e", "both ran while the new vLLM compiled", True)
+    elif S_gpu is not None:
+        gargs = ("G4", "both ran while the new vLLM started", True)
+    else:
+        gargs = ("G4", "N4D stayed up through a vLLM 2→1→2 flap (HPA scale-down window since raised to 120 s)", False)
+    k["gpu_source"] = str(Sg["dir"].relative_to(REPO))
+    r = attempt(lambda: native_gpu(Sg, key, *gargs), "gpu", 1100, 370, ["gpu_out", "gpu_in", "gpu_end"], SS=Sg)
     if r:
-        k["vllm2_ready_s"], k["node_removed_s"], k["scalein_ready_pct"] = r
+        k["vllm2_ready_s"], k["node_removed_s"], k["scalein_ready_pct"], k["scale_ready_pct_all"], k["node_added_s"] = r
     if S.get("cpus"):
         native_cpu_heatmap(S, key, l3, ncores)
         k["heatmap"] = True
@@ -820,12 +1028,15 @@ def main():
     exp_spec_forest()
 
     g4 = load_sweep(BENCH / "sweep1_merged", "native")
-    kpi["g4"] = native_set(g4, "g4", "vLLM alone", L3_G4, 24, 450)
+    g4_scale = load_sweep(BENCH / "g4_scale2") if os.environ.get("DECK_G4_SCALE2") == "1" else None
+    if os.environ.get("DECK_G4_SCALE2") == "1" and g4_scale is None:
+        print("WARNING: DECK_G4_SCALE2=1 but .agents/bench/g4_scale2 has no samples; using sweep1_merged")
+    kpi["g4"] = native_set(g4, "g4", "vLLM alone", L3_G4, 24, 450, S_gpu=g4_scale)
     # v6e stays a placeholder until the sweep (incl. the scale-out/in rerun after the TPU fixes) is declared final
     v6 = load_sweep(BENCH / "v6e_sweep1") if os.environ.get("DECK_V6E_FINAL") == "1" else None
     kpi["v6e"] = native_set(v6, "v6e", "vLLM alone", L3_V6E, 22, 200)
     if v6 is None or not v6.get("cpus"):
-        placeholder_chart("v6e_heatmap", 584, 118, "waiting for the final v6e sweep")
+        placeholder_chart("v6e_heatmap", 500, 540, "waiting for the final v6e sweep")
 
     if MOCK_REPLAYS.exists() and not (DECK / "data" / "replays.json").exists():
         os.environ["DECK_MOCK_REPLAYS"] = str(MOCK_REPLAYS)
