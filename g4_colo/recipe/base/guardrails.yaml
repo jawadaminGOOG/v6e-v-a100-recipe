@@ -92,7 +92,7 @@ spec:
   - name: isNodeAgent
     expression: >-
       namespaceObject.metadata.name == 'colo-system' && has(object.spec.serviceAccountName)
-      && object.spec.serviceAccountName == 'colo-node-agent' && !variables.wantsGPU
+      && object.spec.serviceAccountName in ['colo-node-agent', 'colo-irq-pin'] && !variables.wantsGPU
   # Customer DaemonSets (logging, monitoring, security agents) that must also run on G4 nodes. Allowed only when
   # all hold: (1) the pod was created by the DaemonSet controller itself (its identity cannot be used by people or
   # workloads; ownerReferences on a pod could be forged, this cannot), (2) the namespace carries the admin-set label

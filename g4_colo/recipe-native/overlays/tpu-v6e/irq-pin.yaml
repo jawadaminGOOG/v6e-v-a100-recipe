@@ -1,0 +1,53 @@
+# TPU v6e only: pin the TPU's vfio MSI-X interrupts to the kubelet-reserved CPUs (0 and its SMT sibling 22 on
+# ct6e-standard-1t), which the static CPU manager never hands out exclusively.
+#
+# Why (10 Nov 2026 investigation, .agents/bench/v6e_hang): the v6e chip's MSI-X vectors keep smp_affinity 0-43, and
+# the kernel's effective affinity puts the busy completion vector (vfio-msix[1], ~3,000 IRQ/s at 100 rps) on CPU 14
+# and another on CPU 30. Those are exclusive CPUs of a backfill pod once >= 12 backfill pods share the host, and at
+# 100 % busy there the vLLM-TPU engine silently stalled every ~10-20 min (16 pods), never with 0 pods.
+# Pinning the vectors to the reserved shared CPUs keeps TPU completion handling off every pod's exclusive cores.
+# The loop re-applies every 30 s: vectors are (re)allocated when the TPU runtime opens the device (vLLM restarts).
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: colo-irq-pin, namespace: colo-system}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: colo-irq-pin, namespace: colo-system, labels: {app: colo-irq-pin}}
+spec:
+  selector: {matchLabels: {app: colo-irq-pin}}
+  template:
+    metadata: {labels: {app: colo-irq-pin}}
+    spec:
+      serviceAccountName: colo-irq-pin
+      automountServiceAccountToken: false
+      nodeSelector: {cloud.google.com/gke-tpu-accelerator: tpu-v6e-slice}
+      tolerations:
+      - {key: cloud.google.com/compute-class, operator: Exists, effect: NoSchedule}
+      - {key: google.com/tpu, operator: Exists, effect: NoSchedule}
+      containers:
+      - name: pin
+        image: colo-registry.invalid/colo-node-agent:v0.2.4   # any image with /bin/sh; reuses the node agent's
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "pinning vfio-msix IRQs to CPUs $PIN_CPUS"
+          while true; do
+            for d in /proc/irq/[0-9]*; do
+              ls "$d" 2>/dev/null | grep -q '^vfio-msix' || continue
+              cur=$(cat "$d/smp_affinity_list")
+              if [ "$cur" != "$PIN_CPUS" ]; then
+                if echo "$PIN_CPUS" > "$d/smp_affinity_list" 2>/dev/null; then
+                  echo "$(date -u +%FT%TZ) irq $(basename $d) $cur -> $PIN_CPUS (effective $(cat $d/effective_affinity_list))"
+                fi
+              fi
+            done
+            sleep 30
+          done
+        env:
+        - {name: PIN_CPUS, value: "0,22"}   # ct6e-standard-1t: kubelet-reserved core 0 + SMT sibling
+        securityContext: {privileged: true}  # /proc/irq is read-only without it
+        resources:
+          requests: {cpu: 10m, memory: 16Mi}
+          limits: {memory: 32Mi}

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Charts for sweep.py output: controller recipe vs native recipe.
 
-    g4_colo/.venv/bin/python plots.py <sweep dir>     # writes <dir>/charts/*.png and <dir>/summary.md
+    g4_colo/.venv/bin/python plots.py <sweep dir> [names]   # writes <dir>/charts/*.png and <dir>/summary.md
+    names: comma list of clusters in the dir (default controller,native; the TPU v6e sweep is "tpu").
 """
 from __future__ import annotations
 
@@ -17,9 +18,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 D = Path(sys.argv[1])
 OUT = D / "charts"
 OUT.mkdir(exist_ok=True)
-NAMES = ("controller", "native")
-COL = {"controller": "#1a3a6b", "native": "#1b9e77"}
-LBL = {"controller": "With colo-controller (recipe/)", "native": "Native K8s only (recipe-native/)"}
+NAMES = tuple(sys.argv[2].split(",")) if len(sys.argv) > 2 else ("controller", "native")
+COL = {"controller": "#1a3a6b", "native": "#1b9e77", "tpu": "#7B3FA0"}
+LBL = {"controller": "With colo-controller (recipe/)", "native": "Native K8s only (recipe-native/)",
+       "tpu": "TPU v6e, native (recipe-native/overlays/tpu-v6e)"}
 plt.rcParams.update({"font.size": 10, "axes.grid": True, "grid.alpha": 0.3, "axes.spines.top": False,
                      "axes.spines.right": False, "figure.dpi": 130})
 
@@ -59,6 +61,23 @@ def save(fig, fname):
 
 summary = {n: {} for n in NAMES}
 
+
+def step_levels(n):
+    """(low, high) total sandbox+toolcall demand of the step phase; sweep1 marks predate the demand fields."""
+    m = marks(n, "step_up")
+    hi = sum(m[0].get("demand", [20, 20])) if m else 40
+    lo = sum(m[0].get("demand_lo", [9, 9])) if m else 18
+    return lo, hi
+
+
+def gpu_demand(n):
+    m = marks(n, "gpu_out")
+    return m[0].get("demand", [18, 18]) if m else [18, 18]
+
+
+def accel_slots(n):
+    return 16 if n == "tpu" else 18
+
 # 1. TTFT vs backfill pods ----------------------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7, 4.2))
 for n in NAMES:
@@ -75,10 +94,12 @@ for n in NAMES:
     base = ms[0]["ttft"]["p99"]
     summary[n]["ttft_p99_by_pods"] = {m["pods"]: m["ttft"]["p99"] for m in ms}
     summary[n]["ttft_ratio_full"] = round(ms[-1]["ttft"]["p99"] / base, 2) if base else None
-ax.axhline(30, color="grey", ls=":", lw=1)
-ax.text(0.2, 30.5, "1.5 x 20 ms budget", fontsize=7, color="grey")
+if "tpu" not in NAMES:
+    ax.axhline(30, color="grey", ls=":", lw=1)
+    ax.text(0.2, 30.5, "1.5 x 20 ms budget", fontsize=7, color="grey")
+_rate = ", ".join(sorted({str(m.get("rate", 450)) for n in NAMES for m in marks(n, "backfill")}))
 ax.set(xlabel="Backfill pods on the vLLM node (2 vCPU each)", ylabel="TTFT (ms)",
-       title="vLLM TTFT vs CPU backfill on the same G4 node (450 rps, 1 vLLM)\n"
+       title=f"vLLM TTFT vs CPU backfill on the same accelerator node ({_rate} rps, 1 vLLM)\n"
              "L3×N: number of L3 cache domains (CCX) vLLM's 8 cores span")
 ax.legend(fontsize=7)
 save(fig, "1_ttft_vs_backfill.png")
@@ -86,11 +107,11 @@ save(fig, "1_ttft_vs_backfill.png")
 # 2. TTFT vs load --------------------------------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7, 4.2))
 for n in NAMES:
-    for pods, ls in ((0, "--"), (18, "-")):
+    for pods, ls in ((0, "--"), (accel_slots(n), "-")):
         ms = [m for m in marks(n, "load") if m["pods"] == pods]
         if ms:
             ax.plot([m["rate"] for m in ms], [m["ttft"]["p99"] for m in ms], "o" + ls, color=COL[n],
-                    label=f"{LBL[n]}, {'18 backfill pods' if pods else 'solo'}")
+                    label=f"{LBL[n]}, {f'{pods} backfill pods' if pods else 'solo'}")
     summary[n]["ttft_p99_by_rate"] = {f"{m['pods']}pods@{m['rate']}": m["ttft"]["p99"] for m in marks(n, "load")}
 ax.set(xlabel="Offered load (requests/s, 1 vLLM replica)", ylabel="TTFT p99 (ms)", yscale="log",
        title="TTFT p99 vs load: solo vs full backfill")
@@ -105,7 +126,7 @@ for n in NAMES:
         ax.plot([m["pods"] for m in ms], [m["vllm_busy"] for m in ms], "o-", color=COL[n], label=f"{LBL[n]} vLLM cores")
         ax.plot([m["pods"] for m in ms], [m["all_busy"] for m in ms], "s:", color=COL[n], alpha=0.6,
                 label=f"{LBL[n]} whole node")
-ax.set(xlabel="Backfill pods on the vLLM node", ylabel="CPU busy (%)", title="CPU utilisation on the G4 node (450 rps)")
+ax.set(xlabel="Backfill pods on the vLLM node", ylabel="CPU busy (%)", title=f"CPU utilisation on the accelerator node ({_rate} rps)")
 ax.legend(fontsize=7)
 save(fig, "3_cpu_busy_vs_backfill.png")
 
@@ -127,12 +148,14 @@ def timeline(axs, n, t0, t1, title, demand_fn):
     axs.set(title=title, xlabel="seconds since step", ylabel="pods")
 
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 4.2), sharey=True)
+fig, axes = plt.subplots(1, len(NAMES), figsize=(6 * len(NAMES), 4.2), sharey=True, squeeze=False)
+axes = axes[0]
 for ax, n in zip(axes, NAMES):
     tu, te = mark_t(n, "step_up"), mark_t(n, "step_end")
     if tu and te:
         td = mark_t(n, "step_down")
-        timeline(ax, n, tu - 30, te, LBL[n], lambda s, td=td: 40 if s["t"] < td and s["t"] >= mark_t(n, "step_up") else 18)
+        lo, hi = step_levels(n)
+        timeline(ax, n, tu - 30, te, LBL[n], lambda s, td=td, lo=lo, hi=hi: hi if td > s["t"] >= mark_t(n, "step_up") else lo)
         ax.axvline(td - tu + 30, color="black", ls=":", lw=1)
         summary[n]["step_covered_after_s"] = marks(n, "step_down")[0].get("covered_after_s")
         summary[n]["step_drained_after_s"] = marks(n, "step_end")[0].get("drained_after_s")
@@ -140,12 +163,14 @@ for ax, n in zip(axes, NAMES):
         w = window(n, tu, te)
         summary[n]["step_n4d_node_minutes"] = round(sum(len(s["n4d"]) * 2 for s in w) / 60, 1)
 axes[0].legend(fontsize=7, loc="upper right")
-fig.suptitle("CPU demand step 18 -> 40 pods -> 18 pods (450 rps)")
+fig.suptitle("CPU demand step: " + "; ".join(f"{n} {step_levels(n)[0]} -> {step_levels(n)[1]} -> {step_levels(n)[0]} pods" for n in NAMES))
 save(fig, "4_step_response.png")
 
 # 5. GPU scale-out / scale-in -------------------------------------------------------------------------------------
-fig, axes = plt.subplots(2, 2, figsize=(12, 7), sharex="col")
+fig, axes = plt.subplots(2, len(NAMES), figsize=(6 * len(NAMES), 7), sharex="col", squeeze=False)
 for col, n in enumerate(NAMES):
+    gd = gpu_demand(n)
+    dem = sum(gd)
     t0, te = mark_t(n, "gpu_out"), mark_t(n, "gpu_end")
     if not (t0 and te):
         continue
@@ -154,9 +179,9 @@ for col, n in enumerate(NAMES):
     ax = axes[0][col]
     ax.plot(x, [tot(s, "bf_ready") for s in w], color=COL[n], label="backfill Ready (G4)")
     ax.plot(x, [tot(s, "of_ready") for s in w], color="#d95f02", label="overflow Ready (N4D)")
-    ax.plot(x, [min(1.5, (tot(s, "bf_ready") + tot(s, "of_ready")) / 36) * 36 for s in w], color="#7570b3", ls="--",
-            label="total Ready (demand 36)")
-    ax.axhline(36, color="black", lw=0.8)
+    ax.plot(x, [min(1.5, (tot(s, "bf_ready") + tot(s, "of_ready")) / dem) * dem for s in w], color="#7570b3", ls="--",
+            label=f"total Ready (demand {dem})")
+    ax.axhline(dem, color="black", lw=0.8)
     ax.set(title=LBL[n], ylabel="pods")
     tin = mark_t(n, "gpu_in")
     for a in axes[:, col]:
@@ -165,21 +190,25 @@ for col, n in enumerate(NAMES):
     ax.step(x, [len(s["vllm_ready_nodes"]) for s in w], where="post", color="#1f78b4", label="vLLM Ready")
     ax.step(x, [len(s["g4"]) for s in w], where="post", color="#e31a1c", label="G4 nodes")
     ax.step(x, [len(s["n4d"]) for s in w], where="post", color="grey", label="N4D nodes")
-    ax.set(xlabel="seconds since load 450 -> 1200 rps (dotted: 1200 -> 300 rps)", ylabel="count")
+    go, gi = marks(n, "gpu_out")[0], marks(n, "gpu_in")[0]
+    ax.set(xlabel=f"seconds since load -> {go.get('rate', 1200)} rps"
+                  f"{' + HPA min 2' if go.get('mode') == 'force' else ''} (dotted: -> {gi.get('rate', 300)} rps)",
+           ylabel="count")
     gin = window(n, tin, te)
-    ok = [all(s["svc"][k]["bf_ready"] + s["svc"][k]["of_ready"] >= 18 for k in ("sandbox", "toolcall")) for s in gin]
+    ok = [all(s["svc"][k]["bf_ready"] + s["svc"][k]["of_ready"] >= v for k, v in zip(("sandbox", "toolcall"), gd)) for s in gin]
     summary[n]["scalein_ready_ge_demand_pct"] = round(100 * sum(ok) / len(ok), 1) if ok else None
     summary[n]["vllm2_ready_after_s"] = marks(n, "gpu_in")[0].get("vllm2_ready_after_s")
     summary[n]["node_removed_after_s"] = marks(n, "gpu_end")[0].get("node_removed_after_s")
+    summary[n]["node_added_after_s"] = marks(n, "gpu_in")[0].get("node_added_after_s")
     tv2 = next((s["t"] for s in window(n, t0, tin) if len(s["vllm_ready_nodes"]) >= 2), None)
     if tv2:
         new = [g for g in w[-1]["g4"]] if w else []
         fill = next((s["t"] - tv2 for s in window(n, tv2 - 300, tin)
-                     if len(s["vllm_ready_nodes"]) >= 2 and tot(s, "bf_ready") >= 34), None)
-        summary[n]["g4_fill_34_after_vllm2_ready_s"] = round(fill, 1) if fill is not None else None
+                     if len(s["vllm_ready_nodes"]) >= 2 and tot(s, "bf_ready") >= 2 * accel_slots(n) - 2), None)
+        summary[n][f"g4_fill_{2 * accel_slots(n) - 2}_after_vllm2_ready_s"] = round(fill, 1) if fill is not None else None
 axes[0][0].legend(fontsize=7)
 axes[1][0].legend(fontsize=7)
-fig.suptitle("GPU scale-out (vLLM 1 -> 2) and scale-in (2 -> 1), demand 18/18")
+fig.suptitle("Accelerator scale-out (vLLM 1 -> 2) and scale-in (2 -> 1); " + "; ".join(f"{n} demand {gpu_demand(n)[0]}/{gpu_demand(n)[1]}" for n in NAMES))
 save(fig, "5_gpu_scale_out_in.png")
 
 # 6. Summary bars --------------------------------------------------------------------------------------------------
@@ -188,10 +217,10 @@ keys = [("step_covered_after_s", "demand step up:\ncovered after (s)"),
         ("vllm2_ready_after_s", "2nd vLLM Ready\nafter load up (s)"),
         ("node_removed_after_s", "G4 node removed\nafter load down (s)")]
 fig, ax = plt.subplots(figsize=(9, 4))
-w = 0.38
+w = 0.76 / len(NAMES)
 for i, n in enumerate(NAMES):
     vals = [summary[n].get(k) or 0 for k, _ in keys]
-    bars = ax.bar([j + (i - 0.5) * w for j in range(len(keys))], vals, w, color=COL[n], label=LBL[n])
+    bars = ax.bar([j + (i - (len(NAMES) - 1) / 2) * w for j in range(len(keys))], vals, w, color=COL[n], label=LBL[n])
     for b, v in zip(bars, vals):
         ax.text(b.get_x() + b.get_width() / 2, v, f"{v:.0f}", ha="center", va="bottom", fontsize=8)
 ax.set_xticks(range(len(keys)), [l for _, l in keys], fontsize=8)
@@ -214,6 +243,8 @@ for n in NAMES:
     axes[1].step(x, [len(s["n4d"]) for s in s_], where="post", color=COL[n], label=LBL[n])
     summary[n]["sweep_n4d_node_minutes"] = round(sum(len(s["n4d"]) for s in s_) * 2 / 60, 1)
     summary[n]["sweep_reclaimed_vcpu_minutes"] = round(sum(2 * tot(s, "bf_ready") for s in s_) * 2 / 60, 1)
+    summary[n]["max_reclaimed_vcpu"] = max(2 * tot(s, "bf_ready") for s in DATA[n][0])
+    summary[n]["accel_node_hours"] = round(sum(len(s["g4"]) * (b["t"] - s["t"]) for s, b in zip(DATA[n][0], DATA[n][0][1:])) / 3600, 2)
 for n in NAMES:
     for m in DATA[n][1]:
         if m["phase"] in ("backfill", "load") or m["t"] > t_end:
@@ -229,11 +260,11 @@ json.dump(summary, open(D / "summary.json", "w"), indent=1)
 rows = ["ttft_ratio_full", "step_covered_after_s", "step_drained_after_s", "step_n4d_node_minutes",
         "vllm2_ready_after_s", "g4_fill_34_after_vllm2_ready_s", "scalein_ready_ge_demand_pct", "node_removed_after_s",
         "sweep_n4d_node_minutes", "sweep_reclaimed_vcpu_minutes"]
-md = ["| metric | controller | native |", "|---|---|---|"]
-md += [f"| {r} | {summary['controller'].get(r)} | {summary['native'].get(r)} |" for r in rows]
-md += ["", "TTFT p99 by backfill pods (ms):", "", "| pods | controller | native |", "|---|---|---|"]
+rows += ["node_added_after_s", "max_reclaimed_vcpu", "accel_node_hours"]
+md = ["| metric | " + " | ".join(NAMES) + " |", "|---" * (len(NAMES) + 1) + "|"]
+md += [f"| {r} | " + " | ".join(str(summary[n].get(r)) for n in NAMES) + " |" for r in rows]
+md += ["", "TTFT p99 by backfill pods (ms):", "", "| pods | " + " | ".join(NAMES) + " |", "|---" * (len(NAMES) + 1) + "|"]
 for p in (0, 4, 8, 12, 16, 18):
-    md.append(f"| {p} | {summary['controller'].get('ttft_p99_by_pods', {}).get(p)} | "
-              f"{summary['native'].get('ttft_p99_by_pods', {}).get(p)} |")
+    md.append(f"| {p} | " + " | ".join(str(summary[n].get("ttft_p99_by_pods", {}).get(p)) for n in NAMES) + " |")
 (D / "summary.md").write_text("\n".join(md) + "\n")
 print((D / "summary.md").read_text())

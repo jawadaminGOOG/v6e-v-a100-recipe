@@ -223,6 +223,9 @@ The same recipe runs with Cloud TPU v6e in place of G4 (`overlays/tpu-v6e`, demo
 | Accelerator pool | `g4-standard-48`, 1 × RTX PRO 6000 | `ct6e-standard-1t`, 1 × v6e, single-host (topology 1x1) (`ACCELERATOR=tpu-v6e`, optional `SPOT=1`) |
 | vLLM | `vllm/vllm-openai`, `nvidia.com/gpu: 1` | `vllm/vllm-tpu`, `google.com/tpu: 1`, TPU node selectors (GKE requires both) |
 | Extra toleration | — | `google.com/tpu` on backfill, the reserve, the node agent and customer DaemonSets |
+| vLLM HPA target | 700 completed req/s per pod | 250 (one v6e replica saturates near 330 req/s) |
+| vLLM liveness | — | `engine_progress_check.py`: restart when requests are in flight and no token is generated for ~2 min (the engine can hang while `/health` stays 200) |
+| TPU interrupts | — | `irq-pin.yaml`: DaemonSet pins the TPU's vfio MSI-X IRQs to the shared cores (0, 22), so they never land on a backfill pod's exclusive core (the cause of engine stalls at full backfill) |
 | Everything else | ComputeClasses, backfill affinity, overflow HPAs, rules, VAP | identical |
 
 Zone check: `gcloud compute machine-types list` shows `ct6e-*` in `us-west8-a`, but GKE rejects v6e node pools there (`CONDITION_NOT_MET: Unsupported TPU configuration`, on-demand and Spot, 1t and 4t). The demo cluster therefore runs in `us-east5` (zones a/b), with its own N4D quota.

@@ -30,8 +30,21 @@ spec:
         resources:
           requests: {cpu: "8", memory: 64Gi, nvidia.com/gpu: null, google.com/tpu: 1}
           limits: {cpu: "8", memory: 64Gi, nvidia.com/gpu: null, google.com/tpu: 1}
+        # The engine can hang with requests in flight while /health stays 200 (10 Nov sweep). Restart it when
+        # requests are in flight and no token has been generated for ~2 min (4 probes, 30 s apart).
+        livenessProbe:
+          exec: {command: ["python3", "/opt/colo/engine_progress_check.py"]}
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 4
+        volumeMounts:
+        - {name: hf, mountPath: /hf}
+        - {name: shm, mountPath: /dev/shm}
+        - {name: engine-progress, mountPath: /opt/colo, readOnly: true}
         # First start on a node compiles the XLA graphs for every batch/sequence bucket (minutes, not seconds).
         startupProbe:
           httpGet: {path: /health, port: 8000}
           periodSeconds: 2
           failureThreshold: 900
+      volumes:
+      - {name: engine-progress, configMap: {name: vllm-engine-progress}}

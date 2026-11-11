@@ -18,6 +18,8 @@ resources:
 - settings.yaml
 # Overflow HPA metric source for this cluster: python3 base/gen_colo_services.py --cluster <name> --out overlays/tpu-v6e
 - autoscaling-metric.yaml
+# TPU completion IRQs off backfill-owned CPUs (vLLM-TPU silent-hang fix, see irq-pin.yaml).
+- irq-pin.yaml
 components:
 # Example customer DaemonSet on the accelerator host + N4D (README "Customer DaemonSets on G4").
 - ../../../recipe/components/customer-daemonset
@@ -34,8 +36,20 @@ images:
 - name: vllm/vllm-openai
   newName: docker.io/vllm/vllm-tpu
   newTag: v0.33.0
+configMapGenerator:
+# Liveness script for the silent vLLM-TPU engine hang (see engine_progress_check.py).
+- name: vllm-engine-progress
+  namespace: inference
+  files: [engine_progress_check.py]
 patches:
 - path: vllm-tpu.yaml
+# One vLLM-TPU replica (1 v6e chip, Qwen3-1.7B) saturates near 330 completed req/s (10 Nov sweep: p99 100 ms at
+# 300 rps, 2 s at 400), so the G4 target of 700 req/s per pod would never scale out. 250 keeps ~25 % headroom.
+- target: {kind: HorizontalPodAutoscaler, name: vllm, namespace: inference}
+  patch: |-
+    - op: replace
+      path: /spec/metrics/0/pods/target/averageValue
+      value: "250"
 # GKE taints every TPU node google.com/tpu=present:NoSchedule. Add the toleration to every pod that runs on the
 # accelerator host: backfill, the shared-core reserve, the demo node agent and the example customer DaemonSet.
 - target: {kind: Deployment, namespace: colo-svc, name: ".*-backfill"}
