@@ -1,0 +1,11 @@
+# Bundled PostgreSQL asks for a 500Gi volume. The default class (pd-balanced) counts against the regional
+# SSD_TOTAL_GB quota (927 GB in us-west8, 560 used at install time), so Substrate's postgres uses pd-standard (HDD
+# quota, unused) with zone-aware binding: ate-setup --ateapi-postgres-storage-class=substrate-pd-standard.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: substrate-pd-standard}
+provisioner: pd.csi.storage.gke.io
+parameters: {type: pd-standard}
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+allowVolumeExpansion: true

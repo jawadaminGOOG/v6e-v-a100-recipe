@@ -1,0 +1,97 @@
+# In-cluster actor load generator for the demo's Agent Substrate tab (colo-exp-driver serve).
+# The UI scales actors by patching ConfigMap actor-load: total (actors that exist) and awake (actors kept RUNNING).
+# The driver publishes rolling stats to ConfigMap actor-stats.
+#
+# Identity: like `kubectl ate`, it mints a token for ate-system/ate-client (a bootstrap owner of this Substrate
+# install) and a router client certificate for ate-system/atenet-client. That makes this ServiceAccount an owner
+# of the Substrate install: experiment-only, don't copy into a production recipe.
+#   kubectl apply -f g4_colo/substrate-exp/manifests/actor-load.yaml   (not part of the kustomization)
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: actor-load, namespace: substrate-exp}
+---
+# The actor-load ConfigMap (total / awake / hold_s) is created once, outside this file, so re-applying the manifest
+# never resets the live targets the UI set:
+#   kubectl -n substrate-exp create configmap actor-load --from-literal=total=0 --from-literal=awake=0 --from-literal=hold_s=5
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: actor-load, namespace: substrate-exp}
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: actor-load, namespace: substrate-exp}
+subjects: [{kind: ServiceAccount, name: actor-load, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: actor-load}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: substrate-exp-actor-load, namespace: ate-system}
+rules:
+- apiGroups: [""]
+  resources: [serviceaccounts/token]
+  resourceNames: [ate-client]
+  verbs: [create]
+- apiGroups: [""]
+  resources: [pods, services, endpoints]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods/portforward]
+  verbs: [get, create]
+- apiGroups: [certificates.k8s.io]
+  resources: [podcertificaterequests]
+  verbs: [create, get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: substrate-exp-actor-load, namespace: ate-system}
+subjects: [{kind: ServiceAccount, name: actor-load, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: substrate-exp-actor-load}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: substrate-exp-actor-load}
+rules:
+- apiGroups: [certificates.k8s.io]
+  resources: [clustertrustbundles]
+  verbs: [get, list, watch]
+- apiGroups: [discovery.k8s.io]
+  resources: [endpointslices]
+  verbs: [get, list, watch]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: substrate-exp-actor-load}
+subjects: [{kind: ServiceAccount, name: actor-load, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: substrate-exp-actor-load}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: actor-load, namespace: substrate-exp, labels: {app: actor-load}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: actor-load}}
+  template:
+    metadata: {labels: {app: actor-load}}
+    spec:
+      serviceAccountName: actor-load
+      nodeSelector: {cloud.google.com/gke-nodepool: default-pool}
+      containers:
+      - name: driver
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/substrate/colo-exp-driver:v0.3.1
+        # -evacuate: poll each RUNNING actor's /evicting (template counter-evict) and suspend it SYNCHRONOUSLY on SIGTERM.
+        args: [-context=, -atespace=colo-exp, -template=counter-evict, -sync-suspend=true, -evacuate=true, serve]
+        resources:
+          requests: {cpu: 200m, memory: 256Mi}
+          limits: {memory: 512Mi}
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}

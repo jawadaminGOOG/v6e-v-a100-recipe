@@ -1,0 +1,32 @@
+# Overflow signal for n4d-workers, evaluated by Managed Prometheus' rule-evaluator every 5 s.
+#   desired   = g4-workers Deployment spec.replicas (= WorkerPool spec.replicas)
+#   effective = g4-workers pods Ready, not terminating, on a node labelled colo.active=true
+#   needed    = max(desired - effective, 0)
+# Namespaced Rules only see series scraped in this namespace (the exp-ksm target), so no extra namespace filter.
+# Managed Prometheus has no staleness markers: every series is filtered to "scraped in the last 15 s".
+# If exp-ksm stops, the expression returns nothing and the HPA holds its size.
+apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata: {name: substrate-overflow, namespace: substrate-exp}
+spec:
+  groups:
+  - name: substrate-overflow
+    interval: 5s
+    rules:
+    - record: substrate_g4_desired
+      expr: |-
+        max(substrate_exp_kube_deployment_spec_replicas{deployment="g4-workers"}
+            and (time() - timestamp(substrate_exp_kube_deployment_spec_replicas{deployment="g4-workers"}) < 45))
+    - record: substrate_g4_effective
+      expr: |-
+        count(
+          (substrate_exp_kube_pod_info{exported_pod=~"g4-workers-.+"} and (time() - timestamp(substrate_exp_kube_pod_info{exported_pod=~"g4-workers-.+"}) < 45))
+          * on (exported_namespace, exported_pod) group_left ()
+            ((substrate_exp_kube_pod_status_ready{condition="true"} and (time() - timestamp(substrate_exp_kube_pod_status_ready{condition="true"}) < 45)) == 1)
+          * on (node) group_left ()
+            max by (node) ((substrate_exp_kube_node_labels{label_colo_active="true"} and (time() - timestamp(substrate_exp_kube_node_labels{label_colo_active="true"}) < 45)))
+          unless on (exported_namespace, exported_pod)
+            (substrate_exp_kube_pod_deletion_timestamp and (time() - timestamp(substrate_exp_kube_pod_deletion_timestamp) < 45))
+        ) or (substrate_g4_desired * 0)
+    - record: substrate_overflow_needed
+      expr: clamp_min(substrate_g4_desired - substrate_g4_effective, 0)

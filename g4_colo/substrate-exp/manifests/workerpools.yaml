@@ -1,0 +1,75 @@
+# Two WorkerPools of the same sandbox class (gvisor). Actors pick either through the shared pool label
+# colo.gke.io/worker-tier=agents (ActorTemplate.workerSelector).
+#
+# g4-workers: the spare vCPUs of G4 nodes next to vLLM.
+#  - nodeAffinity colo.active=true: the colo-controller sets this label only on G4 nodes with a Ready vLLM pod
+#    (recipe/ hydrate path), so a worker never binds to a G4 node without vLLM, and a new G4 node takes workers
+#    only once its vLLM is Ready. WorkerPoolPodTemplate has no podAffinity field (workerpool_types.go:32-85).
+#  - priorityClassName colo-backfill (-100): required by colo-g4-guard for non-GPU pods on G4, and below the
+#    Cluster Autoscaler's -10 cutoff, so Pending g4-workers never add a G4 node.
+#  - Guaranteed QoS, integer CPU: exclusive cores from the static CPU manager (also required by the guard).
+#    The worker pod has a single container (workerpool_apply.go:171,263), so Guaranteed is reachable.
+#  - Tolerations: the G4 pool taints (compute-class g4-gpu, GKE Sandbox gvisor, nvidia.com/gpu). The GKE Sandbox
+#    taint is tolerated without setting runtimeClassName: Substrate runs runsc inside the worker container.
+#
+# n4d-workers: overflow on N4D, sized by overflow-hpa.yaml. Priority 0 (no class), so CA adds N4D nodes for it.
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  name: g4-workers
+  namespace: substrate-exp
+  labels:
+    colo.gke.io/worker-tier: agents
+    colo.gke.io/pool: g4
+spec:
+  replicas: 0
+  workerImage: ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0
+  sandboxClasses:
+  - name: gvisor
+  template:
+    labels:
+      colo.gke.io/worker-tier: agents
+      colo.gke.io/pool: g4
+    priorityClassName: substrate-worker
+    nodeSelector:
+      cloud.google.com/compute-class: g4-gpu
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - {key: colo.active, operator: In, values: ["true"]}
+    tolerations:
+    - {key: cloud.google.com/compute-class, operator: Equal, value: g4-gpu, effect: NoSchedule}
+    - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
+    - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
+    resources:
+      requests: {cpu: "2", memory: 4Gi}
+      limits: {cpu: "2", memory: 4Gi}
+---
+apiVersion: ate.dev/v1
+kind: WorkerPool
+metadata:
+  name: n4d-workers
+  namespace: substrate-exp
+  labels:
+    colo.gke.io/worker-tier: agents
+    colo.gke.io/pool: n4d
+spec:
+  # 1, not 0: an HPA whose target starts at spec.replicas 0 reports "ScalingDisabled" and never acts. Starting at 1
+  # lets the HPA itself scale to 0 (ScaledToZero=True), after which it keeps scaling up from 0 (found 2026-11-11).
+  replicas: 1
+  workerImage: ghcr.io/agent-substrate/substrate/ateworker-gvisor:v1.0.0
+  sandboxClasses:
+  - name: gvisor
+  template:
+    labels:
+      colo.gke.io/worker-tier: agents
+      colo.gke.io/pool: n4d
+    nodeSelector:
+      cloud.google.com/compute-class: n4d-cpu
+    tolerations:
+    - {key: cloud.google.com/compute-class, operator: Equal, value: n4d-cpu, effect: NoSchedule}
+    - {key: sandbox.gke.io/runtime, operator: Equal, value: gvisor, effect: NoSchedule}
+    resources:
+      requests: {cpu: "2", memory: 4Gi}
+      limits: {cpu: "2", memory: 4Gi}

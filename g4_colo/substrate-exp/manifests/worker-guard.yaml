@@ -1,0 +1,84 @@
+# Worker guard (colo-exp-driver guard): the T6 fix. Drains a G4 node's Substrate workers and suspends their actors
+# synchronously as soon as the node loses its vLLM pod (or carries the Cluster Autoscaler deletion taint), suspends
+# actors on any terminating worker pod, and sets pod-deletion-cost so WorkerPool scale-down removes idle workers
+# first. See driver/guard.go. Same identity model as actor-load (mints ate-system/ate-client tokens): experiment only.
+#   kubectl apply -f g4_colo/substrate-exp/manifests/worker-guard.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: worker-guard, namespace: substrate-exp}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: worker-guard, namespace: substrate-exp}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: worker-guard, namespace: substrate-exp}
+subjects: [{kind: ServiceAccount, name: worker-guard, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: worker-guard}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: substrate-exp-worker-guard, namespace: inference}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: substrate-exp-worker-guard, namespace: inference}
+subjects: [{kind: ServiceAccount, name: worker-guard, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: substrate-exp-worker-guard}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: substrate-exp-worker-guard, namespace: ate-system}
+subjects: [{kind: ServiceAccount, name: worker-guard, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: substrate-exp-actor-load}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: substrate-exp-worker-guard}
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list, watch]
+- apiGroups: [certificates.k8s.io]
+  resources: [clustertrustbundles]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: substrate-exp-worker-guard}
+subjects: [{kind: ServiceAccount, name: worker-guard, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: substrate-exp-worker-guard}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: worker-guard, namespace: substrate-exp, labels: {app: worker-guard}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: worker-guard}}
+  template:
+    metadata: {labels: {app: worker-guard}}
+    spec:
+      serviceAccountName: worker-guard
+      nodeSelector: {cloud.google.com/gke-nodepool: default-pool}
+      containers:
+      - name: guard
+        image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/substrate/colo-exp-driver:v0.2.0
+        args: [-context=, guard]
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}
+          limits: {memory: 256Mi}
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}

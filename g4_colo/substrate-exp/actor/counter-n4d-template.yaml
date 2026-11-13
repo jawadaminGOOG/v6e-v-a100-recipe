@@ -1,0 +1,32 @@
+# ActorTemplate counter-n4d: same as counter-template.yaml, but its golden snapshot is built on an N4D worker.
+# gVisor pins a snapshot to the CPU feature set of the host the actor FIRST booted on (golden included). N4D's set
+# is a strict subset of G4's (G4 adds monitor, mwaitx), so actors started from an N4D-built golden restore WITH
+# memory on both pools. Build: scale g4-workers to 0, create this template, wait for the golden tag, scale back.
+metadata:
+  atespace: colo-exp
+  name: counter-n4d
+workerSelector:
+  matchLabels:
+    colo.gke.io/worker-tier: agents
+containers:
+- name: counter
+  image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/substrate/counter@sha256:b7acd4882633e7fee9d792126f2628182b8cd58e73649b38b00186f7049730fd
+  command:
+  - /ko-app/counter
+  wakeupProbe:
+    httpGet:
+      path: /readyz
+      port: 80
+  volumeMounts:
+  - name: data
+    mountPath: /home/counter
+# One actor occupies its whole worker: size at the worker's capacity (2 vCPU / 4Gi limits) or below.
+resources:
+  limits:
+    cpuMillicores: 2000
+    memoryBytes: 1073741824
+snapshotConfig:
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
+volumes:
+- name: data
+  durableDir: {}

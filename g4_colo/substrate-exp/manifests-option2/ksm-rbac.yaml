@@ -1,0 +1,17 @@
+# exp-ksm, option 2: CPU requests and priority class of every pod (to size the G4 share), and the g4-workers HPA.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: substrate-exp-ksm-option2}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list, watch]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: substrate-exp-ksm-option2}
+subjects: [{kind: ServiceAccount, name: exp-ksm, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: substrate-exp-ksm-option2}

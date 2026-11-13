@@ -1,0 +1,25 @@
+# G4 share of the Workers: replicas = min(g4-share, maxReplicas). maxReplicas is the user's TOTAL Worker count
+# (UI "Total Workers" slider patches it); the overflow HPA runs the rest on N4D.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: g4-workers, namespace: substrate-exp}
+spec:
+  scaleTargetRef: {apiVersion: ate.dev/v1, kind: WorkerPool, name: g4-workers}
+  minReplicas: 0
+  maxReplicas: 22
+  metrics:
+  - type: External
+    external:
+      metric: {name: "autoscaling.gke.io|substrate-g4-share|g4-share"}
+      target: {type: AverageValue, averageValue: "1"}
+  behavior:
+    # Up: 45 s (same flap guard as the overflow HPA). Down: 30 s, so a vLLM scale-in frees the node quickly; the
+    # removed Workers are deleted with their full grace (actors get SIGTERM and are suspended by the harness).
+    scaleUp:
+      tolerance: 0
+      stabilizationWindowSeconds: 45
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]
+    scaleDown:
+      tolerance: 0
+      stabilizationWindowSeconds: 30
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]

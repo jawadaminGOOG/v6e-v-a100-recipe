@@ -1,0 +1,6 @@
+[
+  {"op": "add", "path": "/spec/template/spec/tolerations/-",
+   "value": {"key": "sandbox.gke.io/runtime", "operator": "Equal", "value": "gvisor", "effect": "NoSchedule"}},
+  {"op": "add", "path": "/spec/template/spec/tolerations/-",
+   "value": {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}}
+]

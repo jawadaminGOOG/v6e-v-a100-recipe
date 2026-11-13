@@ -1,0 +1,37 @@
+# G4 share of the Workers, for the g4-workers HPA (AverageValue 1 => replicas = this value, capped at maxReplicas).
+#
+#   g4-share = sum over G4 nodes running a Ready, non-terminating vLLM pod of
+#              floor((node allocatable CPU - CPU requests of non-backfill, non-Worker pods on it) / 2)
+#
+# 2 = CPU per Worker (WorkerPool g4-workers limits). Backfill (colo-backfill) and Workers are left out of the
+# requests: Workers outrank backfill and preempt it, so backfill cores count as Worker room. A node whose vLLM pod is
+# terminating or gone drops out at once, which is what lets the node leave (Cluster Autoscaler simulation then fits its
+# Workers on the survivors). Series from exp-ksm (ksm-args.json), filtered to "scraped in the last 45 s".
+apiVersion: autoscaling.gke.io/v1beta1
+kind: AutoscalingMetric
+metadata: {name: substrate-g4-share, namespace: substrate-exp}
+spec:
+  metrics:
+  - promql:
+      name: g4-share
+      type: External
+      query: |-
+        sum(
+          floor(
+            (
+              max by (node) ((substrate_exp_kube_node_status_allocatable{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",resource="cpu"} and (time() - timestamp(substrate_exp_kube_node_status_allocatable{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",resource="cpu"}) < 45)))
+              - (sum by (node) (
+                  (substrate_exp_kube_pod_container_resource_requests{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",resource="cpu"} and (time() - timestamp(substrate_exp_kube_pod_container_resource_requests{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",resource="cpu"}) < 45))
+                  * on (exported_namespace, exported_pod) group_left ()
+                    max by (exported_namespace, exported_pod) ((substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",priority_class!~"colo-backfill|substrate-worker"} and (time() - timestamp(substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",priority_class!~"colo-backfill|substrate-worker"}) < 45)))
+                ) or max by (node) ((substrate_exp_kube_node_status_allocatable{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",resource="cpu"} and (time() - timestamp(substrate_exp_kube_node_status_allocatable{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",resource="cpu"}) < 45))) * 0)
+            ) / 2
+          )
+          * on (node) group_left ()
+            max by (node) (
+              ((substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",exported_pod=~"vllm-.+"} and (time() - timestamp(substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",exported_pod=~"vllm-.+"}) < 45))
+                unless on (exported_namespace, exported_pod) (substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference"} and (time() - timestamp(substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference"}) < 45)))
+              * on (exported_namespace, exported_pod) group_left ()
+                ((substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",condition="true"} and (time() - timestamp(substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",condition="true"}) < 45)) == 1)
+            )
+        ) or vector(0)

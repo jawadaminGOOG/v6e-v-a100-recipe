@@ -1,0 +1,11 @@
+# Workers outrank CPU backfill (colo-backfill -100) on every pool and may preempt it; vLLM (gpu-serving 1e6) still
+# preempts Workers. -5 >= CA's expendable cutoff (-10), so Cluster Autoscaler evicts Workers (with grace) instead of
+# deleting them with the node. Recreate (value/preemptionPolicy are immutable):
+#   kubectl delete priorityclass substrate-worker && kubectl create -f priority.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: substrate-worker}
+value: -5
+preemptionPolicy: PreemptLowerPriority
+globalDefault: false
+description: Agent Substrate Workers (wave-4 option 2). Above CPU backfill, below vLLM.

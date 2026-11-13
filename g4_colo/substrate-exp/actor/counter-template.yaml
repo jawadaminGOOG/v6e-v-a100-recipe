@@ -1,0 +1,32 @@
+# ActorTemplate (protojson ateapi.ActorTemplate) for the experiment: Substrate's counter demo server, built with
+# ko from substrate@v1.0.0 demos/counter and pushed to our registry (install/README.md step 6).
+# Create: kubectl ate create actor-template -f actor/counter-template.yaml
+# Any actor can resume on either pool: workerSelector matches the label both WorkerPools carry.
+metadata:
+  atespace: colo-exp
+  name: counter
+workerSelector:
+  matchLabels:
+    colo.gke.io/worker-tier: agents
+containers:
+- name: counter
+  image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/substrate/counter@sha256:b7acd4882633e7fee9d792126f2628182b8cd58e73649b38b00186f7049730fd
+  command:
+  - /ko-app/counter
+  wakeupProbe:
+    httpGet:
+      path: /readyz
+      port: 80
+  volumeMounts:
+  - name: data
+    mountPath: /home/counter
+# One actor occupies its whole worker: size at the worker's capacity (2 vCPU / 4Gi limits) or below.
+resources:
+  limits:
+    cpuMillicores: 2000
+    memoryBytes: 1073741824
+snapshotConfig:
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
+volumes:
+- name: data
+  durableDir: {}

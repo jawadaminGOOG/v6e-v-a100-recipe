@@ -1,0 +1,54 @@
+# Native placement for g4-workers: add a required podAffinity to a vLLM pod on the same node when a g4-workers pod is
+# created. The Substrate controller server-side-applies the worker Deployment with `affinity: {nodeAffinity...}` and
+# never writes pods, so mutating at pod admission does not fight it. Same rule recipe-native uses for backfill, and the
+# reason the Cluster Autoscaler never adds a G4 node for workers: a simulated fresh G4 node has no vLLM pod.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata: {name: substrate-g4-worker-affinity}
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  matchConstraints:
+    namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: substrate-exp}}
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE]
+      resources: [pods]
+  matchConditions:
+  - name: g4-workers
+    expression: >-
+      has(object.metadata.labels) && 'ate.dev/worker-pool' in object.metadata.labels
+      && object.metadata.labels['ate.dev/worker-pool'] == 'g4-workers'
+  # JSONPatch, not ApplyConfiguration: requiredDuringSchedulingIgnoredDuringExecution is an atomic list, which
+  # ApplyConfiguration may not mutate ("may not mutate atomic arrays"). The worker template sets no other affinity on
+  # the native recipe, so replacing spec.affinity is safe.
+  mutations:
+  - patchType: JSONPatch
+    jsonPatch:
+      expression: >-
+        [
+          JSONPatch{
+            op: "add",
+            path: "/spec/affinity",
+            value: Object.spec.affinity{
+              podAffinity: Object.spec.affinity.podAffinity{
+                requiredDuringSchedulingIgnoredDuringExecution: [
+                  Object.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution{
+                    labelSelector: Object.spec.affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution.labelSelector{
+                      matchLabels: {"app": "vllm"}
+                    },
+                    namespaces: ["inference"],
+                    topologyKey: "kubernetes.io/hostname"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata: {name: substrate-g4-worker-affinity}
+spec:
+  policyName: substrate-g4-worker-affinity

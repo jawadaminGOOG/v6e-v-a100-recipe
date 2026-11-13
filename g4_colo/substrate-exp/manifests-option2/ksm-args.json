@@ -1,0 +1,5 @@
+[{"op":"replace","path":"/spec/template/spec/containers/0/args","value":[
+ "--resources=pods,deployments,nodes,horizontalpodautoscalers",
+ "--metric-allowlist=kube_pod_info,kube_pod_status_ready,kube_pod_deletion_timestamp,kube_deployment_spec_replicas,kube_node_labels,kube_node_status_allocatable,kube_pod_container_resource_requests,kube_horizontalpodautoscaler_spec_max_replicas",
+ "--metric-labels-allowlist=nodes=[colo.active]",
+ "--port=8080","--telemetry-port=8081"]}]
