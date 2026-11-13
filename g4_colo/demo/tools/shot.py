@@ -5,7 +5,9 @@ client-side charts accumulate history) and then captures a screenshot via CDP.
     python shot.py "http://localhost:8091/?cluster=native" /tmp/native_1440.png 12 1440x900
 
 With a WxH argument the viewport is set to exactly that size, only the viewport is captured, and the
-one-pane-of-glass check is printed: page scroll size vs viewport (exit code 2 if the page would scroll).
+one-pane-of-glass check is printed: page scroll size vs viewport, plus any fixed-height panel whose content is clipped
+(the pane hides overflow, so a page that "does not scroll" can still cut off the node map). Exit code 2 if either.
+`WxH@Z` emulates browser zoom Z on a WxH screen (CSS viewport W/Z x H/Z at device scale Z), e.g. 1920x1080@1.35.
 """
 
 import asyncio
@@ -20,8 +22,23 @@ import urllib.request
 import websockets
 
 
+# Visible panels with fixed height and hidden overflow: report any whose content does not fit.
+CLIP_JS = """JSON.stringify(['#nodes', '.rail', '.stage', '#sub', '.story', '.n4ds', '.cps', '.sub-cells', '.lanes'].flatMap((q) => {
+  const e = document.querySelector(q);
+  if (!e || e.offsetParent === null) return [];
+  const out = [], v = e.scrollHeight - e.clientHeight, h = e.scrollWidth - e.clientWidth;
+  if (v > 1) out.push(q + ' +' + v + 'px');
+  if (h > 1) out.push(q + ' +' + h + 'px wide');
+  return out;
+}))"""
+
+
 async def main(url: str, out: str, wait_s: float, size: str | None = None) -> int:
     prof = tempfile.mkdtemp(prefix="demo-shot-")
+    zoom = 1.0
+    if size and "@" in size:
+        size, z = size.split("@", 1)
+        zoom = float(z)
     w, h = (int(x) for x in size.lower().split("x")) if size else (1700, 2300)
     proc = subprocess.Popen(
         ["google-chrome", "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
@@ -48,15 +65,19 @@ async def main(url: str, out: str, wait_s: float, size: str | None = None) -> in
                         return msg.get("result", {})
 
             if size:
-                await cdp("Emulation.setDeviceMetricsOverride", {"width": w, "height": h, "deviceScaleFactor": 1, "mobile": False})
+                await cdp("Emulation.setDeviceMetricsOverride", {"width": round(w / zoom), "height": round(h / zoom),
+                                                                 "deviceScaleFactor": zoom, "mobile": False})
             await cdp("Page.navigate", {"url": url})
             await asyncio.sleep(wait_s)
             if size:
                 r = await cdp("Runtime.evaluate", {"expression": "JSON.stringify({sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight, iw: innerWidth, ih: innerHeight, cluster: (new URLSearchParams(location.search)).get('cluster')})", "returnByValue": True})
                 m = json.loads(r["result"]["value"])
                 scroll = m["sh"] > m["ih"] or m["sw"] > m["iw"]
-                print(f"{size}: scroll {m['sw']}x{m['sh']} viewport {m['iw']}x{m['ih']} cluster={m['cluster']} -> {'SCROLLS' if scroll else 'no scroll'}")
-                rc = 2 if scroll else 0
+                clip = await cdp("Runtime.evaluate", {"expression": CLIP_JS, "returnByValue": True})
+                clipped = json.loads(clip["result"]["value"])
+                print(f"{size}@{zoom:g}: scroll {m['sw']}x{m['sh']} viewport {m['iw']}x{m['ih']} cluster={m['cluster']} -> "
+                      f"{'SCROLLS' if scroll else 'no scroll'}; clipped: {clipped or 'none'}")
+                rc = 2 if scroll or clipped else 0
             shot = await cdp("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": not size})
         with open(out, "wb") as f:
             f.write(base64.b64decode(shot["data"]))

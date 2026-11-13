@@ -191,10 +191,16 @@ NATIVE_SCENARIOS: dict[str, dict[str, Any]] = {
         ],
     },
 }
-SCENARIOS_BY_RECIPE: dict[str, dict[str, dict[str, Any]]] = {"controller": SCENARIOS, "native": NATIVE_SCENARIOS}
+# The substrate tab watches the same cluster as the controller tab, with its own scenario runner: scenarios stay on the
+# controller tab so two runners never drive one cluster at once and the Substrate experiment is not perturbed by surprise.
+SCENARIOS_BY_RECIPE: dict[str, dict[str, dict[str, Any]]] = {"controller": SCENARIOS, "native": NATIVE_SCENARIOS,
+                                                             "substrate": {}}
+SUBSTRATE_SCENARIO_REASON = ("Not on this tab: it shares its cluster with the colo-controller tab. Run scenarios there, "
+                             "so one runner drives the cluster and the Substrate experiment is not perturbed.")
 UNAVAILABLE_REASON = {
     ("native", "guard-integer-vs-memory"): "Not on this cluster: there is no latency guard, because memory-heavy "
                                           "services are kept off G4 by admission policy.",
+    **{("substrate", n): SUBSTRATE_SCENARIO_REASON for n in SCENARIOS},
 }
 
 

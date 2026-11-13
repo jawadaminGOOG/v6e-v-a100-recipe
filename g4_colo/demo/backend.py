@@ -11,8 +11,10 @@ One process can show several clusters. `DEMO_CLUSTERS` is a JSON list, one entry
       "name": "v6ecluster-jawadamin-us-east5-1126", "region": "us-east5"}]
 
 Each entry takes either `context` (kubeconfig) or `endpoint` + `ca_cert` (base64 PEM; Cloud Run with ADC), plus
-optional `name`, `region`, `project` for the footer. `recipe` is `controller` (g4_colo/recipe/) or `native`
-(g4_colo/recipe-native/). Optional `accelerator` is the accelerator host the recipe runs on: `g4` (default;
+optional `name`, `region`, `project` for the footer. `recipe` is `controller` (g4_colo/recipe/), `native`
+(g4_colo/recipe-native/) or `substrate` (the controller cluster plus the Agent Substrate experiment: WorkerPools in
+substrate-exp and the substrate-exp/actor-stats ConfigMap; read-only, can share a context with a `controller` entry).
+Optional `accelerator` is the accelerator host the recipe runs on: `g4` (default;
 g4-standard-48, 1 RTX PRO 6000) or `tpu-v6e` (ct6e-standard-1t, 1 TPU v6e chip, 44 vCPU). It sets the node price
 (DEMO_PRICE_G4_HR / DEMO_PRICE_V6E_HR), the host vCPU fallback and every G4/GPU word the UI shows (state.ACCELERATORS);
 the role classification is unchanged (the TPU node pool keeps compute-class g4-gpu / colo.role=g4). In DEMO_MOCK=1 the
@@ -35,8 +37,11 @@ from state import ACCELERATORS, CLUSTER, DEFAULT_ACCELERATOR, RECIPES, accel_pro
 
 log = logging.getLogger("demo.backend")
 
-DEFAULT_LABELS = {"controller": "With colo-controller", "native": "Native K8s only"}
-DEFAULT_NAMES = {"controller": "g4cluster-jawadamin-us-west8-0726", "native": "g4cluster-jawadamin-us-west8-1126"}
+# Base recipe under the substrate tab: everything that is not Substrate follows it (default controller, as before).
+SUBSTRATE_BASE_RECIPES = ("controller", "native")
+DEFAULT_LABELS = {"controller": "With colo-controller", "native": "Native K8s only", "substrate": "G4 · Agent Substrate"}
+DEFAULT_NAMES = {"controller": "g4cluster-jawadamin-us-west8-0726", "native": "g4cluster-jawadamin-us-west8-1126",
+                 "substrate": "g4cluster-jawadamin-us-west8-0726"}
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 _backends: dict[str, Any] | None = None
@@ -65,6 +70,12 @@ def _normalize(entry: dict, idx: int) -> dict:
         raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}): set context or endpoint, not both")
     if endpoint and not (entry.get("ca_cert") or os.environ.get("GKE_CA_CERT")):
         raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}): endpoint needs ca_cert (base64 PEM)")
+    base = entry.get("base_recipe")
+    if base is not None and recipe != "substrate":
+        raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}): base_recipe only applies to recipe substrate")
+    base = str(base or "controller") if recipe == "substrate" else None
+    if base is not None and base not in SUBSTRATE_BASE_RECIPES:
+        raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}).base_recipe must be one of {SUBSTRATE_BASE_RECIPES}, got {base!r}")
     accel = str(entry.get("accelerator") or DEFAULT_ACCELERATOR)
     if accel not in ACCELERATORS:
         raise ValueError(f"DEMO_CLUSTERS[{idx}] ({cid}).accelerator must be one of {list(ACCELERATORS)}, got {accel!r}")
@@ -72,6 +83,7 @@ def _normalize(entry: dict, idx: int) -> dict:
         "id": cid,
         "label": str(entry.get("label") or DEFAULT_LABELS.get(recipe, cid)),
         "recipe": recipe,
+        "base_recipe": base,
         "accelerator": accel,
         "context": ctx,
         "endpoint": endpoint,
@@ -111,7 +123,8 @@ def parse_clusters(env: dict | None = None) -> list[dict]:
 
 def cluster_info(spec: dict) -> dict:
     """What /api/state and /api/clusters expose (never the endpoint or CA)."""
-    return {"id": spec["id"], "label": spec["label"], "recipe": spec["recipe"], "name": spec["name"],
+    return {"id": spec["id"], "label": spec["label"], "recipe": spec["recipe"], "base_recipe": spec.get("base_recipe"),
+            "name": spec["name"],
             "region": spec["region"], "project": spec["project"],
             "accelerator": spec.get("accelerator") or DEFAULT_ACCELERATOR}
 
@@ -150,13 +163,17 @@ def make_backend(spec: dict, mock: bool | None = None):
     mock = os.environ.get("DEMO_MOCK", "0") == "1" if mock is None else mock
     info = cluster_info(spec)
     if mock:
-        from mock import MockBackend, NativeMockBackend
+        from mock import MockBackend, NativeMockBackend, SubstrateMockBackend, SubstrateNativeMockBackend
 
-        cls = NativeMockBackend if spec["recipe"] == "native" else MockBackend
+        cls = {"native": NativeMockBackend, "substrate": SubstrateMockBackend}.get(spec["recipe"], MockBackend)
+        if spec["recipe"] == "substrate" and spec.get("base_recipe") == "native":
+            cls = SubstrateNativeMockBackend
         return cls(cluster_id=spec["id"], cluster_info=info)
-    from cluster import LiveBackend, NativeLiveBackend
+    from cluster import LiveBackend, NativeLiveBackend, SubstrateLiveBackend, SubstrateNativeLiveBackend
 
-    cls = NativeLiveBackend if spec["recipe"] == "native" else LiveBackend
+    cls = {"native": NativeLiveBackend, "substrate": SubstrateLiveBackend}.get(spec["recipe"], LiveBackend)
+    if spec["recipe"] == "substrate" and spec.get("base_recipe") == "native":
+        cls = SubstrateNativeLiveBackend
     # An explicit DEMO_CLUSTERS context is strict (never falls through to another cluster's credentials); the
     # legacy single-cluster spec and an entry with neither context nor endpoint use the old fallback chain.
     strict = bool(spec.get("context")) and not spec.get("legacy")

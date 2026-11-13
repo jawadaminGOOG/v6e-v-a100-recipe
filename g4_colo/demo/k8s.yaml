@@ -170,6 +170,142 @@ roleRef:
   kind: Role
   name: colo-demo
 ---
+# Agent Substrate tab (recipe "substrate", cluster 0726 only): read-only access to the experiment. The WorkerPools
+# (workerpools.ate.dev/v1), their Worker pods, the n4d-workers HPA and the probe's actor-stats ConfigMap live in
+# substrate-exp; ate-system holds Substrate's control plane (on nodes labelled ate.dev/workloadType=ate-system-infra |
+# ate-postgres) and the atelet DaemonSet. Nodes and pods are already readable
+# cluster-wide (colo-demo-read); they are repeated here so these Roles stand alone. The only writes are patch/update of
+# ConfigMap substrate-exp/actor-load (actor load), HPA g4-workers maxReplicas and workerpools/scale g4-workers (Total Workers).
+#
+# These objects carry colo-demo/rbac-substrate=true, NOT colo-demo/rbac=true, so the two-cluster RBAC command keeps
+# working on 1126 (which has none of these namespaces). Apply once substrate-exp, ate-system and
+# podcertificate-controller-system exist (after Substrate is installed):
+#   kubectl --context gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726 \
+#     apply -f k8s.yaml -l colo-demo/rbac-substrate=true
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: colo-demo-substrate-read
+  labels: {colo-demo/rbac-substrate: "true"}
+  namespace: substrate-exp
+rules:
+- apiGroups: [ate.dev]
+  resources: [workerpools]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods, configmaps]
+  verbs: [get, list, watch]
+# Total Workers slider (option 2): merge-patch spec.maxReplicas of HPA g4-workers (scaleTargetRef WorkerPool g4-workers).
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  resourceNames: [g4-workers]
+  verbs: [get, patch]
+# Total Workers fallback when that HPA is absent: scale subresource of WorkerPool g4-workers only.
+- apiGroups: [ate.dev]
+  resources: [workerpools/scale]
+  resourceNames: [g4-workers]
+  verbs: [get, patch, update]
+# Actor load controls: merge-patch of the actor-load generator's spec. Merge-patch of the actor-load generator's spec ConfigMap, by name.
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [actor-load]
+  verbs: [get, patch, update]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: colo-demo-substrate-read
+  labels: {colo-demo/rbac-substrate: "true"}
+  namespace: substrate-exp
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: colo-demo-substrate-read
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: colo-demo-substrate-read
+  labels: {colo-demo/rbac-substrate: "true"}
+  namespace: ate-system
+rules:
+- apiGroups: [ate.dev]
+  resources: [workerpools]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+# Control-plane health strip: ate-api-server, ate-controller, atenet-*, ate-idp-server, pod-certificate-controller
+# (Deployments), the bundled PostgreSQL (StatefulSet) and the atelet DaemonSet. Nodes are already cluster-wide read.
+- apiGroups: [apps]
+  resources: [deployments, statefulsets, daemonsets]
+  verbs: [get, list, watch]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: colo-demo-substrate-read
+  labels: {colo-demo/rbac-substrate: "true"}
+  namespace: ate-system
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: colo-demo-substrate-read
+---
+# The pod-certificate controller Substrate relies on (Deployment podcertificate-controller) runs in its own namespace;
+# the control-plane strip reads its Deployment and pods. Same label, read-only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: colo-demo-substrate-read
+  labels: {colo-demo/rbac-substrate: "true"}
+  namespace: podcertificate-controller-system
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: colo-demo-substrate-read
+  labels: {colo-demo/rbac-substrate: "true"}
+  namespace: podcertificate-controller-system
+subjects:
+- kind: ServiceAccount
+  name: colo-demo
+  namespace: colo-system
+- kind: User
+  name: colodemo-run@northam-ce-mlai-tpu.iam.gserviceaccount.com
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: colo-demo-substrate-read
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
