@@ -158,7 +158,7 @@ def tpu_client(monkeypatch):
 
 def test_api_tpu_cluster_user_facing_text(tpu_client):
     st = tpu_client.get("/api/state?cluster=tpu").json()
-    assert st["accelerator"]["name"] == "TPU v6e" and st["demo"]["version"] == demo_app.DEMO_VERSION == "0.6.0"
+    assert st["accelerator"]["name"] == "TPU v6e" and st["demo"]["version"] == demo_app.DEMO_VERSION == "0.7.1"
     assert _offenders(st) == []
     scen = tpu_client.get("/api/scenarios?cluster=tpu").json()
     assert set(scen) == {"gpu-scale-out", "gpu-scale-in", "cpu-scale-out"}

@@ -20,6 +20,7 @@ Behaviour (deliberately plausible, not calibrated):
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import random
@@ -27,7 +28,8 @@ import string
 import time
 from datetime import datetime, timezone
 
-from state import GUARD_NA_REASON, NATIVE_DEMAND_DEPLOYMENT, SERVICES, UnsupportedOnRecipe, accel_profile, build_state
+from state import (CLUSTER, validate_worker_replicas, GUARD_NA_REASON, NATIVE_DEMAND_DEPLOYMENT, SERVICES, UnsupportedOnRecipe, accel_profile, actor_load_patch,
+                   build_state)
 
 G4_BOOT_S = 75
 VLLM_BOOT_S = 45
@@ -188,6 +190,10 @@ class MockBackend:
                 return c
         return None
 
+    def _node_users(self, node: str) -> list[dict]:
+        """Pods (simulator records with a "tier") that keep an N4D node from being scaled down."""
+        return [p for p in self.svc_pods + self.buffer_pods if p["node"] == node]
+
     def _release(self, uid: str):
         for n in self.nodes.values():
             for c in [c for c, u in n["cores"].items() if u == uid]:
@@ -282,7 +288,7 @@ class MockBackend:
                 n4ds.append(nn)
             self._event("TriggeredScaleUp", "Pod", pending[0]["name"], f"pod triggered scale-up: [{{n4dcpu-{self.POOL_TAG} {len(n4ds) - need}->{len(n4ds)} (max: 10)}}]", "colo-svc")
         for n in list(n4ds):
-            used = [p for p in self.svc_pods + self.buffer_pods if p["node"] == n["name"]]
+            used = self._node_users(n["name"])
             only_buffer = all(p["tier"] == "buffer" for p in used)
             if self._ready(n) and (not used or (only_buffer and len(n4ds) > 1 and not pending)) and len(n4ds) > 1:
                 n["unneeded_since"] = n["unneeded_since"] or now
@@ -773,3 +779,319 @@ class NativeMockBackend(MockBackend):
 
     async def baseline(self) -> dict:
         raise UnsupportedOnRecipe(f"no TTFT baseline on the native recipe: {GUARD_NA_REASON}")
+
+
+# Agent Substrate experiment on the controller cluster (recipe "substrate"). DEMO_MOCK_SUBSTRATE=absent renders the
+# "not installed yet" empty state (no CRD, no pools, no actor-stats ConfigMap) offline.
+SUB_WORKER_CPU = 2  # Guaranteed integer CPU per Worker pod (1 physical core), as on 0726
+SUB_WORKER_MEM_GIB = 4
+N4D_WORKERS_PER_NODE = 6
+SUB_ACTOR_SLOTS = 1  # an awake (RUNNING) actor occupies its whole Worker; suspended actors take none
+SUB_N4D_MAX = 10
+
+
+class SubstrateMockBackend(MockBackend):
+    """The controller simulator plus Agent Substrate Workers, emitting the raw `substrate` section of
+    cluster.SubstrateLiveBackend:
+
+      * g4-workers (WorkerPool, DEMO_MOCK_G4_WORKERS Total Workers, default 4): 2-vCPU / 4 GiB pods on G4 nodes running a Ready vLLM
+        pod, in whatever cores colo backfill left free; the rest stay Pending.
+      * n4d-workers: an HPA keeps 1 + (Pending g4-workers) replicas on N4D nodes with free cores.
+      * actor-stats: ~12 actors per Running Worker, resume p99 about 40 ms on G4 and 55 ms on N4D, no lost actors.
+    """
+
+    recipe = "substrate"
+    G4_WORKER_PRIORITY = "colo-backfill"
+
+    def __init__(self, cluster_id: str = "substrate", cluster_info: dict | None = None):
+        self.sub_absent = os.environ.get("DEMO_MOCK_SUBSTRATE", "") == "absent"
+        # Option 2: Total Workers = HPA g4-workers maxReplicas; that HPA sets the G4 share (Workers that fit next to Ready
+        # vLLM, outranking CPU backfill), the n4d-workers HPA runs the rest. DEMO_MOCK_NO_G4_HPA=1: the pre-option-2
+        # cluster (no g4-workers HPA; Total Workers = WorkerPool g4-workers replicas, extras Pending).
+        self.sub_total = int(os.environ.get("DEMO_MOCK_G4_WORKERS", "4"))
+        self.g4_hpa_present = os.environ.get("DEMO_MOCK_NO_G4_HPA", "") != "1"
+        self.sub_g4_desired = self.sub_total
+        self.sub_workers: list[dict] = []  # {name, uid, pool, node|None, ready_at}
+        self.sub_n4d_desired = 1
+        # ConfigMap substrate-exp/actor-load as the actor-load generator reads it (POST /api/substrate/actors patches it).
+        self.actor_load = {"total": 40, "awake": 2, "hold_s": 5.0}
+        self.sub_counters = {"lost_actors": 0, "resumes_waited_no_room": 0, "memory_resets": 0, "failed_requests": 0}  # 1 on G4, 1 on N4D: settled at start
+        # DEMO_MOCK_ATE_DEGRADED=1: atenet-router 0/1 ready (down) and ate-controller restarting, to see the red states.
+        self.ate_degraded = os.environ.get("DEMO_MOCK_ATE_DEGRADED", "") == "1"
+        super().__init__(cluster_id=cluster_id, cluster_info=cluster_info)
+        t0 = time.time() - 5400
+        self.ate_nodes = {kind: {"name": f"gke-g4cluster-ate-{kind.split('-')[-1]}-{self.POOL_TAG}-{_sfx(4)}-{_sfx(4)}",
+                                 "created": t0, "kind": kind} for kind in ("ate-system-infra", "ate-postgres")}
+        # As on 0726: (workload, node kind, cpu, owner kind, namespace); one entry per pod.
+        A, PC = "ate-system", "podcertificate-controller-system"
+        self.ate_pods = [
+            ("ate-api-server", "ate-system-infra", 0.5, "Deployment", A), ("ate-api-server", "ate-system-infra", 0.5, "Deployment", A),
+            ("ate-controller", "ate-system-infra", 0.25, "Deployment", A),
+            ("atenet-router", "ate-system-infra", 0.25, "Deployment", A),
+            ("atenet-egress", "ate-system-infra", 0.25, "Deployment", A),
+            ("ate-idp-server", "ate-system-infra", 0.1, "Deployment", A), ("ate-idp-server", "ate-system-infra", 0.1, "Deployment", A),
+            ("k8s-credential-provider", "ate-system-infra", 0.1, "Deployment", A),
+            ("podcertificate-controller", "ate-system-infra", 0.1, "Deployment", PC),
+            ("postgres", "ate-postgres", 1.0, "StatefulSet", A),
+        ]
+        self.ate_pod_names = [f"{w}-0" if owner == "StatefulSet" else f"{w}-{_sfx(9)}-{_sfx()}"
+                              for w, _k, _c, owner, _ns in self.ate_pods]
+        self.atelet_names: dict[str, str] = {}
+        for w in self.sub_workers:  # start settled
+            if w["node"]:
+                w["ready_at"] = time.time() - 600
+
+    def _free_cores(self, node: dict, k: int) -> list[int] | None:
+        ncores = self.g4_half if node["role"] == "g4" else 8
+        free = [c for c in range(1, ncores) if c not in node["cores"]]
+        return free[:k] if len(free) >= k else None
+
+    def _g4_capacity(self, hosts: list[dict]) -> int:
+        """Workers that fit next to Ready vLLM when Workers outrank CPU backfill: cores not held by vLLM (or another
+        non-backfill pod) on each host, in whole Workers."""
+        backfill = {p["uid"] for p in self.svc_pods if p["tier"] == "backfill"} | {w["uid"] for w in self.sub_workers}
+        cap = 0
+        for n in hosts:
+            usable = sum(1 for c in range(1, self.g4_half) if c not in n["cores"] or n["cores"][c] in backfill)
+            cap += usable // (SUB_WORKER_CPU // 2)
+        return cap
+
+    def _preempt_backfill_for(self, n: dict, k: int) -> list[int] | None:
+        """Option 2: a Worker (priority substrate-worker, -5) preempts CPU backfill (-100) on its host."""
+        victims = [p for p in self.svc_pods if p["node"] == n["name"] and p["tier"] == "backfill"]
+        while self._free_cores(n, k) is None and victims:
+            p = victims.pop()
+            self._release(p["uid"])
+            self.svc_pods.remove(p)
+            self._event("Preempted", "Pod", p["name"], f"Preempted by substrate-exp/g4-workers on node {n['name']}",
+                        "colo-svc", "default-scheduler")
+        return self._free_cores(n, k)
+
+    def _place_worker(self, w: dict, nodes: list[dict], now: float) -> None:
+        for n in nodes:
+            cores = self._free_cores(n, SUB_WORKER_CPU // 2)
+            if not cores and w["pool"] == "g4-workers" and self.g4_hpa_present:
+                cores = self._preempt_backfill_for(n, SUB_WORKER_CPU // 2)
+            if cores:
+                for c in cores:
+                    n["cores"][c] = w["uid"]
+                w["node"] = n["name"]
+                w["ready_at"] = now + 8
+                return
+
+    def _reconcile_pool(self, pool: str, want: int, nodes: list[dict], now: float) -> None:
+        mine = [w for w in self.sub_workers if w["pool"] == pool]
+        while len(mine) > want:
+            victim = next((w for w in reversed(mine) if w["node"] is None), mine[-1])
+            mine.remove(victim)
+            self._release(victim["uid"])
+            self.sub_workers.remove(victim)
+        while len(mine) < want:
+            w = {"name": f"{pool}-7c9d5b8f6-{_sfx()}", "uid": _sfx(32), "pool": pool, "node": None, "ready_at": None}
+            mine.append(w)
+            self.sub_workers.append(w)
+        for w in mine:
+            if w["node"] is None:
+                self._place_worker(w, nodes, now)
+
+    def _allocate(self, now: float):
+        super()._allocate(now)
+        if self.sub_absent:
+            return
+        for w in self.sub_workers:  # node removed by the autoscaler -> the pod is recreated Pending
+            if w["node"] and w["node"] not in self.nodes:
+                w["node"], w["ready_at"] = None, None
+        hosts = [self.nodes[v["node"]] for v in self.vllm if v["node"] in self.nodes and v["ready_at"] and now >= v["ready_at"]]
+        if self.g4_hpa_present:
+            # g4-workers HPA: G4 share = Workers that fit next to Ready vLLM, capped by Total Workers (maxReplicas).
+            self.sub_g4_desired = min(self.sub_total, self._g4_capacity(hosts))
+        else:
+            self.sub_g4_desired = self.sub_total
+        self._reconcile_pool("g4-workers", self.sub_g4_desired, hosts, now)
+        pending_g4 = sum(1 for w in self.sub_workers if w["pool"] == "g4-workers" and w["node"] is None)
+        g4_cap = SUB_ACTOR_SLOTS * sum(1 for w in self.sub_workers if w["pool"] == "g4-workers" and w["node"])
+        overflow = max(0, self.actor_load["awake"] - g4_cap)
+        if self.g4_hpa_present:
+            # n4d-workers HPA (option 2): Total − G4 share, plus busy headroom for awake actors beyond Total.
+            rest = self.sub_total - self.sub_g4_desired
+            self.sub_n4d_desired = max(0, min(self.n4d_max, rest + max(0, self.actor_load["awake"] - self.sub_total)))
+        else:
+            # pre-option-2: Pending g4-workers + Workers needed for awake actors beyond G4 capacity (at least 1).
+            self.sub_n4d_desired = max(1, min(SUB_N4D_MAX, pending_g4 + max(1, math.ceil(overflow / SUB_ACTOR_SLOTS))))
+        n4ds = [n for n in self.nodes.values() if n["role"] == "n4d" and self._ready(n)]
+        self._reconcile_pool("n4d-workers", self.sub_n4d_desired, n4ds, now)
+        # Pending n4d-workers -> the cluster autoscaler adds N4D nodes (about 6 Workers of 2 vCPU fit one n4d-standard-16).
+        waiting = [w for w in self.sub_workers if w["pool"] == "n4d-workers" and w["node"] is None]
+        all_n4d = [n for n in self.nodes.values() if n["role"] == "n4d"]
+        if waiting and not any(not self._ready(n) for n in all_n4d):
+            for i in range(math.ceil(len(waiting) / N4D_WORKERS_PER_NODE)):
+                self._add_node("n4d", "us-west8-a" if (len(all_n4d) + i) % 2 == 0 else "us-west8-c", now)
+            self._event("TriggeredScaleUp", "Pod", waiting[0]["name"],
+                        f"pod triggered scale-up: [{{n4dcpu-{self.POOL_TAG} {len(all_n4d)}->"
+                        f"{len(all_n4d) + math.ceil(len(waiting) / N4D_WORKERS_PER_NODE)} (max: 10)}}]", "substrate-exp")
+
+    def _node_users(self, node: str) -> list[dict]:
+        return super()._node_users(node) + [{**w, "tier": "worker"} for w in self.sub_workers if w["node"] == node]
+
+    def raw(self) -> dict:
+        r = super().raw()
+        now = self.t
+        if self.sub_absent:
+            r["substrate"] = {"workerpools": None, "hpas": [], "actor_stats": None,
+                              "ate_workloads": {"deployments": [], "statefulsets": [], "daemonsets": [],
+                                                "podcert_deployments": []}, "notes": [
+                "WorkerPools (workerpools.ate.dev/v1 in substrate-exp): not found (not installed yet)",
+                "ConfigMap substrate-exp/actor-stats: not found (not installed yet)"]}
+            return r
+        ready = lambda w: w["node"] is not None and w["ready_at"] is not None and now >= w["ready_at"]  # noqa: E731
+        for w in self.sub_workers:
+            prio = self.G4_WORKER_PRIORITY if w["pool"] == "g4-workers" else None
+            r["pods"].append(self._pod(w["name"], w["uid"], "substrate-exp", {"ate.dev/worker-pool": w["pool"], "app": "ate-worker"},
+                                       w["node"], w["ready_at"], SUB_WORKER_CPU, SUB_WORKER_MEM_GIB, prio))
+        # Busy % of Worker cores (agents emitted by the parent do not know the Worker uids).
+        for w in self.sub_workers:
+            ag = r["agents"].get(w["node"]) if w["node"] else None
+            if not ag:
+                continue
+            half = ag["ncpu"] // 2
+            for c, uid in self.nodes[w["node"]]["cores"].items():
+                if uid == w["uid"]:
+                    for cpu in (c, c + half):
+                        # Counter actors sleep most of each hold: a Worker's CPUs stay near idle whether or not it
+                        # hosts a RUNNING actor, which is why the map marks occupancy separately from busy %.
+                        ag["busy"][cpu] = round(random.uniform(0.3, 3.0), 1)
+        pools = []
+        for pool, desired in (("g4-workers", self.sub_g4_desired), ("n4d-workers", self.sub_n4d_desired)):
+            mine = [w for w in self.sub_workers if w["pool"] == pool]
+            pools.append({"apiVersion": "ate.dev/v1", "kind": "WorkerPool",
+                          "metadata": {"name": pool, "namespace": "substrate-exp", "labels": {"colo.gke.io/worker-tier": "agents"}},
+                          "spec": {"replicas": desired, "workerImage": "ghcr.io/agent-substrate/worker:v1.0.0"},
+                          "status": {"replicas": len(mine), "readyReplicas": sum(1 for w in mine if ready(w))}})
+        n4d_now = sum(1 for w in self.sub_workers if w["pool"] == "n4d-workers")
+        hpas = [{"name": "n4d-workers", "namespace": "substrate-exp", "target": "n4d-workers",
+                 "min": 0 if self.g4_hpa_present else 1, "max": self.n4d_max if self.g4_hpa_present else SUB_N4D_MAX,
+                 "current": n4d_now, "desired": self.sub_n4d_desired,
+                 "metric": str(sum(1 for w in self.sub_workers if w["pool"] == "g4-workers" and w["node"] is None))}]
+        if self.g4_hpa_present:
+            hpas.append({"name": "g4-workers", "namespace": "substrate-exp", "target": "g4-workers", "min": 1,
+                         "max": self.sub_total, "desired": self.sub_g4_desired,
+                         "current": sum(1 for w in self.sub_workers if w["pool"] == "g4-workers"),
+                         "metric": str(self.sub_g4_desired)})
+        # Awake actors land on Ready g4-workers first (one per Worker), the rest on Ready n4d-workers; what fits
+        # nowhere stays suspended until a Worker frees up.
+        by_node: dict[str, int] = {}
+        by_pool = {"g4-workers": 0, "n4d-workers": 0}
+        left = self.actor_load["awake"]
+        running_workers: list[str] = []
+        for pool in ("g4-workers", "n4d-workers"):
+            for w in self.sub_workers:
+                if w["pool"] == pool and ready(w) and left > 0:
+                    k = min(SUB_ACTOR_SLOTS, left)
+                    left -= k
+                    by_node[w["node"]] = by_node.get(w["node"], 0) + k
+                    by_pool[pool] += k
+                    running_workers.append(w["name"])
+        running = sum(by_node.values())
+        hold = self.actor_load["hold_s"]
+        # Cumulative counters: every waiting awake actor was refused a resume once per stats tick (pool full); a resume
+        # that lands on the other pool now and then restores on a different CPU feature set (memory reset, files kept).
+        waiting = max(0, self.actor_load["awake"] - running)
+        self.sub_counters["resumes_waited_no_room"] += waiting
+        if by_pool["n4d-workers"] and by_pool["g4-workers"] and random.random() < 0.1:
+            self.sub_counters["memory_resets"] += 1
+        stats = {
+            "updated": _iso(now),
+            "source": "actor-load",
+            "target_total": self.actor_load["total"],
+            "target_awake": self.actor_load["awake"],
+            "hold_s": hold,
+            "actors_total": self.actor_load["total"],
+            "actors_running": running,
+            "actors_running_by_pool": by_pool,
+            "running_workers": sorted(running_workers),
+            "actors_by_node": by_node,
+            "resumes_per_s": round(running / hold * random.uniform(0.9, 1.1), 1) if running else 0.0,
+            "resume_p50_ms": round(14 * random.uniform(0.95, 1.05), 1),
+            "resume_p99_ms": round(52 * random.uniform(0.95, 1.05), 1),
+            "resume_p99_ms_by_pool": {"g4-workers": round(40 * random.uniform(0.95, 1.05), 1),
+                                      "n4d-workers": round(55 * random.uniform(0.95, 1.05), 1)},
+            **self.sub_counters,
+        }
+        r["substrate"] = {"workerpools": pools, "hpas": hpas, "actor_stats": json.dumps(stats), "notes": [],
+                          "actor_load": {k: f"{v:g}" if isinstance(v, float) else str(v) for k, v in self.actor_load.items()},
+                          "ate_workloads": self._ate_control_plane(r, now)}
+        return r
+
+    def _ate_control_plane(self, r: dict, now: float) -> dict:
+        """Adds the two control-plane nodes, their ate-system pods and one atelet pod per G4/N4D node to `r`;
+        returns the ate-system workload lists (same shape as cluster.SubstrateLiveBackend)."""
+        for kind, n in self.ate_nodes.items():
+            r["nodes"].append({"name": n["name"], "ready": True, "created": _iso(n["created"]),
+                               "labels": {"ate.dev/workloadType": kind, "node.kubernetes.io/instance-type":
+                                              "n4d-standard-4" if kind == "ate-system-infra" else "e2-standard-4",
+                                          "topology.kubernetes.io/zone": "us-west8-a",
+                                          "cloud.google.com/gke-nodepool": f"ate-{kind.split('-')[-1]}"},
+                               "allocatable": {"cpu": "3.92", "memory": "13Gi"}})
+        wls: dict[tuple[str, str, str], dict] = {}
+        for (wname, kind, cpu, owner, ns), name in zip(self.ate_pods, self.ate_pod_names):
+            down = self.ate_degraded and wname == "atenet-router"
+            p = self._pod(name, _sfx(32), ns, {"app": wname}, self.ate_nodes[kind]["name"], None if down else now - 3000,
+                          cpu, 0.5 if owner == "Deployment" else 4, None)
+            p["owner_kind"] = "ReplicaSet" if owner == "Deployment" else "StatefulSet"
+            p["restarts"] = 7 if self.ate_degraded and wname in ("atenet-router", "ate-controller") else 0
+            r["pods"].append(p)
+            wl = wls.setdefault((ns, owner, wname), {"name": wname, "replicas": 0, "ready": 0})
+            wl["replicas"] += 1
+            wl["ready"] += int(p["ready"])
+        pick = lambda ns, owner: [w for (n, o, _w), w in wls.items() if n == ns and o == owner]  # noqa: E731
+        deployments, statefulsets = pick("ate-system", "Deployment"), pick("ate-system", "StatefulSet")
+        podcert = pick("podcertificate-controller-system", "Deployment")
+        workers = [n for n in self.nodes.values() if n["role"] in ("g4", "n4d")]
+        ready = 0
+        for n in workers:
+            name = self.atelet_names.setdefault(n["name"], f"atelet-{_sfx()}")
+            p = self._pod(name, _sfx(32), "ate-system", {"app": "atelet"}, n["name"] if self._ready(n) else None,
+                          n["ready_at"] + 10, 0.1, 0.25, None)
+            p["owner_kind"], p["restarts"] = "DaemonSet", 0
+            ready += int(p["ready"])
+            r["pods"].append(p)
+        daemonsets = [{"name": "atelet", "desired": len(workers), "ready": ready, "available": ready}]
+        return {"deployments": deployments, "statefulsets": statefulsets, "daemonsets": daemonsets,
+                "podcert_deployments": podcert}
+
+    @property
+    def n4d_max(self) -> int:
+        return max(SUB_N4D_MAX, self.sub_total)
+
+    async def set_g4_workers(self, body: dict) -> dict:
+        n = validate_worker_replicas(body)  # ValueError -> 400, as live
+        if self.g4_hpa_present:
+            if n < 1:  # as live: an HPA cannot have maxReplicas below max(1, minReplicas)
+                raise ValueError(f"total must be at least 1 while HPA substrate-exp/g4-workers exists (its minReplicas); got {n}")
+            self.sub_total = n
+            self._step(time.time(), force=True)
+            return {"target": "hpa/substrate-exp/g4-workers", "mode": "hpa-max", "total": n}
+        self.sub_total = n
+        self._step(time.time(), force=True)
+        return {"target": "workerpool/substrate-exp/g4-workers", "mode": "workerpool-replicas", "total": n}
+
+    async def set_actor_load(self, body: dict) -> dict:
+        spec, patch = actor_load_patch(self.actor_load, body)  # ValueError -> 400, as live
+        self.actor_load = spec
+        self._step(time.time(), force=True)
+        return {"spec": spec, "patch": patch}
+
+
+class SubstrateNativeMockBackend(SubstrateMockBackend, NativeMockBackend):
+    """Agent Substrate on the native recipe (base_recipe "native"): NativeMockBackend's placement (backfill next to vLLM by
+    podAffinity, overflow HPAs, no controller/guard) plus SubstrateMockBackend's Workers, actors and control plane.
+    g4-workers go only to G4 nodes with a Ready vLLM pod (podAffinity), never keyed off a colo.active label."""
+
+    recipe = "substrate"
+    POOL_TAG = "jawadamin-us-west8-0726"
+    G4_WORKER_PRIORITY = "substrate-worker"  # -5, bound next to vLLM by a MutatingAdmissionPolicy (podAffinity)
+
+    def __init__(self, cluster_id: str = "substrate", cluster_info: dict | None = None):
+        super().__init__(cluster_id=cluster_id, cluster_info=cluster_info)
+        # build_state reads the base recipe from the cluster info; make it hold even when constructed bare.
+        self.cluster_info = {**(cluster_info or CLUSTER), "base_recipe": "native"}

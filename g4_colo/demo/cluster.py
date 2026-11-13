@@ -14,8 +14,10 @@ import threading
 import time
 from typing import Any
 
-from state import (GUARD_NA_REASON, NAMESPACES, NATIVE_DEMAND_DEPLOYMENT, WATCH_REASONS, UnsupportedOnRecipe, build_state,
-                   parse_cpu, parse_mem_gib)
+from state import (ACTOR_LOAD_CM, ATE_SYSTEM_NS, CLUSTER, GUARD_NA_REASON, NAMESPACES, NATIVE_DEMAND_DEPLOYMENT, PODCERT_NS,
+                   SUBSTRATE_G4_POOL, SUBSTRATE_GROUP, SUBSTRATE_NS, SUBSTRATE_STATS_CM, SUBSTRATE_STATS_NS,
+                   SUBSTRATE_VERSION, WATCH_REASONS, UnsupportedOnRecipe, actor_load_patch, build_state,
+                   parse_actor_load, parse_cpu, parse_mem_gib, validate_worker_replicas)
 
 log = logging.getLogger("demo.cluster")
 
@@ -268,6 +270,7 @@ class LiveBackend:
                     "priority_class": p.spec.priority_class_name,
                     "owner_kind": (p.metadata.owner_references or [None])[0].kind if p.metadata.owner_references else None,
                     "deleting": p.metadata.deletion_timestamp is not None,
+                    "restarts": sum((cs.restart_count or 0) for cs in (p.status.container_statuses or [])),
                 }
             )
         return out
@@ -520,4 +523,157 @@ class NativeLiveBackend(LiveBackend):
         raise UnsupportedOnRecipe(f"no TTFT baseline on the native recipe: {GUARD_NA_REASON}")
 
 
-__all__ = ["LiveBackend", "NativeLiveBackend", "UnsupportedOnRecipe", "NAMESPACES"]
+def _api_problem(e: Exception, what: str) -> str:
+    """A friendly 'why is there no data' line for the Substrate panel (never a cluster alert)."""
+    status = getattr(e, "status", None)
+    if status == 404:
+        return f"{what}: not found (not installed yet)"
+    if status in (401, 403):
+        return f"{what}: no read access ({status}); apply the colo-demo RBAC in k8s.yaml"
+    return f"{what}: {type(e).__name__}: {str(e)[:160]}"
+
+
+class SubstrateLiveBackend(LiveBackend):
+    """The controller cluster (g4_colo/recipe/) with the Agent Substrate experiment on top: everything LiveBackend reads,
+    plus ate.dev/v1 WorkerPools and HPAs in substrate-exp and the probe's substrate-exp/actor-stats ConfigMap.
+
+    Read-only: no Substrate object is ever written. A missing CRD, namespace, HPA or ConfigMap (Substrate not installed
+    yet, cluster mid-upgrade) or a 403 becomes a note in `substrate.notes` and an empty panel, never a cluster alert.
+    Controls (rate, demand, guard) act on the same colo-controller as the `controller` tab.
+    """
+
+    recipe = "substrate"
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.custom = self.client.CustomObjectsApi(self.api_client)
+
+    def _workerpools(self) -> list[dict]:
+        res = self.custom.list_namespaced_custom_object(
+            SUBSTRATE_GROUP, SUBSTRATE_VERSION, SUBSTRATE_NS, "workerpools", _request_timeout=LIST_TIMEOUT_S)
+        return list((res or {}).get("items") or [])
+
+    def _actor_stats(self) -> str | None:
+        cm = self.core.read_namespaced_config_map(SUBSTRATE_STATS_CM, SUBSTRATE_STATS_NS, _request_timeout=LIST_TIMEOUT_S)
+        return (cm.data or {}).get("stats.json")
+
+    def _ate_deployments(self, ns: str = ATE_SYSTEM_NS) -> list[dict]:
+        return [{"name": d.metadata.name, "replicas": d.spec.replicas or 0, "ready": d.status.ready_replicas or 0}
+                for d in self.apps.list_namespaced_deployment(ns, _request_timeout=LIST_TIMEOUT_S).items]
+
+    def _ate_statefulsets(self) -> list[dict]:
+        return [{"name": d.metadata.name, "replicas": d.spec.replicas or 0, "ready": d.status.ready_replicas or 0}
+                for d in self.apps.list_namespaced_stateful_set(ATE_SYSTEM_NS, _request_timeout=LIST_TIMEOUT_S).items]
+
+    def _ate_daemonsets(self) -> list[dict]:
+        return [{"name": d.metadata.name, "desired": d.status.desired_number_scheduled or 0,
+                 "ready": d.status.number_ready or 0, "available": d.status.number_available or 0}
+                for d in self.apps.list_namespaced_daemon_set(ATE_SYSTEM_NS, _request_timeout=LIST_TIMEOUT_S).items]
+
+    async def _substrate(self) -> dict:
+        t = asyncio.to_thread
+        names = ("workerpools", "hpas", "actor_stats", "ate_deployments", "ate_statefulsets", "ate_daemonsets",
+                 "ate_podcert_deployments", "actor_load")
+        res = await asyncio.gather(t(self._workerpools), t(self._hpas_in, SUBSTRATE_NS), t(self._actor_stats),
+                                   t(self._ate_deployments), t(self._ate_statefulsets), t(self._ate_daemonsets),
+                                   t(self._ate_deployments, PODCERT_NS), t(self._actor_load_data), return_exceptions=True)
+        out: dict = {"notes": []}
+        labels = {"workerpools": f"WorkerPools (workerpools.{SUBSTRATE_GROUP}/{SUBSTRATE_VERSION} in {SUBSTRATE_NS})",
+                  "hpas": f"HPAs in {SUBSTRATE_NS}",
+                  "actor_stats": f"ConfigMap {SUBSTRATE_STATS_NS}/{SUBSTRATE_STATS_CM}",
+                  "ate_deployments": f"Deployments in {ATE_SYSTEM_NS}", "ate_statefulsets": f"StatefulSets in {ATE_SYSTEM_NS}",
+                  "ate_daemonsets": f"DaemonSets in {ATE_SYSTEM_NS}",
+                  "ate_podcert_deployments": f"Deployments in {PODCERT_NS}",
+                  "actor_load": f"ConfigMap {SUBSTRATE_NS}/{ACTOR_LOAD_CM}"}
+        for n, r in zip(names, res):
+            if isinstance(r, Exception):
+                out[n] = None
+                out["notes"].append(_api_problem(r, labels[n]))
+            else:
+                out[n] = r
+        # ate-system workloads (control plane). A missing namespace lists as empty, i.e. "not installed yet".
+        out["ate_workloads"] = {k: out.pop(f"ate_{k}") for k in ("deployments", "statefulsets", "daemonsets",
+                                                                        "podcert_deployments")}
+        if out.get("actor_stats") is None and not any(x.startswith(labels["actor_stats"]) for x in out["notes"]):
+            out["notes"].append(f"{labels['actor_stats']}: no stats.json key yet")
+        return out
+
+    def _actor_load_data(self) -> dict:
+        cm = self.core.read_namespaced_config_map(ACTOR_LOAD_CM, SUBSTRATE_NS, _request_timeout=LIST_TIMEOUT_S)
+        return dict(cm.data or {})
+
+    def _set_actor_load_sync(self, body: dict) -> dict:
+        try:
+            current = parse_actor_load(self._actor_load_data())
+        except Exception as e:  # noqa: BLE001
+            if getattr(e, "status", None) == 404:
+                raise RuntimeError(f"ConfigMap {SUBSTRATE_NS}/{ACTOR_LOAD_CM} not found: deploy the actor-load generator "
+                                   "first (the demo only patches it, never creates it)") from e
+            raise
+        spec, patch = actor_load_patch(current, body)  # ValueError -> 400
+        self.core.patch_namespaced_config_map(ACTOR_LOAD_CM, SUBSTRATE_NS, patch, _request_timeout=LIST_TIMEOUT_S)
+        return {"spec": spec, "patch": patch}
+
+    def _set_g4_workers_sync(self, total: int) -> dict:
+        """Option 2: patch HPA substrate-exp/g4-workers spec.maxReplicas = total (merge patch). Only when that HPA is
+        absent, fall back to the WorkerPool g4-workers scale subresource (the pre-option-2 behaviour)."""
+        try:
+            h = self.autoscaling.read_namespaced_horizontal_pod_autoscaler(SUBSTRATE_G4_POOL, SUBSTRATE_NS,
+                                                                           _request_timeout=LIST_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001
+            if getattr(e, "status", None) != 404:
+                raise
+            h = None
+        if h is not None:
+            floor = max(1, int(getattr(h.spec, "min_replicas", None) or 1))
+            if total < floor:  # an HPA cannot have maxReplicas below max(1, minReplicas)
+                raise ValueError(f"total must be at least {floor} while HPA {SUBSTRATE_NS}/{SUBSTRATE_G4_POOL} exists "
+                                 f"(its minReplicas); got {total}")
+            body = {"spec": {"maxReplicas": int(total)}}
+            try:
+                self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(
+                    SUBSTRATE_G4_POOL, SUBSTRATE_NS, body, _content_type="application/merge-patch+json",
+                    _request_timeout=LIST_TIMEOUT_S)
+            except TypeError:  # older kubernetes clients without _content_type: their dict patch is equivalent here
+                self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(SUBSTRATE_G4_POOL, SUBSTRATE_NS, body)
+            return {"target": f"hpa/{SUBSTRATE_NS}/{SUBSTRATE_G4_POOL}", "mode": "hpa-max", "total": int(total)}
+        try:
+            self.custom.patch_namespaced_custom_object_scale(
+                SUBSTRATE_GROUP, SUBSTRATE_VERSION, SUBSTRATE_NS, "workerpools", SUBSTRATE_G4_POOL,
+                {"spec": {"replicas": int(total)}}, _request_timeout=LIST_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001
+            if getattr(e, "status", None) == 404:
+                raise RuntimeError(f"neither HPA nor WorkerPool {SUBSTRATE_NS}/{SUBSTRATE_G4_POOL} found (the demo "
+                                   "scales them, never creates them)") from e
+            raise
+        return {"target": f"workerpool/{SUBSTRATE_NS}/{SUBSTRATE_G4_POOL}", "mode": "workerpool-replicas",
+                "total": int(total)}
+
+    async def set_g4_workers(self, body: dict) -> dict:
+        """Total Workers: HPA g4-workers maxReplicas (option 2), else WorkerPool g4-workers replicas. 0..60."""
+        n = validate_worker_replicas(body)  # ValueError -> 400
+        return await asyncio.to_thread(self._set_g4_workers_sync, n)
+
+    async def set_actor_load(self, body: dict) -> dict:
+        """Merge-patch substrate-exp/actor-load (keys total, awake, hold_s as strings). Validated first."""
+        return await asyncio.to_thread(self._set_actor_load_sync, body)
+
+    async def raw(self) -> dict:
+        base, sub = await asyncio.gather(super().raw(), self._substrate())
+        return {**base, "substrate": sub}
+
+
+class SubstrateNativeLiveBackend(SubstrateLiveBackend, NativeLiveBackend):
+    """Agent Substrate on a cluster running g4_colo/recipe-native/ (DEMO_CLUSTERS base_recipe "native"): the Substrate
+    reads of SubstrateLiveBackend plus the native recipe for everything else (no colo-controller or colo-config reads,
+    demand = deployments/scale of the backfill Deployments, overflow HPAs in colo-svc, no guard/baseline)."""
+
+    recipe = "substrate"
+    base_recipe = "native"
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.cluster_info = {**(self.cluster_info or CLUSTER), "base_recipe": "native"}
+
+
+__all__ = ["LiveBackend", "NativeLiveBackend", "SubstrateLiveBackend", "SubstrateNativeLiveBackend", "UnsupportedOnRecipe", "NAMESPACES"]

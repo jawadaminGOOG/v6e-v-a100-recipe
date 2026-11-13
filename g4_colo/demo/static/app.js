@@ -15,7 +15,7 @@ const PRESETS = {
 const CSS = getComputedStyle(document.documentElement);
 const C = (n) => CSS.getPropertyValue(n).trim();
 const COL = { v: C("--v"), vSoft: C("--f-vllm"), i: C("--i"), m: C("--m"), bad: C("--bad"), muted: C("--muted"), faint: C("--faint"), line: C("--line"), n4d: C("--n4d"), ink: C("--ink") };
-const TAG = { vllm: "V", sandbox: "S", toolcall: "T", analytics: "A", buffer: "B", agent: "D" };
+const TAG = { vllm: "V", sandbox: "S", toolcall: "T", analytics: "A", buffer: "B", agent: "D", worker: "W" };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -79,7 +79,9 @@ let CLUSTERS = [];
 let CLUSTER = new URLSearchParams(location.search).get("cluster") || null;
 const api = (path) => (CLUSTER ? `${path}${path.includes("?") ? "&" : "?"}cluster=${encodeURIComponent(CLUSTER)}` : path);
 const clusterById = (id) => CLUSTERS.find((c) => c.id === id);
-const isNative = (s) => !!s && s.recipe === "native";
+// Native semantics: the native recipe, or the substrate tab on a native base (DEMO_CLUSTERS base_recipe "native").
+const isNative = (s) => !!s && (s.recipe === "native" || s.base_recipe === "native");
+const isSubstrate = (s) => !!s && s.recipe === "substrate";
 
 /* ------------------------------------------------------------------ fetch with session detection */
 class AuthError extends Error {}
@@ -221,6 +223,7 @@ function syncControls(s) {
     $("guard-sub").textContent = L(c.guard_enabled
       ? (c.threshold_ms ? `moves analytics off G4 above ${num(c.threshold_ms)} ms` : "moves analytics off G4 when TTFT rises")
       : "off: nothing is moved");
+    $("guard").title = $("guard-sub").textContent;
     $("baseline-info").textContent = c.baseline_ttft_p99_ms ? `baseline ${num(c.baseline_ttft_p99_ms)} ms · threshold ${num(c.threshold_ms)} ms` : "no baseline yet";
   }
   const running = s.scenario && s.scenario.status === "running";
@@ -232,6 +235,7 @@ function syncControls(s) {
 function renderControl(s) {
   const ctl = s.control || {}, native = isNative(s);
   document.body.classList.toggle("recipe-native", native);
+  document.body.classList.toggle("recipe-substrate", isSubstrate(s));
   $("ctl-chip").hidden = !ctl.label;
   $("ctl-label").textContent = ctl.label || "";
   const hp = ctl.hpas || {};
@@ -362,10 +366,12 @@ function cpuKinds(n) {
     let app = "free";
     if (c.cat === "vllm") app = "vllm";
     else if (c.cat === "buffer") app = "buffer";
+    else if (c.cat === "worker") app = "worker";
     else if (c.cat === "system") app = "system";
     else if (c.cat === "integer" || c.cat === "memory") app = o && SVCS.includes(o.app) ? o.app : (c.cat === "memory" ? "analytics" : "other");
     else if (o) app = "other";
-    return { app, pending: !!(o && o.pod && podReady[o.pod] === false), label: o ? `${o.ns ? o.ns + "/" : ""}${o.pod}` : "" };
+    // occ: Substrate Worker hosting a RUNNING actor (true), warm idle Worker (false), or not reported (undefined).
+    return { app, occ: app === "worker" && o ? o.actor : undefined, pending: !!(o && o.pod && podReady[o.pod] === false), label: o ? `${o.ns ? o.ns + "/" : ""}${o.pod}` : "" };
   });
   // Customer DaemonSets get their own colour: ceil(their CPU requests) shared-pool CPUs, after the kubelet/system reserve.
   const agentCpu = n.agent_cpu || 0;
@@ -430,9 +436,14 @@ function updateCoreMap(root, n, label) {
     const k = kinds[i];
     if (t.app !== k.app) { t.el.className = `cpu a-${k.app}`; t.tag.textContent = TAG[k.app] || ""; t.app = k.app; }
     t.el.classList.toggle("pending", k.pending);
+    // Worker occupancy is its own encoding (solid tile + "W●" vs outlined "W"), separate from CPU busy %.
+    t.el.classList.toggle("occ", k.occ === true);
+    t.el.classList.toggle("idle", k.occ === false);
+    if (k.app === "worker") t.tag.textContent = k.occ === true ? "W●" : "W";
     const busy = Math.max(0, Math.min(100, Number(c.busy) || 0));
     t.fill.style.transform = `scaleY(${busy / 100})`;
-    t.el.title = `CPU ${c.id} (core ${c.core}, thread ${c.thread}, L3 ${c.llc}): ${k.app === "free" ? "free (shared pool)" : k.app === "system" ? "reserved" : k.label || k.app}${k.pending ? " · starting" : ""} · busy ${c.busy ?? "?"}%`;
+    const occTxt = k.occ === true ? " · actor running" : k.occ === false ? " · idle warm Worker" : "";
+    t.el.title = `CPU ${c.id} (core ${c.core}, thread ${c.thread}, L3 ${c.llc}): ${k.app === "free" ? "free (shared pool)" : k.app === "system" ? "reserved" : k.label || k.app}${occTxt}${k.pending ? " · starting" : ""} · busy ${c.busy ?? "?"}%`;
     if (!["free", "system"].includes(k.app)) per[t.llc].add(k.app);
     cnt[k.app] = (cnt[k.app] || 0) + 1;
   });
@@ -442,15 +453,15 @@ function updateCoreMap(root, n, label) {
     g.classList.toggle("has-vllm", per[i].has("vllm"));
     g.classList.toggle("has-mem", per[i].has("analytics"));
   });
-  root.setAttribute("aria-label", `${label} per-vCPU map: ${Object.entries(cnt).map(([k, v]) => `${v} ${k === "system" ? "reserved" : k === "agent" ? "DaemonSet" : k}`).join(", ")}`);
+  root.setAttribute("aria-label", `${label} per-vCPU map: ${Object.entries(cnt).map(([k, v]) => `${v} ${k === "system" ? "reserved" : k === "agent" ? "DaemonSet" : k === "worker" ? "Substrate Worker" : k}`).join(", ")}`);
 }
 
 // Node agent not reporting yet: fall back to one flat cell per requested vCPU from the pod list.
 function flatCells(n) {
   const cells = [];
   for (const p of n.pods || []) {
-    const app = p.cat === "vllm" ? "vllm" : p.cat === "buffer" ? "buffer" : SVCS.includes(p.app) ? p.app : "system";
-    for (let i = 0; i < Math.max(1, Math.round(p.cpu || 0)); i++) cells.push({ app, pending: !p.ready });
+    const app = p.cat === "vllm" ? "vllm" : p.cat === "buffer" ? "buffer" : p.cat === "worker" ? "worker" : SVCS.includes(p.app) ? p.app : "system";
+    for (let i = 0; i < Math.max(1, Math.round(p.cpu || 0)); i++) cells.push({ app, pending: !p.ready, occ: app === "worker" ? p.actor : undefined });
   }
   const cap = n.ncpu || Math.round(n.alloc_cpu || 0);
   const agentCpu = n.agent_cpu || 0;
@@ -462,7 +473,7 @@ function flatCells(n) {
   while (cells.length < cap) cells.push({ app: "free", pending: false });
   cells.length = Math.min(cells.length, cap); // never draw more cells than the node has vCPUs
   const cols = Math.max(1, Math.ceil(cap / 2)); // two rows, like the hyperthread pairs of the core map
-  return `<div class="flat" style="--cols:${cols}" role="img" aria-label="vCPU requests (node agent not reporting${n.ready ? "" : "; node starting"})">${cells.map((c) => `<i class="cpu a-${c.app}${c.pending ? " pending" : ""}"><i class="fill"></i><b class="lt">${TAG[c.app] || ""}</b></i>`).join("")}</div>`;
+  return `<div class="flat" style="--cols:${cols}" role="img" aria-label="vCPU requests (node agent not reporting${n.ready ? "" : "; node starting"})">${cells.map((c) => `<i class="cpu a-${c.app}${c.pending ? " pending" : ""}${c.occ === true ? " occ" : c.occ === false ? " idle" : ""}"><i class="fill"></i><b class="lt">${c.occ === true ? "W●" : TAG[c.app] || ""}</b></i>`).join("")}</div>`;
 }
 
 function trackEvictions(s) {
@@ -481,8 +492,8 @@ function nodeEl(n) {
   const el = document.createElement("div");
   el.className = n.role === "g4" ? "nrow" : "n4d-one";
   el.innerHTML = n.role === "g4"
-    ? `<div class="nname"><b class="g4"></b><span class="flag" hidden></span></div><div class="map"></div>`
-    : `<span class="t"><span class="nm"></span><span class="flag" hidden></span></span><div class="map"></div>`;
+    ? `<div class="nname"><b class="g4"></b><span class="flag" hidden></span><span class="atl" hidden></span></div><div class="map"></div>`
+    : `<span class="t"><span class="nm"></span><span class="flag" hidden></span><span class="atl" hidden></span></span><div class="map"></div>`;
   return el;
 }
 function nodeFlag(n, breach) {
@@ -518,7 +529,19 @@ function renderNodes(s) {
     }
     if (n.role === "g4") bits.push(`TTFT p99 ${n.ttft_p99_ms != null ? num(n.ttft_p99_ms) + " ms" : "–"} · p50 ${n.ttft_p50_ms != null ? num(n.ttft_p50_ms) + " ms" : "–"} · ${n.achieved_rps ? num(n.achieved_rps) : "–"} rps`, `${cpuPods}${slots ? ` of ${slots}` : ""} CPU pods`);
     else bits.push(`${cpuPods} overflow pods`);
+    const wk = (n.pods || []).filter((p) => p.cat === "worker");
+    if (wk.length) bits.push(`${plural(wk.length, "Substrate Worker", "Substrate Workers")} (${num(wk.reduce((a, p) => a + (p.cpu || 0), 0))} vCPU)${wk.some((p) => p.actor !== undefined) ? ` · ${wk.filter((p) => p.actor).length} with a running actor` : ""}${wk.some((p) => !p.ready) ? " · some starting" : ""}`);
     (n.blocks || []).forEach((b) => bits.push(`guard: no ${b} pods`));
+    // Substrate tab: the node's atelet (DaemonSet) as a small marker with an icon and a word, not colour alone.
+    const atl = el.querySelector(".atl"), cpOn = isSubstrate(s) && ((s.substrate || {}).control_plane || {}).present;
+    atl.hidden = !cpOn;
+    if (cpOn) {
+      const a = n.atelet;
+      atl.className = `atl ${!a ? "warn" : a.ready ? "ok" : "bad"}`;
+      atl.textContent = !a ? "– no atelet" : a.ready ? "✓ atelet" : "✕ atelet";
+      atl.title = !a ? "No atelet pod on this node (ate-system DaemonSet)" : `${a.pod}: ${a.ready ? "Ready" : `NotReady (${a.phase || "?"})`} · restarts ${a.restarts ?? "?"}`;
+      bits.push(atl.title);
+    }
     el.title = bits.join("\n");
     const host = el.querySelector(".map");
     if (n.cpus && n.cpus.length) {
@@ -551,7 +574,18 @@ function renderNodes(s) {
     [...wrap.children].slice(n4d.length).forEach((x) => x.remove());
     want.push(line);
   }
+  const cpNodes = isSubstrate(s) ? (((s.substrate || {}).control_plane || {}).nodes || []) : [];
+  if (cpNodes.length) {
+    let line = root.querySelector(".cp-line");
+    if (!line) {
+      line = document.createElement("div"); line.className = "cp-line";
+      line.innerHTML = `<div class="nname"><b class="cp" title="Agent Substrate control plane (namespace ate-system)">Control plane</b></div><div class="cps"></div>`;
+    }
+    line.querySelector(".cps").innerHTML = cpNodes.map(cpNodeHTML).join("");
+    want.push(line);
+  }
   // The CSS sizes G4 tile height from the space left in #nodes, divided by the rows it must hold.
+  root.style.setProperty("--cpn", cpNodes.length ? "1" : "0");
   root.style.setProperty("--g4n", String(Math.max(1, g4.length)));
   root.style.setProperty("--ghost", want.some((el) => el.classList.contains("ghost")) ? "1" : "0");
   root.style.setProperty("--n4dn", n4d.length ? "1" : "0");
@@ -560,6 +594,160 @@ function renderNodes(s) {
   root.querySelector(".empty")?.remove();
   want.forEach((el, i) => { if (root.children[i] !== el) root.insertBefore(el, root.children[i] || null); });
   [...root.children].slice(want.length).forEach((x) => x.remove());
+}
+
+/* ------------------------------------------------------------------ Agent Substrate control plane */
+// One tile per ate-system pod on the control-plane nodes: C = control plane, P = postgres, D = a DaemonSet pod.
+// NotReady pods get a dashed outline and a "!" after the letter (not colour alone); detail on hover.
+const cpPodTitle = (p) => `${p.name} · ${p.component || "other"} · ${p.ready ? "Ready" : `NotReady (${p.phase || "?"})`} · restarts ${p.restarts ?? "?"} · ${num(p.cpu, 2)} vCPU requested`;
+function cpNodeHTML(n) {
+  const cls = (p) => (p.letter === "P" ? "a-pg" : p.letter === "D" ? "a-agent" : "a-cp");
+  const tiles = (n.pods || []).map((p) => `<i class="cpt ${cls(p)}${p.ready ? "" : " nr"}" title="${esc(cpPodTitle(p))}"><b>${p.letter}${p.ready ? "" : "!"}</b></i>`).join("")
+    || '<span class="nd">no ate-system pods</span>';
+  const head = `${n.kind === "postgres" ? "postgres" : "infra"} · ${n.instance_type || "?"}`;
+  const tip = `${n.name}\n${n.pool ? `pool ${n.pool} · ` : ""}${n.zone || ""}\nate.dev/workloadType=${n.kind === "postgres" ? "ate-postgres" : "ate-system-infra"}`;
+  return `<div class="cp-one" title="${esc(tip)}"><span class="t">${esc(head)}${n.ready ? "" : ' <span class="flag bad">✕ NotReady</span>'}</span><div class="cpts" role="img" aria-label="${esc(`${head}: ${(n.pods || []).map((p) => `${p.component || p.name} ${p.ready ? "ready" : "not ready"}`).join(", ")}`)}">${tiles}</div></div>`;
+}
+const HEALTH = { ok: ["✓", "h-ok"], degraded: ["▲", "h-warn"], "scaled-to-zero": ["▲", "h-warn"], down: ["✕", "h-bad"], unknown: ["?", "h-unk"], missing: ["–", "h-unk"] };
+function cpStripHTML(cp) {
+  if (!cp || !cp.present) return '<p class="cp-strip"><b class="cp-k">Control plane</b> <span class="nd">no data yet · ate-system not found (Substrate control plane not installed)</span></p>';
+  const chip = (label, x, extraTitle) => {
+    const [icon, cls] = HEALTH[x.health] || HEALTH.unknown;
+    const val = x.health === "missing" ? "not found" : `${num(x.ready)}/${num(x.desired)}`;
+    const word = { degraded: " degraded", down: " down", "scaled-to-zero": " scaled to 0" }[x.health] || "";
+    const t = `${label}: ${x.health}${x.source ? ` · ${x.source}${x.workloads && x.workloads.length ? ` ${x.workloads.join(", ")}` : ""}` : ""}${x.restarts ? ` · ${x.restarts} restarts` : ""}${extraTitle || ""}`;
+    return `<li class="${cls}" title="${esc(t)}"><span aria-hidden="true">${icon}</span> ${esc(label)} <b>${val}</b>${word ? `<span class="hw">${word}</span>` : ""}</li>`;
+  };
+  const at = cp.atelet || {};
+  return `<div class="cp-strip"><b class="cp-k">Control plane</b><ul>${(cp.components || []).map((c) => chip(c.label, c)).join("")}` +
+    chip("atelet", at, at.found ? ` · ${num(at.available)} available across nodes` : "") + `</ul>` +
+    ((cp.unscheduled || []).length ? `<span class="hw h-warn" title="${esc(cp.unscheduled.map(cpPodTitle).join("\n"))}">▲ ${cp.unscheduled.length} unscheduled</span>` : "") + `</div>`;
+}
+
+/* ------------------------------------------------------------------ Agent Substrate actor load */
+// Two sliders patch ConfigMap substrate-exp/actor-load through POST /api/substrate/actors (debounced 1 s; awake <= total).
+// Target vs actual: target_awake against actors RUNNING per pool, so G4-first then N4D overflow is visible.
+const alVals = () => ({ total: +$("al-total").value, awake: +$("al-awake").value });
+function alSet(total, awake) {
+  $("al-total").value = total; $("al-total-out").textContent = total;
+  $("al-awake").max = String(Math.max(0, total));
+  awake = Math.min(awake, total);
+  $("al-awake").value = awake; $("al-awake-out").textContent = awake;
+  document.querySelectorAll("[data-al-total]").forEach((b) => { b.setAttribute("aria-pressed", String(+b.dataset.alTotal === total)); b.disabled = false; });
+  document.querySelectorAll("[data-al-awake]").forEach((b) => { b.setAttribute("aria-pressed", String(+b.dataset.alAwake === awake)); b.disabled = +b.dataset.alAwake > total; });
+}
+const sendActors = debounce(() => { const v = alVals(); act("/api/substrate/actors", v, `Actors: ${v.total} total, ${v.awake} awake`); }, 1000);
+function alInput(total, awake) { touched.actors = Date.now(); alSet(total, awake); sendActors(); }
+$("al-total").addEventListener("input", (e) => alInput(+e.target.value, alVals().awake));
+$("al-awake").addEventListener("input", (e) => alInput(alVals().total, +e.target.value));
+document.querySelectorAll("[data-al-total]").forEach((b) => b.addEventListener("click", () => alInput(+b.dataset.alTotal, alVals().awake)));
+document.querySelectorAll("[data-al-awake]").forEach((b) => b.addEventListener("click", () => alInput(alVals().total, +b.dataset.alAwake)));
+// Total Workers: HPA substrate-exp/g4-workers maxReplicas (option 2; the HPA sets the G4 share, the n4d-workers HPA the
+// rest), or WorkerPool g4-workers replicas when that HPA is absent. POST /api/substrate/workers, debounced 1 s.
+const sendWorkers = debounce(() => { const n = +$("wp-n").value; act("/api/substrate/workers", { total: n }, `Total Workers: ${n}`); }, 1000);
+$("wp-n").addEventListener("input", (e) => { touched.workers = Date.now(); $("wp-n-out").textContent = e.target.value; sendWorkers(); });
+function renderWorkerPool(sub) {
+  const pools = sub.pools || {}, g4 = pools["g4-workers"], n4 = pools["n4d-workers"], hpa = sub.g4_hpa;
+  const on = sub.total_workers_source != null;
+  $("wp-n").disabled = !on;
+  $("wp-n").min = String(hpa ? Math.max(1, hpa.min ?? 1) : 0);  // an HPA cannot have maxReplicas below max(1, min)
+  if (on && !fresh("workers")) { $("wp-n").value = sub.total_workers ?? 0; $("wp-n-out").textContent = sub.total_workers ?? 0; }
+  if (!on) { $("wp-v").innerHTML = '<span class="nd" title="Neither HPA nor WorkerPool substrate-exp/g4-workers found">Not connected: no g4-workers HPA or WorkerPool.</span>'; return; }
+  const gs = g4 ? g4.desired ?? 0 : 0, ns = n4 ? n4.desired ?? 0 : 0, k = (g4 ? g4.pending ?? 0 : 0) + (n4 ? n4.pending ?? 0 : 0);
+  const src = hpa ? `HPA ${hpa.name} maxReplicas (G4 share = Workers that fit next to Ready vLLM)` : "WorkerPool g4-workers replicas (no g4-workers HPA)";
+  // Two short lines that never ellipsize at 1366 px: the shares, then pending + the headroom note (detail in tooltips).
+  $("wp-v").innerHTML = `<span class="wp-line" title="${esc(`Total Workers = ${src}. G4 share = WorkerPool g4-workers spec.replicas; N4D share = n4d-workers spec.replicas.`)}">Share: G4 <b>${num(gs)}</b> · N4D <b>${num(ns)}</b></span>` +
+    `<span class="al-sub" title="Pending = Workers with no node yet. The n4d-workers HPA adds N4D Workers above Total Workers when awake actors need them (busy headroom)."><b class="${k ? "warn" : ""}">${num(k)}</b> pending · N4D adds more if busy</span>`;
+}
+
+function renderActorLoad(sub) {
+  renderWorkerPool(sub);
+  const al = sub.actor_load || {}, a = sub.actors || {};
+  const on = !!al.exists;
+  $("al").classList.toggle("off", false);
+  $("al").querySelectorAll(".field:not(:has(#wp-n))").forEach((f) => f.classList.toggle("off", !on));
+  $("al").querySelectorAll("input:not(#wp-n), button").forEach((x) => { if (!on) x.disabled = true; else if (x.tagName === "INPUT") x.disabled = false; });
+  if (on && !fresh("actors")) alSet(al.total ?? 0, al.awake ?? 0);
+  if (!on) { $("al-v").innerHTML = '<span class="nd" title="ConfigMap substrate-exp/actor-load not found. Deploy the actor-load generator (Deployment substrate-exp/actor-load) to drive actors from here.">Not connected: deploy actor-load to use these controls.</span>'; return; }
+  // One awake actor occupies one Worker: running = min(target, Ready Workers), G4 first; the rest wait.
+  const tgt = a.target_awake ?? al.awake ?? 0, g = a.running_g4 ?? 0, n = a.running_n4d ?? 0;
+  const run = a.actors_running ?? g + n, wait = Math.max(0, tgt - run);
+  const W = Math.max(1, tgt, run);
+  const seg = (k, x) => (x > 0 ? `<i class="${k}" style="flex-grow:${x / W}"></i>` : "");
+  const lag = a.target_awake != null && a.target_awake !== al.awake ? `<span class="al-lag">generator still on ${a.target_awake} awake</span>` : "";
+  $("al-v").innerHTML =
+    `<span class="al-line" title="${esc(`${num(al.total)} actors exist · 1 awake actor per Worker (suspended actors take none) · each awake actor holds its Worker ${num(al.hold_s ?? a.hold_s ?? 5)} s per cycle`)}">Running <b>${num(run)}</b> / <b>${num(tgt)}</b> awake${wait ? ` <b class="warn" title="${wait} awake actors waiting for a free Worker">▲ ${wait}</b>` : tgt ? ' <span title="every awake actor has a Worker">✓</span>' : ""}</span>` +
+    `<div class="al-bar" role="img" aria-label="${esc(`${g} awake actors on G4 Workers, ${n} on N4D Workers, ${wait} waiting for a Worker`)}">${seg("g", g)}${seg("n", n)}${seg("w", wait)}${tgt || run ? "" : '<i class="e" style="flex-grow:1"></i>'}</div>` +
+    `<span class="al-key"><span><i class="k g"></i>G4 <b>${num(g)}</b></span><span><i class="k n"></i>N4D <b>${num(n)}</b></span><span><i class="k w"></i>waiting <b>${num(wait)}</b></span></span>` +
+    lag;
+}
+
+/* ------------------------------------------------------------------ CPU-backfill clamp (substrate tab) */
+// Workers outrank CPU backfill (option 2), so the backfill sliders max out at floor(vCPUs left after Workers / per-replica
+// CPU). A UI clamp only: preemption enforces it in-cluster. Other tabs keep the static max of 20.
+const CLAMP_SVCS = ["sandbox", "toolcall"];
+function renderCpuClamp(s) {
+  const b = isSubstrate(s) ? (s.substrate || {}).cpu_budget : null;
+  $("cpu-left").hidden = !b;
+  for (const sv of CLAMP_SVCS) {
+    const el = $(`d-${sv}`);
+    const mx = b && b.max_replicas && b.max_replicas[sv] != null ? Math.max(0, Math.min(200, b.max_replicas[sv])) : 20;
+    if (el.max !== String(mx)) el.max = String(mx);
+    el.title = b ? `max ${mx} = floor(${num(b.vcpu_left, 1)} vCPU left / ${num((b.per_replica_vcpu || {})[sv], 1)} vCPU per ${sv} pod)` : "";
+  }
+  if (b) {
+    $("cpu-left").textContent = `${num(b.vcpu_left)} vCPU left after Workers`;
+    $("cpu-left").title = `${num(b.alloc_vcpu, 1)} vCPU allocatable on Ready G4 + N4D nodes − ${num(b.non_backfill_vcpu, 1)} requested by non-backfill pods (vLLM, daemonsets, Workers) − ${b.pending_workers} Pending Workers × 2 vCPU. UI clamp only; preemption enforces it in the cluster.`;
+  }
+}
+
+/* ------------------------------------------------------------------ Agent Substrate panel (recipe "substrate") */
+// One quiet row of numbers above the node map. Every number tolerates absence: Substrate may not be installed yet, the
+// probe may not have published actor-stats, so a missing value reads "no data yet", never an error.
+function renderSubstrate(s) {
+  const host = $("sub");
+  if (!isSubstrate(s)) { host.hidden = true; $("sub-body").innerHTML = ""; $("sub-cp").innerHTML = ""; return; }
+  host.hidden = false;
+  const sub = s.substrate || {}, pools = sub.pools || {}, a = sub.actors || null, hpa = sub.n4d_hpa || null;
+  const notes = (sub.notes || []).join("\n");
+  const g4 = pools["g4-workers"], n4 = pools["n4d-workers"];
+  const nd = '<span class="nd" title="no data yet">–</span>';
+  // G4 / N4D pairs: each number carries its word (and the pool colour), never colour alone.
+  const pair = (x, y, unit = "") => (x == null && y == null ? nd
+    : `${x == null ? "–" : esc(x)}<small class="pg"> G4</small> <span class="sep">·</span> ${y == null ? "–" : esc(y)}<small class="pn"> N4D${unit}</small>`);
+  const poolVal = (p) => (!p ? nd : p.exists ? `${num(p.ready ?? p.pods_ready)}<small> / ${num(p.desired)} ready</small>` : `${num(p.pods_ready)}<small> ready · no WorkerPool</small>`);
+  const runG = a ? (a.running_g4 ?? a.actors_g4) : null, runN = a ? (a.running_n4d ?? a.actors_n4d) : null;
+  const cells = [
+    ["Actors running", a ? pair(runG, runN) : nd, a ? `${num(a.actors_running)} awake of ${num(a.actors_total)}` : "from actor-stats",
+      a && a.actors_other ? `${a.actors_other} on other nodes` : "", "hero"],
+    ["g4-workers", poolVal(g4) + (g4 && g4.pending ? ` <span class="flag warn">▲ ${g4.pending} Pending</span>` : ""),
+      g4 ? (g4.pending ? "no room left on G4" : `${num(g4.on_g4)} on G4 spare cores`) : "WorkerPool on G4",
+      g4 ? `WorkerPool g4-workers: spec ${num(g4.desired)}, status ${num(g4.replicas)} (${num(g4.ready)} ready); ${g4.pods} pods, ${g4.pending} Pending, ${num(g4.vcpu)} vCPU running` : ""],
+    ["n4d-workers", poolVal(n4), hpa ? `HPA wants <b>${num(hpa.desired)}</b> (${num(hpa.min)}–${num(hpa.max)})` : "HPA: –",
+      hpa ? `${hpa.name} → ${hpa.target}: metric ${num(hpa.metric, 1)}, current ${num(hpa.current)}, desired ${num(hpa.desired)}` : ""],
+    ["Resumes/s", a && a.resumes_per_s != null ? num(a.resumes_per_s, 1) : nd,
+      [a && a.resume_p50_ms != null ? `p50 ${num(a.resume_p50_ms)} ms` : "",
+       // Neutral: under oversubscription Substrate refuses a resume when the pool is full and the actor waits.
+       a && a.resumes_waited_no_room != null ? `<span title="resumes Substrate refused because every Worker was busy; the actor waited (expected when awake actors exceed Workers). Cumulative since actor-load started.">waited for a Worker ${num(a.resumes_waited_no_room)}</span>` : ""].filter(Boolean).join("<br>"),
+      a && a.failed_requests ? `${a.failed_requests} other failed requests (cumulative)` : ""],
+    ["Resume p99", a ? pair(a.resume_p99_g4_ms != null ? num(a.resume_p99_g4_ms) : null, a.resume_p99_n4d_ms != null ? num(a.resume_p99_n4d_ms) : null, " ms") : nd,
+      a && a.resume_p99_ms != null ? `all pools ${num(a.resume_p99_ms)} ms` : "", ""],
+    ["Lost actors", a && a.lost_actors != null ? (a.lost_actors > 0 ? `<span class="bad">✕ ${num(a.lost_actors)}</span>` : "0") : nd,
+      [a && a.memory_resets != null ? `<span class="${a.memory_resets > 0 ? "warn" : ""}" title="resumed on a Worker with a different CPU feature set; files kept, process memory restarted">${a.memory_resets > 0 ? "▲ " : ""}memory resets ${num(a.memory_resets)}</span>` : "",
+       a && a.age_s != null ? `updated ${Math.round(a.age_s)} s ago` : ""].filter(Boolean).join("<br>"),
+      `Lost = actors Substrate reports CRASHED (cumulative)${a && a.updated ? ` · updated ${a.updated}` : ""}`],
+  ];
+  const head = `<h3 class="sub-h" id="sub-h">Agent Substrate</h3>`;
+  const empty = sub.installed ? "WorkerPools, the n4d-workers HPA and actor-stats are not published yet."
+    : (sub.control_plane || {}).present ? "No WorkerPools yet: workerpools.ate.dev is not readable in substrate-exp."
+    : "Substrate is not installed on this cluster yet. Install it and the WorkerPools in substrate-exp to fill this panel.";
+  const body = !sub.has_data
+    ? `<p class="sub-empty" title="${esc(notes)}">${esc(empty)}${notes ? ` <span class="nd">${esc(notes.split("\n")[0])}</span>` : ""}</p>`
+    : `<dl class="sub-cells">${cells.map(([k, v, sm, t, cls]) => `<div class="sub-c${cls ? ` ${cls}` : ""}"${t ? ` title="${esc(t)}"` : ""}><dt>${esc(k)}</dt><dd>${v}</dd><dd class="sm">${sm}</dd></div>`).join("")}</dl>` +
+      (notes ? `<p class="sub-notes" title="${esc(notes)}">${esc(notes.split("\n")[0])}${sub.notes.length > 1 ? ` (+${sub.notes.length - 1} more, hover)` : ""}</p>` : "");
+  $("sub-body").innerHTML = `<div class="sub-row">${head}<div class="sub-main">${body}</div></div>`;
+  $("sub-cp").innerHTML = cpStripHTML(sub.control_plane);
+  renderActorLoad(sub);
 }
 
 /* ------------------------------------------------------------------ service lanes */
@@ -682,7 +870,7 @@ function renderEvents(s) {
 function renderMethod(s) {
   const c = s.cost || {}, cf = c.counterfactual || {}, p = c.prices || {};
   $("method").innerHTML = [
-    `<b>Saved vs CPU on N4D</b>: without colo, every CPU pod running now (${cf.pods ?? "–"} pods: G4 backfill plus N4D overflow; ${num(cf.vcpu, 1)} vCPU, ${num(cf.mem_gib, 1)} GiB requested) would run on N4D. Packed first-fit-decreasing onto n4d-standard-16 nodes (${num(cf.node_cpu, 2)} vCPU, ${num(cf.node_mem_gib, 1)} GiB usable each after daemonsets) they need ${cf.n4d_nodes ?? "–"} nodes. ${cf.n4d_nodes_now ?? "–"} N4D nodes run today, so colo saves ${cf.saved_nodes ?? "–"} × ${money(p.n4d16_hr)}/hr = ${money(cf.saved_per_hour)}/hr. Free room on running N4D nodes is counted, and the warm buffer is treated as free.`,
+    `<b>Saved vs CPU on N4D</b>: without colo, every CPU pod running now (${cf.pods ?? "–"} pods: G4 backfill plus N4D overflow${cf.workers ? `, incl. ${cf.workers} Agent Substrate Workers` : ""}; ${num(cf.vcpu, 1)} vCPU, ${num(cf.mem_gib, 1)} GiB requested) would run on N4D. Packed first-fit-decreasing onto n4d-standard-16 nodes (${num(cf.node_cpu, 2)} vCPU, ${num(cf.node_mem_gib, 1)} GiB usable each after daemonsets) they need ${cf.n4d_nodes ?? "–"} nodes. ${cf.n4d_nodes_now ?? "–"} N4D nodes run today, so colo saves ${cf.saved_nodes ?? "–"} × ${money(p.n4d16_hr)}/hr = ${money(cf.saved_per_hour)}/hr. Free room on running N4D nodes is counted, and the warm buffer is treated as free.`,
     `<b>Fleet now</b>: ${(s.counts || {}).g4 || 0} G4 × ${money(p.g4_hr)} + ${(s.counts || {}).n4d || 0} N4D × ${money(p.n4d16_hr)} = ${money(c.per_hour)}/hr. Without colo: same G4 + ${cf.n4d_nodes ?? "–"} N4D = ${money(cf.fleet_per_hour)}/hr.`,
     `<b>Reclaimed</b>: CPU requests of Running backfill pods on Ready G4 nodes. <b>Spare</b>: G4 allocatable minus vLLM and system-pod requests.`,
     `<b>Core map</b>: one tile per vCPU from the node agent; columns are the physical cores of each L3 cache domain as the node reports them (8/8/8 on a G4 host, 8/7/7 on a TPU v6e host), rows the two hyperthreads. Fill height is the CPU's busy %. Grey tiles are the kubelet reserve plus daemonset requests.`,
@@ -690,6 +878,7 @@ function renderMethod(s) {
     isNative(s)
       ? `<b>Control on this cluster</b>: no controller. <i>svc</i>-backfill replicas = demand; a backfill pod binds only next to a vLLM pod (podAffinity), so a G4 node is eligible iff it runs a Ready vLLM pod. Pods with no slot wait Pending at priority -100, and the <i>svc</i>-overflow HPA (metric colo_overflow_needed, min 1) runs them on N4D. Analytics never backfills (admission policy).`
       : `<b>Control on this cluster</b>: colo-controller splits demand into G4 backfill and N4D overflow every 2 s and runs the TTFT guard.`,
+    ...(isSubstrate(s) ? [`<b>Agent Substrate</b>: Worker pods (label ate.dev/worker-pool, namespace substrate-exp) are drawn as W tiles. g4-workers run on G4 spare cores next to vLLM at a low priority (colo-backfill on the controller base; substrate-worker, bound by podAffinity, on the native base) and count as reclaimed; n4d-workers run on N4D, scaled by an HPA. Pool numbers are the WorkerPool (ate.dev/v1) spec and status; actor numbers come from the probe's ConfigMap substrate-exp/actor-stats (stats.json): actors per node are summed by node type, resume p99 is per pool. Missing objects show "no data yet".`, `<b>Substrate control plane</b>: nodes labelled ate.dev/workloadType=ate-system-infra or ate-postgres, one tile per ate-system pod (C control plane, P postgres, D DaemonSet; "!" = NotReady). Health = ready/desired of the ate-system Deployments/StatefulSet matched by name (podcert: Deployment podcertificate-controller in podcertificate-controller-system), and the atelet DaemonSet across nodes.`] : []),
   ].map((x) => `<li>${L(x)}</li>`).join("");
   const ver = (s.demo || {}).version;
   $("cluster").textContent = `${s.cluster.label ? s.cluster.label + " · " : ""}${s.cluster.name} · ${s.cluster.region} · ${s.cluster.project}${ver ? ` · demo v${ver}` : ""}`;
@@ -776,7 +965,7 @@ async function poll() {
     $("accel").hidden = !(s.demo && s.demo.accelerator_active);
     const parts = [
       ["control", renderControl], ["story", renderStory], ["controls", syncControls], ["rail", renderRail], ["numbers", renderNumbers], ["evictions", trackEvictions],
-      ["nodes", renderNodes], ["lanes", renderLanes], ["scenario", () => renderScenario(s.scenario)], ["events", renderEvents], ["method", renderMethod],
+      ["substrate", renderSubstrate], ["cpuclamp", renderCpuClamp], ["nodes", renderNodes], ["lanes", renderLanes], ["scenario", () => renderScenario(s.scenario)], ["events", renderEvents], ["method", renderMethod],
       ["history", (x) => { pushHistory(x); renderSparks(); renderCharts(); }],
     ];
     for (const [name, fn] of parts) {
@@ -815,7 +1004,7 @@ function resetView() {
   for (const k of Object.keys(touched)) delete touched[k];
   for (const k of Object.keys(evictedUntil)) delete evictedUntil[k];
   seenEvents.clear(); firstEvents = true; dismissedScenario = null; alertsKey = ""; connKey = "";
-  nodeEls.clear(); $("nodes").innerHTML = "";
+  nodeEls.clear(); $("nodes").innerHTML = ""; $("sub-body").innerHTML = ""; $("sub-cp").innerHTML = ""; $("sub").hidden = true;
   for (const sv of SVCS) { lanes[sv].forEach((c) => c.remove()); lanes[sv] = []; }
   $("scen-banner").hidden = true;
   renderSparks(); renderCharts();
@@ -850,4 +1039,12 @@ document.querySelectorAll("[data-scenario]").forEach((b) => { b.dataset.title = 
 initCharts();
 localizeStatic();
 document.querySelectorAll("details").forEach((d) => d.addEventListener("toggle", () => { if (last) renderCharts(); }));
+// Remember the one-screen height of the live body row while no bottom drawer is open; the CSS keeps it when one opens.
+const PANE = document.querySelector(".pane"), BODY = document.querySelector(".pane > .body");
+function lockBodyHeight() {
+  if (!document.querySelector(".details > details[open]")) PANE.style.setProperty("--body-h", `${Math.round(BODY.getBoundingClientRect().height)}px`);
+}
+new ResizeObserver(lockBodyHeight).observe(BODY);
+addEventListener("resize", () => requestAnimationFrame(lockBodyHeight));
+lockBodyHeight();
 initClusters().then(() => { poll(); setInterval(poll, POLL_MS); });

@@ -72,6 +72,7 @@
       </div>
       <div class="grp">
         <h3>CPU demand · pods</h3>
+        <p class="cpu-left" id="cpu-left" hidden></p>
         <div class="field a-sandbox svc">
           <label for="d-sandbox"><i class="dotc" aria-hidden="true"></i>sandbox <output id="d-sandbox-out" for="d-sandbox">0</output></label>
           <input type="range" id="d-sandbox" min="0" max="20" step="1" value="0" data-svc="sandbox">
@@ -86,6 +87,27 @@
           <label for="d-analytics"><i class="dotc" aria-hidden="true"></i>analytics <output id="d-analytics-out" for="d-analytics">0</output></label>
           <input type="range" id="d-analytics" min="0" max="20" step="1" value="0" data-svc="analytics">
           <span class="spill" id="spill-analytics"></span>
+        </div>
+      </div>
+      <!-- Substrate tab only. Persistent controls (never re-rendered by the poll, so a drag is never interrupted);
+           writes are debounced 1 s and merge-patch ConfigMap substrate-exp/actor-load. -->
+      <div class="grp sub-grp" id="al" role="group" aria-labelledby="al-h">
+        <h3 id="al-h">Agent Substrate actors</h3>
+        <div class="field a-worker svc">
+          <label for="al-total"><i class="dotc" aria-hidden="true"></i>Agent actors (total) <output id="al-total-out" for="al-total">0</output></label>
+          <input type="range" id="al-total" min="0" max="200" step="1" value="0">
+          <span class="al-pre" role="group" aria-label="Total actors presets"><button type="button" class="btn sm" data-al-total="0">0</button><button type="button" class="btn sm" data-al-total="10">10</button><button type="button" class="btn sm" data-al-total="40">40</button><button type="button" class="btn sm" data-al-total="100">100</button></span>
+        </div>
+        <div class="field a-worker svc">
+          <label for="al-awake"><i class="dotc" aria-hidden="true"></i>Awake now <output id="al-awake-out" for="al-awake">0</output></label>
+          <input type="range" id="al-awake" min="0" max="200" step="1" value="0">
+          <span class="al-pre" role="group" aria-label="Awake actors presets"><button type="button" class="btn sm" data-al-awake="0">0</button><button type="button" class="btn sm" data-al-awake="4">4</button><button type="button" class="btn sm" data-al-awake="16">16</button><button type="button" class="btn sm" data-al-awake="32">32</button></span>
+        </div>
+        <div class="al-v" id="al-v" aria-live="polite"></div>
+        <div class="field a-worker svc">
+          <label for="wp-n"><i class="dotc" aria-hidden="true"></i>Total Workers <output id="wp-n-out" for="wp-n">0</output></label>
+          <input type="range" id="wp-n" min="0" max="60" step="1" value="0" aria-describedby="wp-v">
+          <span class="wp-v" id="wp-v" aria-live="polite"></span>
         </div>
       </div>
       <div class="grp" id="guard-grp">
@@ -143,10 +165,18 @@
         <li><i class="sw a-toolcall" aria-hidden="true"><b>T</b></i>toolcall</li>
         <li><i class="sw a-analytics" aria-hidden="true"><b>A</b></i>analytics</li>
         <li><i class="sw a-agent" aria-hidden="true"><b>D</b></i>DaemonSet</li>
+        <li class="sub-only"><i class="sw a-worker occ" aria-hidden="true"><b>W●</b></i>Worker · actor running</li>
+        <li class="sub-only"><i class="sw a-worker idle" aria-hidden="true"><b>W</b></i>Worker · idle</li>
+        <li class="sub-only"><i class="sw a-cp" aria-hidden="true"><b>C</b></i>control plane</li>
+        <li class="sub-only"><i class="sw a-pg" aria-hidden="true"><b>P</b></i>postgres</li>
         <li><i class="sw a-system" aria-hidden="true"></i>reserved</li>
         <li><i class="sw a-free" aria-hidden="true"></i>free · fill = busy</li>
       </ul>
     </div>
+    <section id="sub" class="sub" hidden aria-labelledby="sub-h">
+      <div id="sub-body"></div>
+      <div id="sub-cp"></div>
+    </section>
     <div id="nodes" class="nodes" aria-labelledby="nodes-h"></div>
     <div class="lanes" id="lanes" aria-label="Where each CPU service runs">
       <span></span><span class="zh" data-acc>on G4 spare cores</span><span class="zh" id="zh-n">on N4D</span>

@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("demo")
 
 # Demo release, shown in the page footer and in /api/state and /api/clusters.
-DEMO_VERSION = "0.6.1"
+DEMO_VERSION = "0.7.1"
 
 STATIC = Path(__file__).resolve().parent / "static"
 ERROR_LOG_INTERVAL_S = float(os.environ.get("DEMO_ERROR_LOG_INTERVAL_S", "30"))
@@ -68,6 +68,8 @@ class ClusterCtx:
         self.spec = spec
         self.info = cluster_info(spec)
         self.recipe = spec["recipe"]
+        # Native semantics (no guard/baseline, demand = Deployment replicas): the native recipe, or substrate on native.
+        self.native = self.recipe == "native" or spec.get("base_recipe") == "native"
         self.accel = accelerator_of(spec)
         self.backend = backend
         self.scenarios = scenarios_for(self.recipe, self.accel)
@@ -191,7 +193,7 @@ def _manual_allowed(ctx: ClusterCtx):
 
 
 def _guard_allowed(ctx: ClusterCtx, what: str):
-    if ctx.recipe == "native":
+    if ctx.native:
         raise HTTPException(409, f"{what} is not available on cluster {ctx.id!r} (native recipe): "
                                  f"{localize(GUARD_NA_REASON, ctx.accel)}")
 
@@ -223,8 +225,10 @@ async def api_clusters():
         "default": DEFAULT_CLUSTER,
         "version": DEMO_VERSION,
         "clusters": [{**c.info, "accelerator_profile": c.accel,
-                      "control": "HPA + scheduler" if c.recipe == "native" else "colo-controller",
-                      "guard_available": c.recipe != "native",
+                      "control": ("native K8s + Agent Substrate" if c.recipe == "substrate" and c.native else
+                                  {"native": "HPA + scheduler", "substrate": "colo-controller + Agent Substrate"}.get(
+                                      c.recipe, "colo-controller")),
+                      "guard_available": not c.native,
                       "scenario_running": c.runner.running} for c in CTXS.values()],
     }
 
@@ -274,6 +278,42 @@ async def api_baseline(cluster: str | None = Query(None)):
     _guard_allowed(ctx, "the TTFT baseline")
     _manual_allowed(ctx)
     return await _action(ctx, ctx.backend.baseline(), "baseline")
+
+
+@app.post("/api/substrate/actors")
+async def api_substrate_actors(body: dict = Body(...), cluster: str | None = Query(None)):
+    """Agent actor load (substrate recipe only): merge-patch ConfigMap substrate-exp/actor-load with any of
+    {total: 0..200, awake: 0..total, hold_s: 1..300}. Returns the new spec. The UI debounces slider writes (1 s)."""
+    ctx = _ctx(cluster)
+    if ctx.recipe != "substrate" or not hasattr(ctx.backend, "set_actor_load"):
+        raise HTTPException(409, f"actor load is only available on a substrate cluster, not {ctx.id!r} ({ctx.recipe})")
+    try:
+        res = await ctx.backend.set_actor_load(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        log.exception("actor load failed (cluster %s)", ctx.id)
+        raise HTTPException(502, f"actor load failed: {type(e).__name__}: {e}") from e
+    ctx.invalidate()
+    return {"ok": True, **res}
+
+
+@app.post("/api/substrate/workers")
+async def api_substrate_workers(body: dict = Body(...), cluster: str | None = Query(None)):
+    """Warm Worker pool (substrate recipe only): scale WorkerPool substrate-exp/g4-workers to {"replicas": 0..60}.
+    G4 spare cores fill first (Workers bind next to vLLM); the rest runs on N4D via the overflow HPA. UI debounces 1 s."""
+    ctx = _ctx(cluster)
+    if ctx.recipe != "substrate" or not hasattr(ctx.backend, "set_g4_workers"):
+        raise HTTPException(409, f"the Worker pool is only available on a substrate cluster, not {ctx.id!r} ({ctx.recipe})")
+    try:
+        res = await ctx.backend.set_g4_workers(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        log.exception("worker pool scale failed (cluster %s)", ctx.id)
+        raise HTTPException(502, f"worker pool scale failed: {type(e).__name__}: {e}") from e
+    ctx.invalidate()
+    return {"ok": True, **res}
 
 
 @app.get("/api/scenarios")

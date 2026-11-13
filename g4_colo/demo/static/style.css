@@ -353,7 +353,12 @@ body { line-height: 1.3; }
 /* flex, not grid: hidden or empty rows (alerts, scenario banner) must not shift the track that grows */
 .pane { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 .pane > .body { flex: 1 1 0; }
-.pane:has(details[open]) { height: auto; min-height: 100dvh; overflow: visible; }
+/* Opening a drawer below the fold (History, events, method) lets the page grow and scroll, but the live view above it
+   keeps exactly its one-screen height (--body-h, measured by app.js while no drawer is open): without the lock the body
+   row collapsed and clipped the rail, the node map and the lanes. The rail's own "Presets, scenarios, numbers" expander
+   does not change the pane; the rail scrolls instead (below). */
+.pane:has(.details > details[open]) { height: auto; min-height: 100dvh; overflow: visible; }
+.pane:has(.details > details[open]) > .body { flex: none; height: var(--body-h, 70vh); }
 .top { padding: 0.5rem 1rem 0.4rem; }
 .top h1 { font-size: 1.2rem; }
 .top .lede { font-size: 0.88rem; }
@@ -402,7 +407,7 @@ details.more { padding-top: 0.55rem; font-size: 0.82rem; }
   --g4n: 2; --ghost: 0; --n4dn: 1;
   /* height available to one G4 tile row: what is left after the container padding, the N4D line, the ghost
      row, and each G4 row's L3 header, padding, borders, outline and gap (40 px), split over 2 rows per node */
-  --th-budget: calc((100cqh - 8px - var(--n4dn) * 78px - var(--ghost) * 30px - var(--g4n) * 40px) / (2 * var(--g4n)));
+  --th-budget: calc((100cqh - 8px - var(--n4dn) * 78px - var(--cpn, 0) * 62px - var(--ghost) * 30px - var(--g4n) * 40px) / (2 * var(--g4n)));
 }
 .nname { gap: 0.2rem; }
 .nname b { font-size: 0.9rem; }
@@ -462,3 +467,186 @@ details.more { padding-top: 0.55rem; font-size: 0.82rem; }
 .scen.na { opacity: .45; }
 .zone .wait { font-size: 0.72rem; color: var(--muted); padding: 0 0.35rem; white-space: nowrap; cursor: help; }
 .zone .hpa-tag { margin-left: auto; font-size: 0.68rem; font-weight: 600; color: var(--n4d); background: #fff; border: 1px solid var(--line); border-radius: 999px; padding: 0 0.4rem; white-space: nowrap; cursor: help; }
+
+/* ------------------------------------------------------------ Agent Substrate tab (recipe "substrate")
+   Worker tiles: own tint (rose) AND their own letter W AND a horizontal-stripe fill, so they never rely on colour. */
+:root { --t-worker: #fbeef3; --f-worker: #d987ab; --k-worker: #6d1240; }
+.a-worker { --tint: var(--t-worker); --fillc: var(--f-worker); --inkc: var(--k-worker); }
+.cpu.a-worker { box-shadow: inset 0 0 0 1.5px var(--f-worker); }
+.cpu.a-worker .fill, .sw.a-worker::before { background-image: repeating-linear-gradient(0deg, transparent 0 3px, rgba(255,255,255,.5) 3px 5px); }
+.sub-only { display: none !important; }
+.recipe-substrate .sub-only { display: flex !important; }
+.recipe-substrate .seg button[aria-checked="true"]::before { background: var(--f-worker); }
+.sub { border: 1px solid var(--line-2); border-radius: 8px; padding: 0.35rem 0.7rem 0.4rem; background: var(--sunk); display: grid; gap: 0.2rem; }
+.sub-h { color: var(--k-worker); }
+.sub .nd { color: var(--faint); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.sub-empty { font-size: 0.85rem; color: var(--muted); }
+.sub-cells { margin: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.2rem 0.9rem; }
+.sub-c { min-width: 0; }
+.sub-c dt { font-size: 0.7rem; color: var(--muted); font-weight: 600; }
+.sub-c dd { margin: 0; font-size: 1.1rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub-c dd small { font-size: 0.72rem; font-weight: 400; color: var(--muted); }
+.sub-c dd .nd { font-size: 0.85rem; }
+.sub-c dd .bad { color: var(--bad); }
+.sub-c dd.sm { font-size: 0.72rem; font-weight: 400; color: var(--muted); }
+.sub-c dd.sm .warn { color: var(--warn-ink); font-weight: 700; }
+.sub-notes { font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1100px) { .sub-cells { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* Substrate control plane: its own node group (C = control plane, P = postgres, D = DaemonSet pod), a health strip in
+   the panel and an atelet marker on every worker node. States carry an icon and a word, never colour alone. */
+:root { --t-cp: #e6edf7; --f-cp: #8ea5c8; --k-cp: #1d3557; --t-pg: #eaf4e3; --f-pg: #93bd7f; --k-pg: #2c5419; }
+.a-cp { --tint: var(--t-cp); --fillc: var(--f-cp); --inkc: var(--k-cp); }
+.a-pg { --tint: var(--t-pg); --fillc: var(--f-pg); --inkc: var(--k-pg); }
+.cp-line { display: grid; grid-template-columns: var(--name-w) minmax(0, 1fr); gap: 0.6rem; align-items: start; border-top: 1px solid var(--line-2); padding-top: 6px; flex: none; }
+.nname b.cp { color: var(--k-cp); font-size: 0.78rem; line-height: 1.15; }
+.cps { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+.cp-one { display: grid; gap: 0.15rem; border: 1px solid var(--line-2); border-radius: 7px; padding: 3px 6px 5px; background: var(--sunk); }
+.cp-one .t { font-size: 0.7rem; color: var(--muted); display: flex; gap: 0.4rem; align-items: center; }
+.cpts { display: flex; gap: 3px; flex-wrap: wrap; }
+.cpt { font-style: normal; width: 24px; height: 22px; border-radius: 3px; display: grid; place-items: center; background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--fillc); cursor: help; }
+.cpt b { font-size: 0.68rem; font-weight: 700; color: var(--inkc); }
+.cpt.nr { box-shadow: none; outline: 2px dashed var(--bad); outline-offset: -2px; background: var(--bad-soft); }
+.cpt.nr b { color: var(--bad); }
+.sw.a-cp::before, .sw.a-pg::before { inset: 0; opacity: .35; }
+.atl { font-size: 0.64rem; font-weight: 600; padding: 0 0.35rem; border-radius: 999px; white-space: nowrap; border: 1px solid var(--line); cursor: help; color: var(--muted); background: #fff; }
+.atl.bad { color: var(--bad); border-color: #f5c2bd; background: var(--bad-soft); }
+.atl.warn { color: var(--warn-ink); border-color: #f2d7a6; background: var(--warn-soft); }
+.cp-strip { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.72rem; border-top: 1px solid var(--line-2); padding-top: 0.25rem; margin: 0; }
+.cp-strip .cp-k { color: var(--k-cp); font-size: 0.7rem; text-transform: uppercase; letter-spacing: .05em; }
+.cp-strip ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.cp-strip li { padding: 0 0.45rem; border-radius: 999px; border: 1px solid var(--line); background: #fff; color: var(--ink); white-space: nowrap; cursor: help; }
+.cp-strip li b { font-weight: 700; }
+.cp-strip .h-ok { border-color: #b7dcd6; }
+.cp-strip .h-ok span { color: var(--ok); }
+.cp-strip .h-warn { border-color: #f2d7a6; background: var(--warn-soft); color: var(--warn-ink); }
+.cp-strip .h-bad { border-color: #f5c2bd; background: var(--bad-soft); color: var(--bad); font-weight: 600; }
+.cp-strip .h-unk { color: var(--faint); border-style: dashed; }
+.cp-strip .hw { margin-left: 0.2rem; font-weight: 600; }
+
+/* "Agent Substrate actors" rail group (substrate tab only): same .grp / .field slider pattern as GPU load and CPU
+   demand, presets under each slider, and a compact target-vs-running readout. The bar never relies on colour alone:
+   G4 solid, N4D outlined, waiting hatched, and every segment is named with its number in the key below it. */
+.sub-grp { display: none; }
+.recipe-substrate .sub-grp { display: grid; }
+:root { --worker-ink: #a8326a; }
+.svc.a-worker input { accent-color: var(--worker-ink); }
+.al-pre { display: flex; gap: 0.25rem; margin-top: 0.1rem; }
+.al-pre .btn.sm { font-size: 0.72rem; padding: 0.08rem 0.45rem; min-width: 2.1rem; }
+.al-v { display: grid; gap: 0.2rem; font-size: 0.76rem; }
+.al-line b { font-weight: 700; }
+.al-line .warn { color: var(--warn-ink); }
+.al-bar { display: flex; height: 0.6rem; gap: 2px; border-radius: 3px; overflow: hidden; background: var(--line-2); }
+.al-bar i { display: block; min-width: 3px; transition: flex-grow .6s var(--ease); }
+.al-bar .g, .al-key .k.g { background: var(--worker-ink); }
+.al-bar .n, .al-key .k.n { background: #fff; box-shadow: inset 0 0 0 2px var(--n4d); }
+.al-bar .w, .al-key .k.w { background: repeating-linear-gradient(135deg, #fff 0 2px, #c98a1b 2px 4px); }
+.al-bar .e { background: transparent; }
+.al-key { display: flex; gap: 0.6rem; color: var(--muted); }
+.al-key > span { display: inline-flex; align-items: center; gap: 0.25rem; }
+.al-key b { color: var(--ink); }
+.al-key .k { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 2px; }
+.al-sub, .al-lag { color: var(--muted); font-size: 0.7rem; }
+.al-lag { color: var(--warn-ink); }
+.sub-grp.off .field { opacity: .45; }
+.sub-grp .nd { color: var(--muted); font-size: 0.74rem; }
+
+/* ------------------------------------------------------------ substrate tab: UX review fixes (impeccable critique)
+   Substrate-only selectors, so the other tabs render exactly as before. Text floors: 0.85rem (11 px at the 13 px
+   compact root) for labels and secondary lines; empty values are a muted dash with a "no data yet" tooltip. */
+.sub { padding: 0.35rem 0.7rem; gap: 0.25rem; }
+.sub-row { display: grid; grid-template-columns: 6.2rem minmax(0, 1fr); gap: 0.6rem; align-items: start; }
+.sub-h { color: var(--k-worker); font-size: 0.78rem; line-height: 1.15; padding-top: 0.1rem; }
+.sub-main { min-width: 0; display: grid; gap: 0.15rem; }
+.sub-cells { grid-template-columns: 1.35fr repeat(5, minmax(0, 1fr)); gap: 0.1rem 1rem; }
+.sub-c dt { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.sub-c dd { font-size: 1.15rem; }
+.sub-c dd small { font-size: 0.85rem; }
+.sub-c dd.sm { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.sub-c.hero dd:not(.sm) { font-size: 1.6rem; line-height: 1.1; }
+.sub-c.hero dd small { font-size: 0.9rem; }
+.sub-c small.pg { color: var(--worker-ink); font-weight: 600; }
+.sub-c small.pn { color: var(--n4d); font-weight: 600; }
+.sub-c .sep { color: var(--faint); }
+.sub-c dd .flag { font-size: 0.78rem; vertical-align: 0.15em; }
+.sub-c dd .bad { color: var(--bad); }
+.sub .nd { color: var(--muted); font-size: inherit; }
+.sub-empty { font-size: 0.9rem; color: var(--ink); }
+.sub-empty .nd { font-size: 0.85rem; }
+.sub-notes { font-size: 0.85rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-strip { font-size: 0.85rem; padding-top: 0.25rem; }
+.cp-strip .cp-k { font-size: 0.78rem; display: inline-block; width: 6.2rem; }
+.cp-one .t { font-size: 0.85rem; }
+.cpt { width: 26px; height: 24px; }
+.cpt b { font-size: 0.8rem; }
+.atl { font-size: 0.75rem; }
+.nname b.cp { font-size: 0.9rem; }
+.al-pre .btn.sm { font-size: 0.85rem; padding: 0.06rem 0.4rem; min-width: 2.3rem; }
+.al-v { font-size: 0.85rem; }
+.al-bar { height: 0.75rem; }
+.al-sub, .al-lag { font-size: 0.8rem; }
+.sub-grp .nd { font-size: 0.85rem; }
+/* N4D overflow is the payoff of the actor story: larger N4D tiles on this tab, with the row budget to match. */
+.recipe-substrate .n4d-one .tiles, .recipe-substrate .n4d-one .flat { --tile: clamp(9px, calc((100cqw - var(--name-w) - 20px - var(--n4dc, 4) * 44px) / (8 * var(--n4dc, 4))), 30px); --tile-h: 26px; }
+.recipe-substrate .nodes { --th-budget: calc((100cqh - 8px - var(--n4dn) * 92px - var(--cpn, 0) * 66px - var(--ghost) * 30px - var(--g4n) * 40px) / (2 * var(--g4n))); }
+.recipe-substrate .rail fieldset { gap: 0.7rem; }
+.al-line, .al-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub-c dd.sm .warn { color: var(--warn-ink); font-weight: 700; }
+
+/* Worker occupancy (actor-stats running_workers). Occupancy is the story, not CPU: a counter actor sleeps most of each
+   hold, so busy % stays near zero on a Worker that is fully occupied. Encoding, never colour alone:
+     actor running = solid tile, white "W●";   idle warm Worker = white tile, dashed outline, "W".
+   Busy % stays as a faint fill (same node-agent per-CPU source on G4 and N4D), without the stripes. */
+.cpu.a-worker.occ { background: var(--worker-ink); box-shadow: inset 0 0 0 1.5px var(--k-worker); --inkc: #fff; }
+.cpu.a-worker.occ .fill { background: rgba(255,255,255,.28); background-image: none; }
+.cpu.a-worker.idle { background: #fff; box-shadow: none; outline: 1.5px dashed var(--worker-ink); outline-offset: -1.5px; }
+.cpu.a-worker.idle .fill { background: var(--t-worker); background-image: none; }
+.sw.a-worker.occ { background: var(--worker-ink); box-shadow: none; }
+.sw.a-worker.occ::before { display: none; }
+.sw.a-worker.occ b { color: #fff; font-size: 0.5rem; }
+.sw.a-worker.idle { background: #fff; box-shadow: none; outline: 1.5px dashed var(--worker-ink); outline-offset: -1.5px; }
+.sw.a-worker.idle::before { display: none; }
+.wp-v { display: grid; gap: 0.05rem; font-size: 0.85rem; }
+.wp-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-line .warn { color: var(--warn-ink); }
+.sub-grp .field.off { opacity: .45; }
+/* Substrate tab rail budget (fits 1920x1080 at 1.35x with the actor + Warm Worker pool controls): the per-service
+   "N on N4D" spill lines are dropped here (the lanes and the node map show the same), and the notes wrap tight. */
+.recipe-substrate .rail .spill { display: none; }
+.recipe-substrate .rail fieldset { gap: 0.6rem; }
+.wp-v .al-sub { white-space: normal; line-height: 1.2; }
+.cpu-left { font-size: 0.85rem; color: var(--muted); margin-top: -0.2rem; }
+/* Substrate tab on a native base: no latency guard exists there (the control chip says so), so the guard group's
+   "Not used here" note is dropped to keep the rail within one screen at 1.35x. */
+.recipe-substrate.recipe-native #guard-grp { display: none; }
+.recipe-substrate #guard-sub { display: none; } /* controller base: the switch state alone; detail stays in the tooltip */
+
+/* ------------------------------------------------------------ substrate tab: fit at 1366x768 .. 1920x1080 (100%)
+   with live-sized data (2 G4, ~6-10 N4D nodes, 40 Workers). Nothing is hidden; secondary text moves to tooltips:
+   - N4D node headers never widen or wrap their node (the tile grid sets the width; the header ellipsizes), so the N4D
+     line keeps the height the node-map budget reserves for it;
+   - N4D tiles may shrink to 4 px when many N4D nodes share the row, instead of overflowing it sideways;
+   - control-plane pod tiles shrink with the row width (clamp) and the two boxes never wrap under each other. */
+.recipe-substrate .n4d-one .t { width: 0; min-width: 100%; white-space: nowrap; overflow: hidden; }
+.recipe-substrate .n4d-one .t .nm { flex: none; }
+.recipe-substrate .n4d-one .t .flag, .recipe-substrate .n4d-one .t .atl { flex: none; }
+.recipe-substrate .n4d-one .tiles, .recipe-substrate .n4d-one .flat {
+  --tile: clamp(4px, calc((100cqw - var(--name-w) - 20px - var(--n4dc, 4) * 40px) / (8 * var(--n4dc, 4))), 30px);
+}
+.recipe-substrate .n4ds { gap: clamp(0.3rem, 1vw, 0.8rem); }
+.recipe-substrate .cps { flex-wrap: nowrap; min-width: 0; }
+.recipe-substrate .cp-one { min-width: 0; }
+.recipe-substrate .cpts { flex-wrap: nowrap; }
+.recipe-substrate .cpt { width: clamp(16px, 1.6vw, 26px); height: clamp(18px, 2.2vh, 24px); }
+.wp-v .al-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ------------------------------------------------------------ v0.7.1: no cut-off text (tools/cutoff.py audit)
+   - the rail scrolls when its expander is open, instead of clipping the controls below it;
+   - tile letters never exceed the tile height (wide-but-short tiles at 1920x1080 clipped V/S/T/W);
+   - the hero number's descenders are not clipped by its cell;
+   - empty event / scenario-log lists span the full width instead of squeezing into the 5rem time column. */
+.rail:has(details.more[open]) { overflow-y: auto; }
+.cpu .lt { font-size: min(calc(var(--tile) * .34), calc(var(--tile-h, 40px) * .55)); top: 0.2em; } /* glyph box stays inside the tile */
+.sub-c.hero dd:not(.sm) { overflow: visible; line-height: 1.2; }
+.events li.empty, .scen-log li.empty { display: block; }
+.wp-v .al-sub { white-space: normal; overflow: visible; }

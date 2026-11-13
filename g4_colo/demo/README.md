@@ -65,6 +65,7 @@ scenario on one cluster never locks the other.
 |---|---|---|---|
 | `controller` | `g4cluster-jawadamin-us-west8-0726` | `g4_colo/recipe/` | Control: colo-controller |
 | `native` | `g4cluster-jawadamin-us-west8-1126` | `g4_colo/recipe-native/` | Control: HPA + scheduler |
+| `substrate` | `g4cluster-jawadamin-us-west8-0726` (same as `controller`) | `g4_colo/recipe/` + Agent Substrate experiment | Control: colo-controller + Agent Substrate |
 | `tpu` | `v6ecluster-jawadamin-us-east5-1126` (TPU v6e, ct6e-standard-1t) | `g4_colo/recipe-native/` | Control: HPA + scheduler |
 
 ```bash
@@ -77,7 +78,8 @@ DEMO_CLUSTERS='[
 DEMO_MOCK=1 python -m uvicorn app:app --port 8088   # both clusters simulated
 ```
 
-* Entry fields: `id`, `label`, `recipe` (`controller`|`native`), and `context` **or** `endpoint` + `ca_cert`
+* Entry fields: `id`, `label`, `recipe` (`controller`|`native`|`substrate`; substrate also takes `base_recipe`
+  `controller`|`native`, see [Agent Substrate tab](#agent-substrate-tab)), and `context` **or** `endpoint` + `ca_cert`
   (base64 PEM, Cloud Run with ADC); optional `name`, `region`, `project`, and `accelerator` (`g4`, the default,
   or `tpu-v6e`). `accelerator` sets the accelerator-host price, its vCPU fallback (48 / 44) and every G4/GPU word
   the page shows (`state.ACCELERATORS`): on `tpu-v6e` the page says "TPU v6e", "v6e #1" and "TPU load". The TPU
@@ -108,6 +110,120 @@ DEMO_MOCK=1 python -m uvicorn app:app --port 8088   # both clusters simulated
   --format='value(endpoint,masterAuth.clusterCaCertificate)'`). The SA needs `roles/container.clusterViewer`
   on the project (both clusters). The old single-cluster variables still work when `DEMO_CLUSTERS` is unset.
 
+## Agent Substrate tab
+
+Recipe `substrate` watches the Agent Substrate experiment (github.com/agent-substrate/substrate) on the controller
+cluster. It reads everything the `controller` tab reads, plus (read-only):
+
+| Object | Where | Shown as |
+|---|---|---|
+| Worker pods (label `ate.dev/worker-pool=<pool>`) | `substrate-exp` | **W** tiles on the node map: rose tint, letter W and a horizontal-stripe fill (never colour alone); legend "Substrate Worker" |
+| WorkerPool `g4-workers` (`workerpools.ate.dev/v1`) | `substrate-exp` | ready / desired (`.status.readyReplicas` / `.spec.replicas`) and the Pending pod count ("no G4 room") |
+| WorkerPool `n4d-workers` + its HPA (target `n4d-workers`) | `substrate-exp` | ready / desired, HPA desired (min–max) |
+| ConfigMap `actor-stats`, key `stats.json` (written by the probe) | `substrate-exp` | actors running G4 · N4D (`actors_by_node` summed by node type), resumes/s, resume p99 G4 · N4D (`resume_p99_ms_by_pool`), lost actors (`lost_actors` = CRASHED, ✕ red when > 0), "waited for a Worker N" (`resumes_waited_no_room`, neutral: expected under oversubscription), "memory resets N" (`memory_resets`, amber ▲ when > 0: resumed on a different CPU feature set, files kept); all counters cumulative since actor-load started, `failed_requests` in the tooltip |
+
+* **Control plane** (namespace `ate-system`). Nodes labelled `ate.dev/workloadType=ate-system-infra` or `=ate-postgres`
+  (keyed off the label, not the pool name or machine type: each is a dedicated node, e.g. n4d-standard-4 and
+  e2-standard-4 on 0726) are drawn as their own group, "Substrate control plane", below N4D and are never counted as
+  worker capacity or colo cost. Each control-plane pod on them is a tile: **C** control plane, **P** postgres, **D** a
+  DaemonSet pod. A NotReady pod gets a dashed red outline and a "!" after its letter; the tooltip has Ready/NotReady,
+  phase and restart count. The panel's health strip shows ready/desired for api-server, controller, router, egress,
+  idp (ate-system Deployments, matched by name), podcert (Deployment `podcertificate-controller` in namespace
+  `podcertificate-controller-system`) and postgres (StatefulSet), plus atelet (DaemonSet ready/desired across nodes).
+  Each chip has an icon and a word: ✓ ok, ▲ degraded / scaled to 0, ✕ down, – not found. Every G4/N4D node shows an
+  atelet marker (✓ atelet / ✕ atelet / – no atelet); atelet still takes its D tile (DaemonSet convention; A is
+  analytics). A component with no workload falls back to its pods; ate-system missing shows "Control plane: no data
+  yet". Other ate-system pods (e.g. k8s-credential-provider) get a C tile but no chip.
+* **Actor load controls** (the tab's only write to Substrate's side). An in-cluster generator (Deployment
+  `substrate-exp/actor-load`) reads ConfigMap `substrate-exp/actor-load`: string keys `total` (actors that exist,
+  0..200), `awake` (actors kept RUNNING at once, ≤ total) and `hold_s` (seconds each awake actor stays RUNNING per
+  cycle, default 5). The left control rail has an "Agent Substrate actors" group (substrate tab only, same slider
+  pattern as GPU load / CPU demand): "Agent actors (total)" and "Awake now" (awake is clamped to total), with presets
+  0/10/40/100 and 0/4/16/32, and a readout "Running N / M awake ▲ waiting" with a G4 / N4D / waiting bar and a
+  labelled key. Slider writes are debounced 1 s and sent to
+  `POST /api/substrate/actors?cluster=<id>` `{total?, awake?, hold_s?}`, which validates the ranges against the current
+  spec (400 with the reason), merge-patches only the keys given (`{"data": {"awake": "16"}}`) and returns
+  `{spec, patch}`. 409 on any other recipe; if the ConfigMap is missing the call fails with "deploy the actor-load
+  generator first" (the demo never creates it) and the controls show "no data yet".
+  Target vs actual: `awake target → running: N G4 · M N4D` from the generator's stats (`target_awake`, `actors_running`,
+  `actors_running_by_pool`), with a bar: G4 solid, N4D outlined, not-yet-running dashed amber plus "▲". The mock places
+  awake actors one per Ready Worker (an awake actor occupies its whole Worker; suspended actors take none), g4-workers
+  first, then n4d-workers; awake beyond Ready Workers shows as waiting (▲); its n4d-workers HPA asks for more
+  Workers when actors overflow G4, and Pending n4d-workers trigger an N4D scale-up.
+* **Total Workers** (rail slider, 0..60; "option 2": Workers outrank CPU backfill, vLLM 1e6 > substrate-worker -5 >
+  colo-backfill -100). A stock HPA `substrate-exp/g4-workers` (scaleTargetRef WorkerPool g4-workers) sets the G4 share =
+  Workers that fit next to Ready vLLM; its `spec.maxReplicas` is the TOTAL Worker count. The slider merge-patches that
+  `maxReplicas` (its initial value is the HPA's maxReplicas; its minimum is max(1, HPA minReplicas), an HPA cannot go
+  lower). Only when that HPA does not exist does it fall back to the old WorkerPool g4-workers `scale` patch (initial
+  value = WorkerPool replicas). The n4d-workers HPA runs Total − G4 share (+ busy headroom).
+  Readout: "Share: G4 N · N4D M · K pending" = WorkerPool g4-workers spec.replicas · n4d-workers spec.replicas · Workers
+  with no node. `POST /api/substrate/workers?cluster=<id>` `{"total": n}` (old `{"replicas": n}` still accepted; 400
+  outside 0..60 or below the HPA minimum, 409 on other recipes), debounced 1 s; returns `{target, mode, total}` with
+  mode `hpa-max` or `workerpool-replicas`.
+* **CPU-backfill clamp** (substrate tab): the sandbox / toolcall sliders max out at floor(vCPU left / per-replica CPU),
+  where vCPU left = Σ allocatable CPU of Ready G4 + N4D nodes − Σ CPU requests of every non-backfill pod on them
+  (vLLM, daemonsets, Workers) − 2 vCPU per Pending Worker. Shown as "N vCPU left after Workers" under CPU demand
+  (`substrate.cpu_budget` in `/api/state`). A UI clamp only; preemption enforces it in the cluster. Other tabs keep max 20.
+  Mock: `DEMO_MOCK_G4_WORKERS` (default 4) is the initial Total Workers; `DEMO_MOCK_NO_G4_HPA=1` simulates a cluster
+  without the g4-workers HPA (pre-option-2: extras stay Pending).
+* **Cost on this tab**: Running Workers count like CPU pods. g4-workers on Ready G4 nodes add to "Reclaimed on G4"
+  (vCPU, GiB, $/hr), and both g4-workers on G4 and n4d-workers on N4D join the "Saved vs CPU on N4D" counterfactual
+  (first-fit-decreasing pack of every running CPU pod, with real requests). Without this, Workers that preempt backfill
+  under option 2 made the saving read $0.
+* Every field is optional. A missing CRD, WorkerPool, HPA or ConfigMap (Substrate not installed yet, cluster
+  mid-upgrade), a 403, or a malformed `stats.json` shows "no data yet" with the reason in a tooltip; it never raises a
+  cluster alert. The atelet DaemonSet in `ate-system` is drawn like any other DaemonSet (D).
+* g4-workers Running on Ready G4 nodes count toward "Reclaimed on G4" on this tab only. The `controller` tab draws
+  Worker pods as before (reserved/system) and its numbers do not change.
+* Controls (rate, demand, guard, baseline) drive the same colo-controller as the `controller` tab. Scenarios are
+  disabled on this tab (409 with the reason): two runners must never drive one cluster, and the experiment should not
+  be perturbed by surprise. Run them from the `controller` tab.
+* Offline: `DEMO_MOCK=1` with a `substrate` entry simulates option 2: Total Workers 4 (2 vCPU / 4 GiB each, as on 0726), a
+  g4-workers HPA whose G4 share is what fits next to vLLM (Workers preempt CPU backfill), and the n4d-workers HPA for
+  the rest. `DEMO_MOCK_SUBSTRATE=absent` renders the "not installed" state; `DEMO_MOCK_G4_WORKERS` sets the initial
+  Total Workers; `DEMO_MOCK_ATE_DEGRADED=1` makes atenet-router 0/1 (down)
+  with restarts, to see the red states.
+* RBAC: `k8s.yaml` objects labelled `colo-demo/rbac-substrate=true` (get/list/watch on `workerpools.ate.dev`, pods,
+  configmaps and HPAs in `substrate-exp`; workerpools, pods, HPAs, deployments, statefulsets and daemonsets in
+  `ate-system`; deployments and pods in `podcertificate-controller-system`; nodes are already cluster-wide read;
+  the only writes: get/patch/update on ConfigMap `actor-load`, get/patch on HPA `g4-workers` and get/patch/update on
+  `workerpools/scale` `g4-workers` in `substrate-exp`, all by resourceName).
+  Apply on 0726 only, after those namespaces exist:
+  `kubectl --context gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726 apply -f k8s.yaml -l colo-demo/rbac-substrate=true`.
+
+**Base recipe.** The substrate tab runs on top of a base recipe, set by the entry field `base_recipe`:
+`"controller"` (default, backward compatible: g4_colo/recipe/, colo-controller + colo-config) or `"native"`
+(g4_colo/recipe-native/: no colo-controller or colo-config reads; CPU-demand sliders patch `deployments/scale` of the
+backfill Deployments; overflow HPAs in colo-svc; backfill eligibility = a Ready vLLM pod on the node, never the
+`colo.active` label; no latency guard / baseline (409); control chip "native K8s + Agent Substrate"). Everything
+Substrate (Workers, actors, control plane, actor load) is the same on both bases. g4-workers are expected to bind next to
+vLLM by podAffinity; the demo keys Worker placement off pods, not node labels. `base_recipe` is rejected on any other
+recipe. The response of `/api/state` and `/api/clusters` carries `base_recipe`. Mock: `SubstrateNativeMockBackend`
+(g4-workers at priority `substrate-worker`).
+
+Cluster 0726 runs the native recipe now (since 2026-11-12). DEMO_CLUSTERS entries for it:
+
+```json
+{"id":"native0726","label":"Native K8s · 0726","recipe":"native","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"},
+{"id":"substrate","label":"G4 · Agent Substrate","recipe":"substrate","base_recipe":"native","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"}
+```
+
+A `controller` entry for 0726 no longer works (no colo-controller there). Previous entry, for a cluster still on the
+controller recipe (keep the `controller` entry; both use the same context):
+
+```json
+{"id":"substrate","label":"G4 · Agent Substrate","recipe":"substrate","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"}
+```
+
+On Cloud Run use the same `endpoint` + `ca_cert` as the `controller` entry instead of `context`.
+
+```bash
+DEMO_MOCK=1 DEMO_CLUSTERS='[
+ {"id":"controller","label":"With colo-controller","recipe":"controller","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"},
+ {"id":"substrate","label":"G4 · Agent Substrate","recipe":"substrate","context":"gke_northam-ce-mlai-tpu_us-west8_g4cluster-jawadamin-us-west8-0726"}
+]' python -m uvicorn app:app --port 8088   # open http://localhost:8088/?cluster=substrate
+```
+
 ## Scenarios from the command line
 
 The step definitions in `scenarios.py` are data. The web app and the CLI run the same definitions:
@@ -134,7 +250,7 @@ The JSON output contains the step log, labelled observations (`observe` steps) a
 | Method | Path | Body / notes |
 |---|---|---|
 | GET | `/api/clusters` | `{default, clusters: [{id, label, recipe, name, region, project, control, guard_available}]}` |
-| GET | `/api/state` | aggregated snapshot (adds `cluster_id`, `recipe`, `control`; native also `services.<svc>.backfill.waiting` and `services.<svc>.overflow.hpa`): nodes + per-CPU owners, pods, vLLM/HPA, loadgen summary, services, controller, events, cost (incl. `cost.counterfactual`), `story` (hero numbers), `alerts` (classified backend errors), `demo` (accelerator state), `scenario` (incl. `wait` = current metric vs target + deadline) |
+| GET | `/api/state` | aggregated snapshot (adds `cluster_id`, `recipe`, `control`; native also `services.<svc>.backfill.waiting` and `services.<svc>.overflow.hpa`; substrate also `substrate` = `{installed, has_data, pools.<pool>.{desired, replicas, ready, pending, on_g4, on_n4d}, g4_pending, n4d_hpa, actors, notes, control_plane: {present, health, nodes[].pods[], components[], atelet, unscheduled}}` and `nodes[].atelet` on G4/N4D nodes): nodes + per-CPU owners, pods, vLLM/HPA, loadgen summary, services, controller, events, cost (incl. `cost.counterfactual`), `story` (hero numbers), `alerts` (classified backend errors), `demo` (accelerator state), `scenario` (incl. `wait` = current metric vs target + deadline) |
 | POST | `/api/gpu-rate` | `{"rate": 600}`: sends `POST /rate {"rate": 600}` to every Ready loadgen pod |
 | POST | `/api/demand` | `{"sandbox": n, "toolcall": n, "analytics": n}`: sent as a patch to the controller's `POST /config` (it deep-merges). 409 while a scenario runs |
 | POST | `/api/guard` | `{"enabled": true}`: sent as a patch to the controller's `POST /config`. 409 while a scenario runs |
@@ -142,6 +258,8 @@ The JSON output contains the step log, labelled observations (`observe` steps) a
 | POST | `/api/scenario/{name}` | `name` is a scenario name or `1`-`4`; runs asynchronously |
 | GET | `/api/scenario/status` | current scenario step log + observations |
 | POST | `/api/scenario/cancel` | cancels the running scenario and resets HPA `minReplicas` to 1 |
+| POST | `/api/substrate/workers` | substrate recipe only: `{"total": 0..60}` → merge-patch HPA `substrate-exp/g4-workers` spec.maxReplicas (fallback: WorkerPool g4-workers scale when the HPA is absent); returns `{target, mode, total}`; 400 bad range, 409 other recipe |
+| POST | `/api/substrate/actors` | substrate recipe only: `{"total": 0..200, "awake": 0..total, "hold_s": 1..300}` (any subset) merge-patched into ConfigMap `substrate-exp/actor-load`; returns `{spec, patch}`; 400 bad range, 409 other recipe |
 | GET | `/api/scenarios` | scenario definitions for that cluster's recipe |
 
 Every endpoint takes `?cluster=<id>` (default: the first cluster; unknown id = 404). On `native`, `/api/demand`
@@ -153,13 +271,14 @@ patches `deployments/scale`, and `/api/guard`, `/api/baseline` and scenario 4 re
 |---|---|
 | `app.py` | FastAPI routes; per cluster: 1 s state cache and scenario runner |
 | `backend.py` | `DEMO_CLUSTERS` parsing and one backend per cluster |
-| `cluster.py` | live backends (`LiveBackend` controller recipe, `NativeLiveBackend` native recipe), each with its own `ApiClient`: kubernetes client reads plus pod-proxy calls (`/stats`, `/rate`, `/state`, `/config`, `/baseline`, `/cpus`) |
+| `cluster.py` | live backends (`LiveBackend` controller recipe, `NativeLiveBackend` native recipe, `SubstrateLiveBackend` controller + Agent Substrate reads), each with its own `ApiClient`: kubernetes client reads plus pod-proxy calls (`/stats`, `/rate`, `/state`, `/config`, `/baseline`, `/cpus`) |
 | `state.py` | pure aggregation of a raw snapshot into `/api/state` (CPU ownership, histogram merge, cost) |
-| `mock.py` | time-compressed simulators (`MockBackend`, `NativeMockBackend`) that emit the same raw formats as `cluster.py` |
+| `mock.py` | time-compressed simulators (`MockBackend`, `NativeMockBackend`, `SubstrateMockBackend`) that emit the same raw formats as `cluster.py` |
 | `scenarios.py` | scenario step data + async runner. Each scenario starts with a `require` step that fails fast with a plain message (e.g. scale-in needs 2 vLLM replicas on 2 G4 nodes); note text is templated from live metrics |
 | `run_scenario.py` | headless CLI, writes the JSON observation log |
 | `static/` | `index.html`, `app.js`, `style.css` |
-| `tools/shot.py` | headless-Chrome (CDP) screenshot after N s, e.g. `python tools/shot.py http://localhost:8088/ /tmp/demo_mock.png 150` (needs `websockets`, included with `uvicorn[standard]`); add `WxH` (e.g. `1440x900`) to capture exactly that viewport and print the no-scroll check |
+| `tools/shot.py` | headless-Chrome (CDP) screenshot after N s, e.g. `python tools/shot.py http://localhost:8088/ /tmp/demo_mock.png 150` (needs `websockets`, included with `uvicorn[standard]`); add `WxH` (e.g. `1440x900`) to capture exactly that viewport and print the no-scroll check plus any clipped panel; `WxH@Z` emulates browser zoom (e.g. `1920x1080@1.35`) |
+| `tools/cutoff.py` | cut-off text audit: every visible element whose text does not fit (overflow hidden / ellipsis / line-clamp, text spilling past a clipping parent, SVG text outside its svg), e.g. `python tools/cutoff.py "http://localhost:8088/?cluster=substrate" 1366x768 [--open drawers|rail] [--shot out.png]`; exit 2 if anything is cut |
 
 ## How the data is read
 
