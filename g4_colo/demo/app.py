@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("demo")
 
 # Demo release, shown in the page footer and in /api/state and /api/clusters.
-DEMO_VERSION = "0.7.1"
+DEMO_VERSION = "0.7.2"
 
 STATIC = Path(__file__).resolve().parent / "static"
 ERROR_LOG_INTERVAL_S = float(os.environ.get("DEMO_ERROR_LOG_INTERVAL_S", "30"))
@@ -173,6 +173,18 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="G4 colo at scale demo", version=DEMO_VERSION, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.middleware("http")
+async def _revalidate_ui(request, call_next):
+    # The page and its static assets carry no version in their URLs, so without this a browser keeps serving a
+    # cached style.css/app.js after a deploy (heuristic caching from Last-Modified). no-cache = always revalidate;
+    # an unchanged file costs a 304 via its ETag.
+    resp = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 async def _action(ctx: ClusterCtx, coro, what: str):
