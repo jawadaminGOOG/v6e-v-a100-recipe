@@ -1,0 +1,14 @@
+# 0726 settings (native recipe on the former colo-controller cluster): the single place for this overlay's environment values that are not images.
+# local-config: kustomize reads this ConfigMap for `replacements` and never emits it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: colo-settings
+  annotations: {config.kubernetes.io/local-config: "true"}
+data:
+  g4NodePool: g4gpu-jawadamin-us-west8-1026        # ComputeClass g4-gpu pool
+  n4dNodePool: n4dcpu-jawadamin-us-west8-1026      # ComputeClass n4d-cpu pool
+  model: Qwen/Qwen3-1.7B-Base                      # vLLM --model and loadgen MODEL
+  # components/vllm-gcs-cache (shared with recipe/: same bucket, same Workload Identity principal ns/inference/sa/vllm).
+  cacheBucket: bucket-cache-jawadamin-us-west8-1026
+  cacheKey: vllm-v0.32.0/Qwen3-1.7B-Base/rtx-pro-6000

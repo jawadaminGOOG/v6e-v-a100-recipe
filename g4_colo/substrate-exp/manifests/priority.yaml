@@ -1,0 +1,14 @@
+# Graceful-drain priority for Substrate workers (wave 4, "go native" fix for T6).
+# Priority -5 is ABOVE the Cluster Autoscaler's expendable cutoff (-10): CA drains these pods on scale-down and
+# honours Substrate's 1-hour worker grace period, so actors get the documented 30-minute window to be suspended
+# (api-guide "Eviction"). At -100 (colo-backfill) workers were "expendable": CA deleted the node without waiting,
+# and 19 awake actors crashed in T6. "Never buy a G4 node for workers" now comes from placement alone (workers bind
+# only next to a Ready vLLM — colo.active nodeAffinity on the controller recipe, podAffinity on native), which CA's
+# simulation of a fresh G4 node cannot satisfy. preemptionPolicy Never: workers never evict colo backfill.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata: {name: substrate-worker}
+value: -5
+preemptionPolicy: Never
+globalDefault: false
+description: Agent Substrate workers on accelerator-host spare cores (drained gracefully; never buy a node).

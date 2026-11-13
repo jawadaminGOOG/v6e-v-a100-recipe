@@ -1,0 +1,90 @@
+# Upstream kube-state-metrics limited to what the overflow rule needs: g4-workers pods, their node and
+# readiness, the g4-workers Deployment's spec.replicas (the WorkerPool renders a Deployment of the same name),
+# and each node's colo.active label. Scraped every 5 s; rules.yaml turns it into substrate_overflow_needed.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: exp-ksm, namespace: substrate-exp}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: exp-ksm, namespace: substrate-exp}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list, watch]
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: exp-ksm, namespace: substrate-exp}
+subjects: [{kind: ServiceAccount, name: exp-ksm, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exp-ksm}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: substrate-exp-ksm-nodes}
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: substrate-exp-ksm-nodes}
+subjects: [{kind: ServiceAccount, name: exp-ksm, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: substrate-exp-ksm-nodes}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: exp-ksm, namespace: substrate-exp, labels: {app: exp-ksm}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: exp-ksm}}
+  template:
+    metadata: {labels: {app: exp-ksm}}
+    spec:
+      serviceAccountName: exp-ksm
+      priorityClassName: system-cluster-critical
+      nodeSelector: {cloud.google.com/gke-nodepool: default-pool}
+      containers:
+      - name: kube-state-metrics
+        image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.13.0
+        args:
+        - --resources=pods,deployments,nodes
+        - --namespaces=substrate-exp
+        - --metric-allowlist=kube_pod_info,kube_pod_status_ready,kube_pod_deletion_timestamp,kube_deployment_spec_replicas,kube_node_labels
+        - --metric-labels-allowlist=nodes=[colo.active]
+        - --port=8080
+        - --telemetry-port=8081
+        ports:
+        - {name: http-metrics, containerPort: 8080}
+        - {name: telemetry, containerPort: 8081}
+        readinessProbe: {httpGet: {path: /readyz, port: 8081}, periodSeconds: 5}
+        livenessProbe: {httpGet: {path: /livez, port: 8081}, periodSeconds: 10}
+        resources:
+          requests: {cpu: 50m, memory: 64Mi}
+          limits: {memory: 256Mi}
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+          seccompProfile: {type: RuntimeDefault}
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: exp-ksm, namespace: substrate-exp}
+spec:
+  selector: {matchLabels: {app: exp-ksm}}
+  endpoints:
+  - port: http-metrics
+    path: /metrics
+    interval: 5s
+    # Rename to substrate_exp_kube_*: the recipe's colo-ksm exports the same kube_* series for colo-svc and inference,
+    # and its overflow queries join them without a job filter, so duplicates from this exporter make those joins
+    # many-to-many and the colo-svc overflow HPAs lose their metric (seen on 0726, 2026-11-13).
+    metricRelabeling:
+    - {action: replace, sourceLabels: [__name__], regex: "kube_(.+)", targetLabel: __name__, replacement: "substrate_exp_kube_$1"}

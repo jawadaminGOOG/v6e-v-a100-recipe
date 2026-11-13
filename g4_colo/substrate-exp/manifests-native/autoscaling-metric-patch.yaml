@@ -1,0 +1,41 @@
+- op: replace
+  path: /spec/metrics/0/promql/query
+  value: |-
+    clamp_min(
+      max(
+        label_replace(
+          max(substrate_exp_kube_deployment_spec_replicas{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",deployment="g4-workers"}
+              and (time() - timestamp(substrate_exp_kube_deployment_spec_replicas{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",deployment="g4-workers"}) < 45)),
+          "src", "g4", "", "")
+        or
+        label_replace(
+          ceil(sum(max by (ate_workerpool_name) (
+            ate_workerpool_workers{cluster="g4cluster-jawadamin-us-west8-0726",ate_workerpool_namespace="substrate-exp",ate_worker_state=~"partial|at_capacity"}
+            and (time() - timestamp(ate_workerpool_workers{cluster="g4cluster-jawadamin-us-west8-0726",ate_workerpool_namespace="substrate-exp",ate_worker_state=~"partial|at_capacity"}) < 45)
+          )) / 0.8),
+          "src", "busy", "", "")
+      )
+      - (
+        count(
+          (substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="substrate-exp",exported_pod=~"g4-workers-.+"}
+            and (time() - timestamp(substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="substrate-exp",exported_pod=~"g4-workers-.+"}) < 45))
+          * on (exported_namespace, exported_pod) group_left ()
+            ((substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="substrate-exp",condition="true"}
+              and (time() - timestamp(substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="substrate-exp",condition="true"}) < 45)) == 1)
+          * on (node) group_left ()
+            max by (node) (
+              ((substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",exported_pod=~"vllm-.+"}
+                and (time() - timestamp(substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",exported_pod=~"vllm-.+"}) < 45))
+               unless on (exported_namespace, exported_pod)
+                (substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference"}
+                  and (time() - timestamp(substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference"}) < 45)))
+              * on (exported_namespace, exported_pod) group_left ()
+                ((substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",condition="true"}
+                  and (time() - timestamp(substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="inference",condition="true"}) < 45)) == 1))
+          unless on (exported_namespace, exported_pod)
+            (substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="substrate-exp"}
+              and (time() - timestamp(substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_namespace="substrate-exp"}) < 45))
+        )
+        or vector(0)
+      ),
+    0)

@@ -1,0 +1,35 @@
+# Overflow HPA: runs on N4D as many workers as g4-workers can't run next to vLLM.
+# Targets the n4d-workers WorkerPool through its scale subresource (workerpool_types.go:259).
+# The metric is an exact worker count, so AverageValue 1 => replicas = substrate_overflow_needed.
+# Read through GKE's managed AutoscalingMetric (autoscaling-metric.yaml), as recipe-native does.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: n4d-workers, namespace: substrate-exp}
+spec:
+  scaleTargetRef: {apiVersion: ate.dev/v1, kind: WorkerPool, name: n4d-workers}
+  # 0: no N4D worker while every g4-worker fits next to vLLM (HPA scale to zero: GKE >= 1.37).
+  minReplicas: 0
+  maxReplicas: 24
+  metrics:
+  - type: External
+    external:
+      metric:
+        name: autoscaling.gke.io|substrate-overflow|overflow-needed
+      target: {type: AverageValue, averageValue: "1"}
+  behavior:
+    # tolerance 0: act on every worker of difference (default 10 % ignores e.g. 17 -> 18).
+    # Up: 45 s stabilization (the HPA takes the LOWEST recommendation in the window). The metric occasionally reads
+    # the full desired count for one evaluation (the effective term comes back empty from Managed Prometheus), which
+    # with 0 s jumped n4d-workers 3 -> 22 and drove N4D scale-ups into the regional CPU quota (T3, 19:12Z/19:17Z).
+    # A real shortfall persists, so it still lands within the 120 s gate.
+    scaleUp:
+      tolerance: 0
+      stabilizationWindowSeconds: 45
+      selectPolicy: Max
+      policies: [{type: Percent, value: 100, periodSeconds: 15}, {type: Pods, value: 20, periodSeconds: 15}]
+    # Down: 300 s. Busy demand comes and goes in bursts, and a removed N4D worker that still hosts a RUNNING actor
+    # crashes that actor (T3/T4 findings), so N4D shrinks only after 5 min of lower demand.
+    scaleDown:
+      tolerance: 0
+      stabilizationWindowSeconds: 300
+      policies: [{type: Percent, value: 100, periodSeconds: 15}]

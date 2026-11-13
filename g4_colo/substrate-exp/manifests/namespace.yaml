@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: substrate-exp
+  labels:
+    colo.gke.io/experiment: substrate
+---
+# GKE admits system-cluster-critical pods outside kube-system only with a matching ResourceQuota (the ksm pod).
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: exp-critical-pods, namespace: substrate-exp}
+spec:
+  hard: {pods: "4"}
+  scopeSelector:
+    matchExpressions:
+    - {operator: In, scopeName: PriorityClass, values: [system-cluster-critical]}

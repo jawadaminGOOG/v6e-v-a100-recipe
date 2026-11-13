@@ -1,0 +1,57 @@
+# Overflow metric source for the n4d-workers HPA, served by GKE's managed autoscaling-metrics-adapter
+# (autoscaling.gke.io/v1beta1, available on this cluster from GKE 1.37). Queries run project-wide, so every
+# selector is scoped to cluster=g4cluster-jawadamin-us-west8-0726.
+#
+#   n4d needed = max(g4 desired, ceil(busy / 0.8)) - g4 effective, floored at 0
+#
+#   g4 desired   g4-workers spec.replicas (fills the spare G4 cores; fixed by capacity, never by actor count)
+#   g4 effective g4-workers pods Ready, not terminating, on a colo.active=true node (exp-ksm)
+#   busy         workers with no free actor slot, both pools: ate_workerpool_workers{ate_worker_state=~"partial|at_capacity"}
+#                from ate-api-server (substrate-metrics.yaml). Two api-server replicas report the same gauge, so
+#                max by pool. Target 80 % busy => ceil(busy / 0.8) workers keeps 20 % headroom for resumes.
+#
+# So N4D runs workers (a) for g4-workers that can't run next to vLLM (G4 full or scaled in), and (b) when awake actors
+# keep more than 80 % of all workers busy. Idle (snapshotted) actors never add workers. If the busy series is
+# missing, the max falls back to g4 desired (overflow-only behaviour).
+# Every series is filtered to "scraped in the last 45 s" (Managed Prometheus has no staleness markers). 15 s
+# (recipe-native's value) flapped here: the effective term intermittently came back empty.
+apiVersion: autoscaling.gke.io/v1beta1
+kind: AutoscalingMetric
+metadata: {name: substrate-overflow, namespace: substrate-exp}
+spec:
+  metrics:
+  - promql:
+      name: overflow-needed
+      type: External
+      query: |-
+        clamp_min(
+          max(
+            label_replace(
+              max(substrate_exp_kube_deployment_spec_replicas{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",deployment="g4-workers"}
+                  and (time() - timestamp(substrate_exp_kube_deployment_spec_replicas{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",deployment="g4-workers"}) < 45)),
+              "src", "g4", "", "")
+            or
+            label_replace(
+              ceil(sum(max by (ate_workerpool_name) (
+                ate_workerpool_workers{cluster="g4cluster-jawadamin-us-west8-0726",ate_workerpool_namespace="substrate-exp",ate_worker_state=~"partial|at_capacity"}
+                and (time() - timestamp(ate_workerpool_workers{cluster="g4cluster-jawadamin-us-west8-0726",ate_workerpool_namespace="substrate-exp",ate_worker_state=~"partial|at_capacity"}) < 45)
+              )) / 0.8),
+              "src", "busy", "", "")
+          )
+          - (
+            count(
+              (substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_pod=~"g4-workers-.+"}
+                and (time() - timestamp(substrate_exp_kube_pod_info{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",exported_pod=~"g4-workers-.+"}) < 45))
+              * on (exported_namespace, exported_pod) group_left ()
+                ((substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",condition="true"}
+                  and (time() - timestamp(substrate_exp_kube_pod_status_ready{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",condition="true"}) < 45)) == 1)
+              * on (node) group_left ()
+                max by (node) ((substrate_exp_kube_node_labels{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",label_colo_active="true"}
+                  and (time() - timestamp(substrate_exp_kube_node_labels{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp",label_colo_active="true"}) < 45)))
+              unless on (exported_namespace, exported_pod)
+                (substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp"}
+                  and (time() - timestamp(substrate_exp_kube_pod_deletion_timestamp{cluster="g4cluster-jawadamin-us-west8-0726",namespace="substrate-exp"}) < 45))
+            )
+            or vector(0)
+          ),
+        0)

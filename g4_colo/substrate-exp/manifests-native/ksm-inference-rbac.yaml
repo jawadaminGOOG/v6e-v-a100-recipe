@@ -1,0 +1,17 @@
+# exp-ksm also reads vLLM pods (native "effective" term: g4-workers next to a Ready vLLM pod).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: substrate-exp-ksm, namespace: inference}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list, watch]
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: substrate-exp-ksm, namespace: inference}
+subjects: [{kind: ServiceAccount, name: exp-ksm, namespace: substrate-exp}]
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: substrate-exp-ksm}

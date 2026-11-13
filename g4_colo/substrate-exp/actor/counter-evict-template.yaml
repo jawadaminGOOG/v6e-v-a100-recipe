@@ -1,0 +1,33 @@
+# ActorTemplate counter-evict (wave-4 option 2): Substrate's counter demo with the SIGTERM handling the API guide's
+# "Eviction" section requires (source: counter-evict/main.go). On SIGTERM it keeps running and reports it on
+# GET /evicting; the harness (colo-exp-driver serve -evacuate) acks and suspends it SYNCHRONOUSLY.
+# Image built on the ROOT distroless base (as upstream .ko.yaml does for demos/counter: it writes / and volumes).
+#   kubectl ate create actor-template -f counter-evict-template.yaml   (golden snapshot builds on the first worker)
+metadata:
+  atespace: colo-exp
+  name: counter-evict
+workerSelector:
+  matchLabels:
+    colo.gke.io/worker-tier: agents
+containers:
+- name: counter
+  image: us-west8-docker.pkg.dev/northam-ce-mlai-tpu/repo-jawadamin-us-west8-1026/substrate/counter-evict@sha256:0f2d936e60553fcb74ec9e13fb23a75f3a934483949d9e59b7d554039be68b85
+  command:
+  - /ko-app/counter-evict
+  wakeupProbe:
+    httpGet:
+      path: /readyz
+      port: 80
+  volumeMounts:
+  - name: data
+    mountPath: /home/counter
+# One actor occupies its whole worker: size at the worker's capacity (2 vCPU / 4Gi limits) or below.
+resources:
+  limits:
+    cpuMillicores: 2000
+    memoryBytes: 1073741824
+snapshotConfig:
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
+volumes:
+- name: data
+  durableDir: {}

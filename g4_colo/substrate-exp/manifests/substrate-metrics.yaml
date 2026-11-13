@@ -1,0 +1,11 @@
+# Scrape Substrate's own Prometheus endpoint (ate-api-server :9090, port name "prometheus") into Managed Prometheus.
+# It already serves ate_workerpool_workers{ate_workerpool_name, ate_worker_state=idle|partial|at_capacity|unschedulable}
+# (how full each pool's workers are, in actor slots) but nothing scraped it, so the busy-workers signal never reached
+# Managed Prometheus. ate-system's `ate-system-observability` NetworkPolicy already admits scrapes on "prometheus".
+# This is a new object of ours in ate-system; no Substrate manifest is modified.
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata: {name: substrate-exp-ate-api-server, namespace: ate-system}
+spec:
+  selector: {matchLabels: {app: ate-api-server}}
+  endpoints: [{port: prometheus, path: /metrics, interval: 15s}]

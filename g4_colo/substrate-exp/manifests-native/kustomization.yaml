@@ -1,0 +1,26 @@
+# Experiment on the NATIVE recipe (cluster 0726 after conversion). Same objects as ../manifests, except:
+#  - g4-workers bind next to a Ready vLLM by podAffinity, injected at pod admission by a MutatingAdmissionPolicy
+#    (worker-affinity-map.yaml): WorkerPoolPodTemplate has no podAffinity field, and there is no colo.active label.
+#  - the overflow metric's "effective" term counts g4-workers Ready on a node that runs a Ready, non-terminating vLLM
+#    pod (recipe-native's backfill rule) instead of a colo.active node; exp-ksm also watches namespace inference.
+#   kubectl apply -k g4_colo/substrate-exp/manifests-native   (after applying native-0726 and allow-substrate-worker.sh)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../manifests
+- worker-affinity-map.yaml
+- ksm-inference-rbac.yaml
+patches:
+- target: {kind: WorkerPool, name: g4-workers}
+  patch: |-
+    - op: remove
+      path: /spec/template/nodeAffinity
+- target: {kind: Deployment, name: exp-ksm}
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/args/1
+      value: --namespaces=substrate-exp,inference
+- target: {kind: AutoscalingMetric, name: substrate-overflow}
+  path: autoscaling-metric-patch.yaml
+- target: {kind: Rules, name: substrate-overflow}
+  path: rules-patch.yaml

@@ -1,0 +1,15 @@
+# Agent Substrate Workers on the colo-controller G4 cluster (experiment).
+# Separate from g4_colo/recipe/ and g4_colo/recipe-native/: nothing here edits them.
+#   kubectl --context <0726> apply -k g4_colo/substrate-exp/manifests
+# Prerequisite: Substrate v1.0.0 installed (install/README.md), so the ate.dev CRDs exist.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- namespace.yaml
+- priority.yaml
+- workerpools.yaml
+- ksm.yaml
+- rules.yaml
+- substrate-metrics.yaml
+- autoscaling-metric.yaml
+- overflow-hpa.yaml
