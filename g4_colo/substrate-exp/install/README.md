@@ -28,7 +28,8 @@ tag `v1.0.0` (for `cmd/ate-setup`, and the manifests ate-setup applies).
    Each ate-setup deploy re-applies upstream manifests, so re-run this step after any redeploy.
 6. **Actor image + template.** `ko build` `demos/counter` from the v1.0.0 checkout to `$KO_DOCKER_REPO`, then
    `kubectl ate create atespace colo-exp` and `kubectl ate create actor-template -f actor/counter-template.yaml`.
-7. **Experiment objects.** `kubectl apply -k manifests/`.
+7. **Experiment objects.** Follow [../README.md](../README.md) section 5.2 (native recipe, priority and sizing,
+   eviction-aware actor). Apply a kustomization only once: it contains the WorkerPools.
 
 Teardown: `go run ./cmd/ate-setup delete ate-system` (v1.0.0 checkout), then
 `<substrate-gke>/tools/setup-gcp/teardown.sh --cluster-scoped`, then delete the two system node pools.
