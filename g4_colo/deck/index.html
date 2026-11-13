@@ -245,6 +245,58 @@
   </aside>
 </section>
 
+<!-- ============================================================ Agent Substrate on the idle cores (GKE flow + core map) -->
+<section class="slide" data-accent="green" aria-label="Agent Substrate on the idle cores">
+  <h2>Agent Substrate on the idle cores<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede sb-lede">Agents run as actors on warm, sandboxed Workers; idle ones snapshot to Cloud Storage and resume on any free Worker.</p>
+  <div class="sb-wrap"><svg id="sbsvg" viewBox="0 0 1664 684" role="img" aria-label="Agent Substrate on the G4 cluster: actors resume through the Substrate control plane on two tainted N4D nodes onto Worker pods that fill the spare cores of a G4 node next to vLLM, with overflow Workers on N4D, snapshots in Cloud Storage, GKE autoscaling and the G4 guardrail"></svg></div>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>Agent Substrate:</b> open-source agent runtime on GKE (<code>agent-substrate/substrate</code> v1.0.0). Actors are multiplexed onto warm Worker pods (gVisor/runsc inside each Worker container); an idle actor is snapshotted (memory + filesystem) to Cloud Storage and resumed on any free Worker.</li>
+      <li><b>Placement:</b> a stock Kubernetes MutatingAdmissionPolicy injects required podAffinity to a Ready vLLM pod into g4-workers (<code>manifests-native/worker-affinity-map.yaml</code>); the recipe's ValidatingAdmissionPolicy colo-g4-guard admits them on G4 (substrate-worker allowed).</li>
+      <li><b>Priority:</b> vLLM <code>gpu-serving</code> 1e6 &gt; Workers <code>substrate-worker</code> −5 (PreemptLowerPriority) &gt; CPU backfill <code>colo-backfill</code> −100 (CA-expendable). Workers preempt backfill on every pool; the Cluster Autoscaler's scale-down simulation ignores expendable backfill, so backfill cores look free (<code>priority.yaml</code>).</li>
+      <li><b>Sizing:</b> one "Total Workers" slider = g4-workers HPA maxReplicas. G4 share (AutoscalingMetric <code>substrate-g4-share</code>) = per G4 node with a Ready, non-terminating vLLM pod, floor((allocatable CPU − non-backfill non-Worker requests) / 2) = 19 per g4-standard-48 node here. The N4D overflow HPA runs max(total, ceil(busy / 0.8)) − G4 Workers Ready (<code>g4-workers-hpa.yaml</code>, <code>overflow-metric-patch.json</code>).</li>
+      <li><b>Eviction contract:</b> when a G4 node leaves, the g4-workers HPA drops the share, the extra Workers get SIGTERM, Substrate drains them; the actor (template counter-evict) flags <code>/evicting</code> instead of exiting, and the harness calls <code>SuspendActor(SYNCHRONOUS)</code> (Substrate api-guide "Eviction").</li>
+      <li><b>Control plane:</b> Substrate API server, controller, router and PostgreSQL on 1 n4d-standard-4 + 1 e2-standard-4 system node (tainted), Postgres on pd-standard. atelet runs on every worker node (G4 and N4D).</li>
+      <li><b>Caveat:</b> G4 exposes monitor/mwaitx; a snapshot is stamped with the checkpointing Worker's CPU features, so a G4-made snapshot restored on N4D drops to filesystem-only (memory reset, state on disk kept). 22 such resets in the G4 scale-in run (slide 12). Upstream issue #1657.</li>
+      <li><b>Core map:</b> illustrative, drawn like the replay core map (one column per core, one row per hyperthread). G4: core 0 shared/system, 1–4 vLLM, 5–23 = the 19 Workers. N4D: Workers plus lower-priority backfill. Letters + stripes: V vLLM, W Worker (green on G4, red on paid N4D), B backfill, C/P Substrate control plane / PostgreSQL.</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================ Agent Substrate results: scale-in timeline + core map, resume, elasticity -->
+<section class="slide" data-accent="red" aria-label="Agent Substrate: a G4 node leaves, no agent is lost">
+  <h2>A G4 node leaves; no agent is lost<span class="dot" aria-hidden="true"></span></h2>
+  <p class="lede sb-lede">vLLM scaled in with 60 actors on two G4 nodes: actors suspended, resumed on other Workers, then GKE removed the node.</p>
+  <div class="kpis kstrip" id="kpi-sub"></div>
+  <div class="tl-wrap"><svg id="tlsvg" viewBox="0 0 1664 326" role="img" aria-label="Timeline of the G4 scale-in: actors running by Worker pool and the leaving G4 node, with events"></svg></div>
+  <div class="ex3">
+    <div class="fig"><h3>19 Workers, 19 cores</h3><svg id="cmsvg" viewBox="0 0 520 250" role="img" aria-label="Core map of the G4 node from the kubelet CPU manager: vLLM on cores 1-4, 19 Workers on cores 5-23, one each"></svg></div>
+    <div class="fig"><h3>Resume: G4 as fast as N4D</h3><svg id="cdfsvg" viewBox="0 0 520 250" role="img" aria-label="Distribution of actor resume plus first request latency on G4 and N4D Workers"></svg></div>
+    <div class="fig"><h3>N4D Workers follow a burst <small>— wanted · <span class="tr">■</span> Ready</small></h3><svg id="busysvg" viewBox="0 0 520 250" role="img" aria-label="n4d-workers replicas over a 4-minute burst of 30 awake actors"></svg></div>
+  </div>
+  <p class="cav"><b>Caveat:</b> an actor moved from G4 to N4D keeps its files but restarts its memory (snapshots carry the G4 CPU features); the fix is tracked upstream.</p>
+  <div class="foot"><span>Maximizing CPU Utilization on GCP GPU and TPU machines with GKE</span><span class="pg"></span></div>
+  <aside class="notes">
+    <ul>
+      <li><b>Run:</b> 2026-11-12 19:23–19:45Z, native recipe on the G4 cluster, the design from slide 11. 60 actors, 30 awake (120 s holds), Total Workers 40 → g4-workers 38 on two G4 nodes (19 each). Trigger 19:33:26Z: vLLM HPA min 2 → 1 (<code>.agents/wave-4/logs/t6_opt2_sync/t6_result.md</code>, <code>t6.log</code>).</li>
+      <li><b>Chart data</b> (<code>js/substrate_data.js</code>, built by <code>substrate_data.py</code> from the raw files): actors running by pool from <code>timeline.txt</code> (every ~19 s) plus the final stats line of <code>t6.log</code> (19:45:34Z); G4 nodes, vLLM Ready and Workers Ready from <code>samples.jsonl</code> (every ~9 s); suspends from <code>evacuations.jsonl</code>; "marked" from <code>ca_scaledown_events.txt</code>; "removed" from <code>t6.log</code>.</li>
+      <li><b>Sequence:</b> g4-share 38 → 19 at 19:34:06Z; the g4-workers HPA removed the leaving node's Workers; each Worker's SIGTERM reached its actor, which flagged <code>/evicting</code>; the harness called <code>SuspendActor(SYNCHRONOUS)</code>: 16 actors, 19:34:06.1–07.4Z, 323–559 ms each, 0 failed. They resumed on the surviving node's Workers and on N4D (19 G4 / 11 N4D). Cluster Autoscaler marked the node at 19:39:30Z and removed it at 19:40:32Z (7 min 06 s after the trigger). 0 / 60 actors lost, 0 failed requests; resume p99 72.7 ms over the 5 min after. 16 Workers preempted CPU backfill on the way.</li>
+      <li><b>Memory resets:</b> 22 actors moved G4 → N4D restored files but not memory (the caveat line).</li>
+      <li><b>Scope:</b> in this run the Workers left through the HPA → Deployment path (the ReplicaSet removed the newest Workers, which were on the leaving node). The Cluster Autoscaler eviction path (10 min GKE grace cap) was not exercised.</li>
+      <li><b>Resume latency</b> (<code>.agents/wave-4/logs/native_smoke2/t5g.jsonl</code>, <code>t5n.jsonl</code>; <code>result.md</code>): 3 actors per pool, concurrency 3, 1.5 resumes/s each, 150 s, run concurrently; synchronous suspends. Per cycle: resume RPC → RUNNING + first HTTP request through the router. 223 (G4) vs 222 (N4D) cycles, 0 fails, 0 counter discontinuities. p50 732 vs 742 ms, p99 991 vs 1,011 ms = 0.98×. Client on a workstation through kubectl port-forward (same overhead for both pools).</li>
+      <li><b>Core map</b> (<code>t2_native_cpuset_probe.txt</code>): kubelet static CPU manager state on the G4 node: shared 0,24; vLLM 1–4,25–28; 19 Workers on 5,29 … 23,47, one core (2 hyperthreads) each. All 14 sandbox threads of the probed Worker (ateworker-gvisor, gVisor sentry) have Cpus_allowed 18,42; only the pod's pause container is 0–47 (every pod).</li>
+      <li><b>Elastic N4D Workers</b> (<code>native_smoke2/busy.txt</code>, 25 s samples): Total Workers 22 (G4 share 19, N4D 3); 60 actors, 30 awake, 20 s holds for 4 min from 19:52:15Z, then awake 0 at 19:56:21Z. n4d-workers 3 → 9 → 13 → 14 (overflow metric with busy headroom ceil(busy / 0.8)); back to 3 at 20:02:04Z, 5.7 min after load stopped (300 s HPA scale-down stabilization). 0 actors lost, 0 failed requests. Ready lagged desired because the Cluster Autoscaler had just removed N4D nodes emptied after the preceding scale-in (3 → 1 nodes, back to 3 at 19:57): 61 resumes waited for a Worker ("no worker has room"; they waited, none was lost).</li>
+      <li><b>0 G4 nodes bought:</b> the g4-workers HPA caps G4 Workers at what fits next to Ready vLLM, so extra demand runs on N4D. In the scale-in run the G4 node count changed only with vLLM (<code>t6_opt2_sync/samples.jsonl</code>: 1 → 2 after vLLM HPA min 2, back to 1 after min 1); in the burst, demand beyond the G4 share waited for N4D, not G4.</li>
+      <li><b>44 / 44:</b> live UI smoke on the native cluster (Total Workers and Awake sliders, 7 steps, screenshots at 1920×1080) (<code>smoke_native_opt2/smoke_results.json</code>).</li>
+      <li><b>Caveat (footer line):</b> G4 exposes monitor/mwaitx and N4D does not; a snapshot carries the checkpointing Worker's CPU features, so a G4 snapshot restored on N4D drops to filesystem-only (native T4: N4D → G4 3/3/3 counters kept; G4 → N4D memory counter reset, file and volume kept; <code>native_smoke2/t4.jsonl</code>). Upstream issue #1657.</li>
+      <li><b>Install notes:</b> Kueue's mutating webhook removed Substrate's podCertificate projected volumes until the namespace was excluded; regional N4D CPU and SSD quotas had to be raised.</li>
+      <li><b>Not on the slide:</b> resume p99 72.7 ms over the 5 min after the scale-in (30 running: 19 G4 + 11 N4D); g4-workers 38 → 19 and n4d-workers 21 Ready through the scale-in (<code>samples.jsonl</code>).</li>
+    </ul>
+  </aside>
+</section>
+
 <!-- ============================================================ Appendix · recipe components -->
 <section class="slide" data-accent="green" data-appendix="1" aria-label="Appendix: recipe components">
   <h2 style="top:84px">Appendix: recipe components<span class="dot" aria-hidden="true"></span></h2>
@@ -267,6 +319,7 @@
 <div class="pager" aria-live="polite"></div>
 <div class="notes-panel" role="complementary" aria-label="Speaker notes"></div>
 <script src="js/deck_data.js"></script>
+<script src="js/substrate_data.js"></script>
 <script src="js/replay.js"></script>
 <script src="js/deck.js"></script>
 </body>

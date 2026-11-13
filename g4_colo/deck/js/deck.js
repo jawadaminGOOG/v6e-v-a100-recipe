@@ -223,6 +223,228 @@
     return s;
   }
 
+  /* ------------------------------------------------------------ Agent Substrate: slide-4 flow framing + replay core map */
+  function substrateSVG() {
+    const fbox = (x, y, w, h, fill, stroke, so = 1) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="22" fill="${fill}" stroke="${stroke}" stroke-opacity="${so}" stroke-width="3"/>`;
+    const line = (d, opt = "") => `<path d="${d}" fill="none" stroke="${C.ink}" stroke-width="3" stroke-linecap="round" ${opt}/>`;
+    const arr = (d, dashed, both) => line(d, `${dashed ? 'stroke-dasharray="8 7"' : ""} marker-end="url(#sbah)"${both ? ' marker-start="url(#sbah)"' : ""}`);
+    const lab = (x, y, t, anchor = "start") => `<text class="t4" x="${x}" y="${y}" text-anchor="${anchor}" style="fill:${C.ink};font-weight:600">${t}</text>`;
+    // one column per core, one row per hyperthread (replay layout, no L3 frames); letter + stripes so kinds never rely on colour alone
+    const TW = 34, TH = 40, TG = 6, P = 40;
+    const KIND = { v: [C.blue, "V"], b: [C.green, "B"], w: [C.green, "W", 1], n: [C.red, "W", 1], r: [C.warm, ""], c: [mix("warm", 45), "C"], p: [mix("warm", 45), "P"], f: [null, ""] };
+    function tile(x, y, k, w, h) {
+      const [fill, , striped] = KIND[k];
+      return fill
+        ? `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${fill}"/>` + (striped ? `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="url(#sbstripe)"/>` : "")
+        : `<rect x="${x + 1}" y="${y + 1}" width="${w - 2}" height="${h - 2}" rx="6" fill="none" stroke="${C.ink}" stroke-opacity=".3" stroke-width="2"/>`;
+    }
+    const letter = (x, y, k, fs) => (KIND[k][1] ? `<text class="lt" style="font-size:${fs}px" x="${x}" y="${y + fs * 0.36}">${KIND[k][1]}</text>` : "");
+    const core = (x, y, k, w = TW, h = TH) => tile(x, y, k, w, h) + tile(x, y + h + TG, k, w, h) + letter(x + w / 2, y + h + TG / 2, k, 21);
+    const key = (x, y, k) => tile(x, y, k, 26, 26) + letter(x + 13, y + 13, k, 15);
+    const cores = (x, y, kinds) => kinds.map((k, i) => core(x + i * P, y, k)).join("");
+    const bracket = (x0, x1, y, t) => line(`M${x0},${y} L${x0},${y + 8} L${x1},${y + 8} L${x1},${y}`, 'stroke-width="2.5"') + `<text class="t3" x="${(x0 + x1) / 2}" y="${y + 36}" text-anchor="middle">${t}</text>`;
+    const pill = (x, y, t, w) => `<rect x="${x}" y="${y}" width="${w}" height="30" rx="15" fill="${C.ground}" stroke="${C.ink}" stroke-opacity=".5" stroke-width="2"/><text class="t4" x="${x + w / 2}" y="${y + 21}" text-anchor="middle" style="fill:${C.ink};font-weight:600">${t}</text>`;
+    let s = `<defs><marker id="sbah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${C.ink}"/></marker>` +
+      `<pattern id="sbstripe" width="8" height="7" patternUnits="userSpaceOnUse"><rect width="8" height="3" fill="${C.ground}" fill-opacity=".5"/></pattern></defs>`;
+
+    // ---- row 1: actors -> Substrate control plane · Cloud Storage
+    const H1 = 136;
+    s += fbox(0, 0, 320, H1, mix("warm", 14), C.ink, 0.45);
+    s += `<text class="t1" x="24" y="44">Agents (actors)</text><text class="t4" x="24" y="76">● running · ○ snapshotted</text>`;
+    for (let i = 0; i < 9; i++) {
+      const cx = 34 + i * 29;
+      s += i < 3 ? `<circle cx="${cx}" cy="108" r="9" fill="${C.ink}"/>` : `<circle cx="${cx}" cy="108" r="8" fill="none" stroke="${C.ink}" stroke-width="2" stroke-dasharray="4 3"/>`;
+    }
+    s += fbox(380, 0, 760, H1, C.ground, C.ink, 0.55);
+    s += `<text class="t1" x="408" y="44">Substrate control plane</text><text class="t2" x="408" y="80">API server · controller · router · PostgreSQL</text><text class="t2" x="408" y="110">2 tainted nodes · Postgres on pd-standard</text>`;
+    for (const [i, kinds] of [[0, ["c", "c"]], [1, ["c", "p"]]]) {
+      const x = 870 + i * 130;
+      s += `<rect x="${x}" y="16" width="116" height="104" rx="12" fill="${mix("warm", 9)}" stroke="${C.ink}" stroke-opacity=".35" stroke-width="2"/>`;
+      s += `<text class="t4" style="font-size:15px;font-weight:600" x="${x + 58}" y="38" text-anchor="middle">${i ? "e2-std-4" : "n4d-std-4"}</text>`;
+      kinds.forEach((k, j) => { s += tile(x + 16 + j * 46, 48, k, 38, 56) + letter(x + 35 + j * 46, 76, k, 19); });
+    }
+    s += fbox(1200, 0, 464, H1, mix("warm", 14), C.ink, 0.45);
+    s += `<text class="t1" x="1224" y="44">Cloud Storage</text><text class="t2" x="1224" y="80">memory + filesystem</text><text class="t2" x="1224" y="110">snapshots</text>`;
+    s += arr("M320,68 L374,68");
+    s += lab(350, 54, "resume", "middle");
+
+    // fork: an actor resumes on any free Worker, in either pool (one shared label)
+    const Y2 = 214, H2 = 232, NX = 1064, FY = 174;
+    s += line(`M760,${H1} L760,${FY}`) + line(`M512,${FY} L1364,${FY}`);
+    s += arr(`M512,${FY} L512,${Y2 - 4}`) + arr(`M1364,${FY} L1364,${Y2 - 4}`);
+    s += `<rect x="560" y="${FY - 14}" width="170" height="28" fill="${C.ground}"/>` + lab(574, FY + 6, "any free Worker");
+    s += arr(`M1560,${H1} L1560,${Y2 - 4}`, true, true) + lab(1574, FY + 6, "snapshots");
+
+    // ---- row 2: worker nodes
+    s += fbox(0, Y2, 1024, H2, mix("warm", 9), C.ink, 0.55);
+    s += `<text class="t1" x="24" y="${Y2 + 42}">G4 node, next to Ready vLLM</text>` + pill(904, Y2 + 18, "atelet", 96);
+    // 24 cores: 0 shared/system, 1–4 vLLM, 5–23 Workers (g4-share = 19 per node; Workers preempt backfill)
+    const g4 = Array.from({ length: 24 }, (_, c) => (c === 0 ? "r" : c <= 4 ? "v" : "w"));
+    const cy = Y2 + 66, by = cy + 2 * TH + TG + 12;
+    s += cores(32, cy, g4);
+    s += bracket(32 + 5 * P, 32 + 23 * P + TW, by, "g4-workers · the 19 that fit next to vLLM");
+    s += fbox(NX, Y2, 600, H2, mix("warm", 9), C.ink, 0.55);
+    s += `<text class="t1" x="${NX + 24}" y="${Y2 + 42}">N4D node, overflow</text>` + pill(NX + 480, Y2 + 18, "atelet", 96);
+    s += cores(NX + 32, cy, ["r", "n", "n", "n", "n", "n", "b", "b"]);
+    s += bracket(NX + 32 + P, NX + 32 + 5 * P + TW, by, "n4d-workers · the rest");
+    s += `<text class="t4" x="${NX + 32 + 6 * P + TW / 2 + 20}" y="${by + 36}" text-anchor="middle">backfill</text>`;
+
+    // one shared key
+    const ky = Y2 + H2 + 22;
+    let kx = 0;
+    for (const [ks, t] of [[["v"], "vLLM · priority 1e6"], [["w", "n"], "Worker on G4 / N4D · −5"], [["b"], "CPU backfill · −100"], [["r"], "shared / system"]]) {
+      ks.forEach((k) => { s += key(kx, ky, k); kx += 32; });
+      s += `<text class="t4" x="${kx + 2}" y="${ky + 19}">${t}</text>`;
+      kx += 2 + t.length * 8.6 + 34;
+    }
+
+    // ---- row 3: one light band, four chips with a short second line
+    const Y3 = ky + 52, HB = 96;
+    s += `<rect x="0" y="${Y3}" width="1664" height="${HB}" rx="30" fill="${mix("warm", 9)}"/>`;
+    const chip = (x, w, col, t1, t2) => `<rect x="${x}" y="${Y3 + 10}" width="${w}" height="${HB - 20}" rx="20" fill="${C.ground}" stroke="${C[col]}" stroke-width="2.5"/>` +
+      `<circle cx="${x + 24}" cy="${Y3 + 36}" r="7" fill="${C[col]}"/><text class="t4" x="${x + 42}" y="${Y3 + 42}" style="fill:${C.ink};font-weight:700;font-size:18px">${t1}</text>` +
+      `<text class="t4" x="${x + 42}" y="${Y3 + 68}" style="font-size:16px">${t2}</text>`;
+    s += chip(12, 400, "yellow", "Pinned next to Ready vLLM", "MutatingAdmissionPolicy · colo-g4-guard");
+    s += chip(424, 400, "blue", "Workers outrank backfill", "they preempt it on every pool");
+    s += chip(836, 400, "red", "One slider: Total Workers", "G4 runs what fits; N4D the rest");
+    s += chip(1248, 404, "warm", "Eviction: SIGTERM → suspend", "harness calls SuspendActor(SYNCHRONOUS)");
+
+    // ---- caveat
+    const CY = Y3 + HB + 22;
+    s += `<rect x="0" y="${CY}" width="1664" height="46" rx="16" fill="${mix("yellow", 18)}"/>`;
+    s += `<text x="20" y="${CY + 30}" style="font-size:19px"><tspan style="font-weight:700">Caveat:</tspan> a G4 → N4D move resets actor memory (filesystem kept). Snapshots carry the G4 Worker's CPU features (monitor/mwaitx); upstream issue #1657.</text>`;
+    return s;
+  }
+
+  /* ------------------------------------------------------------ Agent Substrate results (slide 12)
+     Every series comes from js/substrate_data.js (substrate_data.py, raw logs of the native runs). */
+  const SD = window.SUBSTRATE_DATA || null;
+  const AX = `fill:${C.ink};fill-opacity:.72`;
+  const mmss = (s) => `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
+  const stepPath = (pts, sx, sy) => pts.map((p, i) => (i ? `H${sx(p[0])}V${sy(p[1])}` : `M${sx(p[0])},${sy(p[1])}`)).join("");
+  const mark = (x, y, n) => `<circle cx="${x}" cy="${y}" r="15" fill="${C.ink}"/><text x="${x}" y="${y + 6}" text-anchor="middle" style="font-size:17px;font-weight:700;fill:${C.ground}">${n}</text>`;
+
+  function timelineSVG() {
+    const T = SD.t6, X0 = 200, X1 = 1600, tmin = -30, tmax = Math.ceil(T.after_s / 60) * 60 + 20;
+    const sx = (s) => X0 + ((s - tmin) / (tmax - tmin)) * (X1 - X0);
+    const ev = T.evac.map((e) => e[0]), e0 = Math.min(...ev), e1 = Math.max(...ev);
+    const vllmDrop = (T.workers.find((w) => w[0] > 0 && w[4] === 1) || [0])[0];
+    const W = T.workers, w0 = W.find((w) => w[0] >= 0), wl = W[W.length - 1];
+    const E = [[0, "vLLM scales in"], [e0, `${T.evac.length} actors suspended`], [T.marked_s, "GKE marks the node"], [T.removed_s, "node removed"]];
+    let s = `<defs><pattern id="tlh" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="10" height="10" fill="${mix("blue", 18)}"/><rect width="4" height="10" fill="${C.blue}" fill-opacity=".55"/></pattern></defs>`;
+    let lx = X0;
+    E.forEach(([, l], i) => { s += mark(lx + 15, 16, i + 1) + `<text x="${lx + 38}" y="23" style="font-size:20px">${l}</text>`; lx += 66 + l.length * 10.2; });
+    E.forEach(([t], i) => { s += `<line x1="${sx(t)}" y1="50" x2="${sx(t)}" y2="268" stroke="${C.ink}" stroke-opacity=".45" stroke-width="2" stroke-dasharray="5 6"/>` + mark(sx(t), 50, i + 1); });
+    // actors running by pool (stacked)
+    const A0 = 74, A1 = 212, sy = (v) => A1 - (v / 34) * (A1 - A0);
+    s += `<text x="0" y="${A0 + 40}" style="font-size:21px;font-weight:700">Actors running</text><text x="0" y="${A0 + 66}" style="font-size:18px;${AX}">by Worker pool</text>`;
+    [0, 10, 20, 30].forEach((v) => { s += `<line x1="${X0}" y1="${sy(v)}" x2="${sx(T.after_s)}" y2="${sy(v)}" stroke="${C.warm}" stroke-opacity=".35"/><text x="${X0 - 12}" y="${sy(v) + 6}" text-anchor="end" style="font-size:16px;${AX}">${v}</text>`; });
+    const pts = T.actors, last = pts[pts.length - 1];
+    s += `<path d="${stepPath(pts.map((p) => [p[0], p[1] + p[2]]), sx, sy)}H${sx(T.after_s)}V${sy(0)}H${sx(pts[0][0])}Z" fill="${C.red}" fill-opacity=".85"/>`;
+    s += `<path d="${stepPath(pts.map((p) => [p[0], p[1]]), sx, sy)}H${sx(T.after_s)}V${sy(0)}H${sx(pts[0][0])}Z" fill="${C.green}"/>`;
+    s += `<text x="${sx(T.after_s) - 12}" y="${sy(last[1] / 2) + 7}" text-anchor="end" style="font-size:20px;font-weight:700;fill:${C.ground}">${last[1]} on G4 Workers</text>`;
+    s += `<text x="${sx(T.after_s) - 12}" y="${sy(last[1] + last[2] / 2) + 7}" text-anchor="end" style="font-size:20px;font-weight:700">${last[2]} on N4D Workers</text>`;
+    s += `<text x="${sx(T.after_s) + 14}" y="${sy(30) + 14}" style="font-size:18px;font-weight:700">30 awake</text><text x="${sx(T.after_s) + 14}" y="${sy(30) + 36}" style="font-size:16px;${AX}">of 60, 0 lost</text>`;
+    // the leaving G4 node
+    const B = 228, NH = 34;
+    s += `<text x="0" y="${B + 24}" style="font-size:21px;font-weight:700">Leaving G4 node</text>`;
+    s += `<rect x="${sx(tmin)}" y="${B}" width="${sx(vllmDrop) - sx(tmin)}" height="${NH}" rx="8" fill="${C.blue}"/>`;
+    s += `<rect x="${sx(vllmDrop)}" y="${B}" width="${sx(T.marked_s) - sx(vllmDrop)}" height="${NH}" fill="${mix("blue", 30)}"/>`;
+    s += `<rect x="${sx(T.marked_s)}" y="${B}" width="${sx(T.removed_s) - sx(T.marked_s)}" height="${NH}" fill="url(#tlh)"/>`;
+    s += `<text x="${sx(vllmDrop) + 14}" y="${B + 24}" style="font-size:18px;font-weight:700">vLLM gone · Workers removed · no actors left</text>`;
+    s += `<text x="${sx(T.removed_s) + 12}" y="${B + 24}" style="font-size:18px;font-weight:700">gone after ${mmss(T.removed_s)}</text>`;
+    for (let m = 0; m * 60 <= tmax; m += 2) s += `<text x="${sx(m * 60)}" y="292" text-anchor="middle" style="font-size:16px;${AX}">${m}</text>`;
+    s += `<text x="${(X0 + X1) / 2}" y="318" text-anchor="middle" style="font-size:17px;${AX}">minutes since vLLM scaled in (${T.t0} UTC)</text>`;
+    return s;
+  }
+
+  function cdfSVG() {
+    const D = SD.t5, X0 = 56, X1 = 505, Y0 = 12, Y1 = 206;
+    const all = D.g4.e2e.concat(D.n4d.e2e), lo = Math.floor(Math.min(...all) / 100) * 100, hi = Math.ceil((Math.max(D.g4.p99, D.n4d.p99) * 1.12) / 100) * 100;
+    const sx = (v) => X0 + ((Math.min(v, hi) - lo) / (hi - lo)) * (X1 - X0), sy = (q) => Y1 - q * (Y1 - Y0);
+    const off = all.filter((v) => v > hi);
+    let s = "";
+    for (let v = lo; v <= hi; v += 100) s += `<line x1="${sx(v)}" y1="${Y0}" x2="${sx(v)}" y2="${Y1}" stroke="${C.warm}" stroke-opacity=".35"/>` + (v % 200 ? "" : `<text x="${sx(v)}" y="${Y1 + 22}" text-anchor="middle" style="font-size:16px;${AX}">${v.toLocaleString("en-US")}</text>`);
+    [0, 0.5, 1].forEach((q) => { s += `<text x="${X0 - 8}" y="${sy(q) + 6}" text-anchor="end" style="font-size:16px;${AX}">${q * 100}%</text>`; });
+    s += `<text x="${(X0 + X1) / 2}" y="${Y1 + 46}" text-anchor="middle" style="font-size:16px;${AX}">resume + first request, ms</text>`;
+    s += `<line x1="${X0}" y1="${sy(0.99)}" x2="${X1}" y2="${sy(0.99)}" stroke="${C.ink}" stroke-opacity=".35" stroke-dasharray="4 5"/>`;
+    for (const [k, col, dash] of [["n4d", C.red, "9 6"], ["g4", C.green, ""]]) {
+      const xs = D[k].e2e, n = xs.length;
+      s += `<path d="${xs.map((v, i) => `${i ? "L" : "M"}${sx(v)},${sy(i / n)}L${sx(v)},${sy((i + 1) / n)}`).join("")}" fill="none" stroke="${col}" stroke-width="4" ${dash ? `stroke-dasharray="${dash}"` : ""}/>`;
+    }
+    const fx = (v) => Math.round(v).toLocaleString("en-US");
+    const LX = X1 - 220;
+    s += `<line x1="${LX}" y1="${sy(0.62)}" x2="${LX + 36}" y2="${sy(0.62)}" stroke="${C.green}" stroke-width="4"/><text x="${LX + 46}" y="${sy(0.62) + 6}" style="font-size:17px">G4 p99 ${fx(D.g4.p99)} ms</text>`;
+    s += `<line x1="${LX}" y1="${sy(0.46)}" x2="${LX + 36}" y2="${sy(0.46)}" stroke="${C.red}" stroke-width="4" stroke-dasharray="9 6"/><text x="${LX + 46}" y="${sy(0.46) + 6}" style="font-size:17px">N4D p99 ${fx(D.n4d.p99)} ms</text>`;
+    if (off.length) s += `<text x="${X1}" y="${sy(0.12)}" text-anchor="end" style="font-size:15px;${AX}">${off.length} of ${all.length} beyond ${hi.toLocaleString("en-US")} ms (max ${(Math.max(...off) / 1000).toFixed(1)} s)</text>`;
+    return s;
+  }
+
+  function busySVG() {
+    const B = SD.busy, R = B.rows, X0 = 40, X1 = 505, Y0 = 12, Y1 = 206, tmax = R[R.length - 1][0];
+    const ymax = Math.ceil((Math.max(...R.map((r) => r[1])) + 2) / 4) * 4;
+    const sx = (t) => X0 + (t / tmax) * (X1 - X0), sy = (v) => Y1 - (v / ymax) * (Y1 - Y0);
+    let s = `<defs><marker id="bah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${C.ink}"/></marker></defs>`;
+    s += `<rect x="${sx(0)}" y="${Y0}" width="${sx(B.load_off_s) - sx(0)}" height="${Y1 - Y0}" fill="${mix("yellow", 22)}"/>`;
+    s += `<text x="${sx(0) + 8}" y="${Y0 + 22}" style="font-size:16px;font-weight:700">30 awake</text>`;
+    for (let v = 0; v <= ymax; v += 8) s += `<line x1="${X0}" y1="${sy(v)}" x2="${X1}" y2="${sy(v)}" stroke="${C.warm}" stroke-opacity=".35"/><text x="${X0 - 8}" y="${sy(v) + 6}" text-anchor="end" style="font-size:16px;${AX}">${v}</text>`;
+    for (let m = 0; m * 60 <= tmax; m += 2) s += `<text x="${sx(m * 60)}" y="${Y1 + 22}" text-anchor="middle" style="font-size:16px;${AX}">${m}</text>`;
+    s += `<text x="${(X0 + X1) / 2}" y="${Y1 + 46}" text-anchor="middle" style="font-size:16px;${AX}">minutes since the burst started</text>`;
+    s += `<path d="${stepPath(R.map((r) => [r[0], r[2]]), sx, sy)}H${sx(tmax)}V${sy(0)}H${sx(0)}Z" fill="${C.red}" fill-opacity=".85"/>`;
+    s += `<path d="${stepPath(R.map((r) => [r[0], r[1]]), sx, sy)}H${sx(tmax)}" fill="none" stroke="${C.ink}" stroke-width="3.5"/>`;
+    const top = Math.max(...R.map((r) => r[1])), first = R[0][1];
+    s += `<text x="${sx(B.load_off_s) + 8}" y="${sy(top) - 8}" style="font-size:17px;font-weight:700">${first} → ${top}</text>`;
+    s += `<line x1="${sx(B.load_off_s)}" y1="${sy(top) + 26}" x2="${sx(B.down_s)}" y2="${sy(top) + 26}" stroke="${C.ink}" stroke-width="2" marker-end="url(#bah)" marker-start="url(#bah)"/>`;
+    s += `<text x="${(sx(B.load_off_s) + sx(B.down_s)) / 2}" y="${sy(top) + 50}" text-anchor="middle" style="font-size:16px;font-weight:700">back to ${first} in ${((B.down_s - B.load_off_s) / 60).toFixed(1)} min</text>`;
+    s += `<text x="${X1 - 6}" y="${sy(1.4)}" text-anchor="end" style="font-size:16px;font-weight:700">${B.lost} actors lost</text>`;
+    return s;
+  }
+
+  function coreMapSVG() {
+    const cs = SD.cpuset, owner = {};
+    const parse = (str) => str.split(",").flatMap((p) => { const [a, b] = p.split("-").map(Number); return b === undefined ? [a] : Array.from({ length: b - a + 1 }, (_, i) => a + i); });
+    cs.vllm.forEach((c) => parse(c).forEach((x) => (owner[x] = "v")));
+    cs.workers.forEach((c) => parse(c).forEach((x) => (owner[x] = "w")));
+    const X = 6, P = 21, TW = 18, TH = 30, Y = 14;
+    let s = `<defs><pattern id="cmst" width="8" height="7" patternUnits="userSpaceOnUse"><rect width="8" height="3" fill="${C.ground}" fill-opacity=".5"/></pattern></defs>`;
+    for (let c = 0; c < 24; c++) {
+      for (let t = 0; t < 2; t++) {
+        const o = owner[c + 24 * t], x = X + c * P, y = Y + t * (TH + 4);
+        s += `<rect x="${x}" y="${y}" width="${TW}" height="${TH}" rx="4" fill="${o === "v" ? C.blue : o === "w" ? C.green : C.warm}"/>` + (o === "w" ? `<rect x="${x}" y="${y}" width="${TW}" height="${TH}" rx="4" fill="url(#cmst)"/>` : "");
+      }
+      const o = owner[c];
+      if (o) s += `<text class="lt" x="${X + c * P + TW / 2}" y="${Y + TH + 2 + 6}" style="font-size:15px">${o === "v" ? "V" : "W"}</text>`;
+      if (cs.probe_worker === `${c},${c + 24}`) s += `<rect x="${X + c * P - 3}" y="${Y - 4}" width="${TW + 6}" height="${2 * TH + 12}" rx="6" fill="none" stroke="${C.ink}" stroke-width="3"/>`;
+    }
+    const ky = Y + 2 * TH + 34;
+    let kx = X;
+    for (const [col, st, t] of [[C.blue, 0, `vLLM ${cs.vllm[0]}`], [C.green, 1, "Worker, 1 core each"], [C.warm, 0, "shared"]]) {
+      s += `<rect x="${kx}" y="${ky - 15}" width="18" height="18" rx="4" fill="${col}"/>` + (st ? `<rect x="${kx}" y="${ky - 15}" width="18" height="18" rx="4" fill="url(#cmst)"/>` : "");
+      s += `<text x="${kx + 26}" y="${ky}" style="font-size:16px">${t}</text>`;
+      kx += 26 + t.length * 8.4 + 22;
+    }
+    s += `<text x="${X}" y="${ky + 40}" style="font-size:17px">All ${cs.probe_tasks} sandbox threads of the outlined</text>`;
+    s += `<text x="${X}" y="${ky + 64}" style="font-size:17px">Worker run on its cores ${cs.probe_worker}.</text>`;
+    s += `<text x="${X}" y="${ky + 96}" style="font-size:16px;${AX}">kubelet CPU manager state, G4 node</text>`;
+    return s;
+  }
+
+  function substrateResults() {
+    if (!SD) return;
+    const T = SD.t6, a = T.after, ev = T.evac, e0 = Math.min(...ev.map((e) => e[0])), e1 = Math.max(...ev.map((e) => e[0]));
+    const ka = $("#kpi-sub");
+    if (ka) ka.innerHTML =
+      cell(`${a.lost_actors} of ${a.actors_total}`, "actors lost") +
+      cell(`${ev.length} in ${(e1 - e0).toFixed(1)} s`, "suspended on SIGTERM") +
+      cell(mmss(T.removed_s), "until the node is gone") +
+      cell(`${SD.t5.ratio_p99.toFixed(2)}×`, "resume p99, G4 vs N4D") +
+      cell("0", "G4 nodes bought");
+    $("#tlsvg").innerHTML = timelineSVG();
+    $("#cdfsvg").innerHTML = cdfSVG();
+    $("#busysvg").innerHTML = busySVG();
+    $("#cmsvg").innerHTML = coreMapSVG();
+  }
+
   const players = {};
   function onSlide(i) {
     Object.values(players).forEach((p) => p.pause());
@@ -405,6 +627,7 @@
   $("#s2svg").innerHTML = hostSVG(H[0], 0) + hostSVG(H[1], 868);
   $("#s3svg").innerHTML = gkeSVG();
   $("#flowsvg").innerHTML = flowSVG();
+  if ($("#sbsvg")) $("#sbsvg").innerHTML = substrateSVG();
   $$(".slide[data-steps]").forEach(initSteps);
   slides.forEach((sl, i) => { const pg = $(".pg", sl); if (pg) pg.textContent = sl.dataset.appendix ? `Appendix · ${i + 1} / ${slides.length}` : `${i + 1} / ${slides.length}`; });
   inject();
@@ -425,6 +648,7 @@
     players.v6e = new window.DeckReplay.Player($("#rp-v6e"), "v6e", (D.replays || {}).v6e);
   }
   guidance();
+  substrateResults();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => html.classList.add("fonts-ready"));
   fromHash();
 })();

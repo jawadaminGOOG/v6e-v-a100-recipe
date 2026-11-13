@@ -7,6 +7,9 @@ Writes g4_colo/deck/keyframes/:
   slide-N.png                    every slide, final static frame (step slides at their last step, replays at their key frame)
   flow-step0..3.png              "How it works" diagram at each step (step 3 = final frame)
   hosts.png, components.png      "Inside the host" and appendix diagrams as single images
+  substrate.png                  Agent Substrate diagram (flow + core maps) as a single image
+  substrate-timeline.png         Agent Substrate: G4 scale-in timeline (slide 12)
+  substrate-resume-cdf.png, substrate-busy.png, substrate-coremap.png   slide 13 charts
   replay-<g4|v6e>-<scenario>.png each replay panel at its key frame (busiest moment)
 Charts are already single files in charts/ (SVG + PNG) from deck_charts.py.
 """
@@ -91,6 +94,15 @@ async def main():
             await shot("hosts", ".slide.is-active .s2-wrap")
             await js(f"location.hash='slide={nslides}'"); await asyncio.sleep(0.5)
             await shot("components", ".slide.is-active .s3-wrap")
+            sub = await js("[...document.querySelectorAll('.slide')].findIndex(s=>s.querySelector('#sbsvg'))+1")
+            if sub:
+                await js(f"location.hash='slide={sub}'"); await asyncio.sleep(0.5)
+                await shot("substrate", ".slide.is-active .sb-wrap")
+            for sel, name in (("#tlsvg", "substrate-timeline"), ("#cdfsvg", "substrate-resume-cdf"), ("#busysvg", "substrate-busy"), ("#cmsvg", "substrate-coremap")):
+                k = await js(f"[...document.querySelectorAll('.slide')].findIndex(s=>s.querySelector('{sel}'))+1")
+                if k:
+                    await js(f"location.hash='slide={k}'"); await asyncio.sleep(0.5)
+                    await shot(name, f".slide.is-active {sel}")
             # replays at their key frame, one per scenario
             for slide, acc in ((await idx("[data-replay=g4]"), "g4"), (await idx("[data-replay=v6e]"), "v6e")):
                 await js(f"location.hash='slide={slide}'"); await asyncio.sleep(0.5)

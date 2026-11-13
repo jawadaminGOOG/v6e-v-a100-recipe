@@ -1,6 +1,6 @@
 # Deck: Maximizing CPU Utilization on GCP GPU and TPU machines with GKE
 
-Jawad Amin and Karim Roukoz · AI Infra GTM at Google. Footer on every slide: the talk title and page number; names only on slide 1. Ten 1920×1080 slides and one appendix slide. Self-contained HTML that opens
+Jawad Amin and Karim Roukoz · AI Infra GTM at Google. Footer on every slide: the talk title and page number; names only on slide 1. Twelve 1920×1080 slides and one appendix slide. Self-contained HTML that opens
 offline.
 
 ## Open it
@@ -25,7 +25,9 @@ offline.
 | 8 | TPU v6e: serving stays fast with the node full (+ per-CPU heatmap) | none |
 | 9 | TPU v6e: GKE reacts when demand changes | replay player |
 | 10 | What it saves (avoided N4D spend and G4 vs AWS, side by side) | none |
-| 11 | Appendix: recipe components (detailed diagram) | none |
+| 11 | Agent Substrate on the idle cores (slide-4 GKE flow framing around replay-style core maps) | none |
+| 12 | A G4 node leaves; no agent is lost (Agent Substrate: 5 KPIs, scale-in timeline, core map, resume CDF, N4D burst, caveat) | none |
+| 13 | Appendix: recipe components (detailed diagram) | none |
 
 ## Replays
 
@@ -48,6 +50,7 @@ python3 g4_colo/deck/export_frames.py                  # keyframes/*.png for Goo
 | Native G4 sweep | `.agents/bench/sweep1_merged/native.{samples.jsonl,marks.json}`; scale-out/in lanes from the rerun `.agents/bench/g4_scale2/` with `DECK_G4_SCALE2=1` | slides 6–7 |
 | Native v6e sweep | `.agents/bench/v6e_sweep1/<name>.{samples.jsonl,marks.json,cpus.jsonl}`; used only with `DECK_V6E_FINAL=1` (placeholders until the sweep, incl. the scale-out/in rerun, is final) | slides 8–9 (same code as 6–7) |
 | Replays | `data/replays.json` (rebuilt from raw `/api/state` jsonl when `DECK_MOCK_REPLAYS=<dir>` is set) | slides 7, 9 |
+| Agent Substrate | `.agents/wave-4/logs/{t6_opt2_sync,native_smoke2,smoke_native_opt2}/`, `t2_native_cpuset_probe.txt` → `python3 g4_colo/deck/substrate_data.py` → `js/substrate_data.js` | slide 12 |
 | Pricing | `$DECK_PRICING_DIR` (default: the planner's `scratch/deck/pricing/`): `pricing.json`, `g4_vs_aws.csv`, `guidance.csv` | slide 10 |
 
 Every chart comes from real sweep or experiment data. A missing input becomes a chart marked **PLACEHOLDER**; no data
@@ -70,7 +73,9 @@ depends on hover, scroll or animation, and every chart or diagram exists as one 
 | 8 | Same as 6 | `charts/v6e_latency.png`, `charts/v6e_heatmap.png` |
 | 9 | Same as 7 | `charts/v6e_gpu.png`, `charts/v6e_spike.png`, `keyframes/replay-v6e-*.png` |
 | 10 | Two columns | Two headline text boxes; guidance table as a native table (`guidance.csv`, 3-yr CUD); `charts/what_you_get.png` (machine cards + waterfall); footnote text box |
-| 11 | Title only (appendix) | `keyframes/components.png`; controller-variant line as text |
+| 11 | Title only | Title, one-line lede (text); diagram `keyframes/substrate.png` (the six points are in the speaker notes) |
+| 12 | Title, takeaway line, 5 KPI boxes | `keyframes/substrate-timeline.png` (top); `substrate-coremap.png`, `substrate-resume-cdf.png`, `substrate-busy.png` (bottom row, panel titles as text); caveat as text |
+| 13 | Title only (appendix) | `keyframes/components.png`; controller-variant line as text |
 
 Speaker notes: copy each slide's notes from `index.html` (`<aside class="notes">`, also shown with `N`).
 
@@ -80,9 +85,10 @@ Speaker notes: copy each slide's notes from `index.html` (`<aside class="notes">
 |---|---|
 | `index.html` | The slides and their speaker notes |
 | `css/deck.css` | Layout and type: Caprasimo headings over Figtree body on an ivory ground, matching the decks on jawadamingoog.github.io |
-| `js/deck.js` | Engine (scaling, keys, hash, step slides), host strips, host diagrams, step-through flow, appendix diagram, KPIs, pricing table |
+| `js/deck.js` | Engine (scaling, keys, hash, step slides), host strips, host diagrams, step-through flow, Agent Substrate diagram and result charts, appendix diagram, KPIs, pricing table |
 | `js/replay.js` | Replay player: a light copy of `demo/static/app.js` `buildCoreMap` / `updateCoreMap`, with speed control and scrub |
 | `js/deck_data.js` | Generated: chart SVGs, KPIs, compressed replay frames, pricing |
+| `substrate_data.py`, `js/substrate_data.js` | Agent Substrate results data (slide 12), built from the raw native-run logs |
 | `bench_replay.py` | Replay playback benchmark in headless Chrome (rAF frame times, long tasks, scrub progress per speed) |
 | `deck_charts.py` | Generates every chart (SVG for HTML, PNG at 2× for Slides) in the palette |
 | `export_frames.py` | Static key frames for Slides (`keyframes/`) |
