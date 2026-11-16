@@ -5,3 +5,6 @@ __pycache__/
 
 # HTML deck copied into the demo image by g4_colo/demo/tools/sync_deck.sh
 g4_colo/demo/deck/
+
+# The walkthrough deck is internal: never publish it to the public repo (served only by the IAP-gated demo).
+g4_colo/deck/
