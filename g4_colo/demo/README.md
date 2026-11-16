@@ -55,6 +55,24 @@ Environment variables:
 | `DEMO_EVENTS_TTL_S` | `10` | how often cluster events are re-listed (scoped by a reason field selector, limit 200) |
 | `DEMO_ERROR_LOG_INTERVAL_S` | `30` | each distinct backend error is logged at WARNING at most this often (for unattended soaks in Cloud Logging) |
 
+## Walkthrough deck at /deck/
+
+The header's **Deck ↗** link opens the HTML walkthrough deck (g4_colo/deck: index.html plus css/js/fonts/charts/
+keyframes) at `/deck/` in a new tab. The deck is served read-only from, in order: `DEMO_DECK_DIR`, else `<demo>/deck`
+(the copy the container image carries), else `../deck` (local dev serves the live deck directory, nothing to copy;
+delete a stale `demo/deck` copy or set `DEMO_DECK_DIR` to be sure). `*.pptx`, `*.py`, `__pycache__` and dotfiles are
+never served (404), paths cannot leave the deck directory, `/deck` redirects to `/deck/` so the deck's relative asset
+paths resolve, and responses carry `Cache-Control: no-cache` like `/` and `/static`. With no deck directory `/deck/`
+returns a 404 that says so; the demo itself is unaffected.
+
+**Container image** (build context `g4_colo/demo`, Dockerfile `COPY . /app/`): copy the deck in first, then build:
+
+```bash
+cd g4_colo/demo
+tools/sync_deck.sh          # ../deck -> ./deck (git-ignored), same exclusions
+gcloud builds submit ...    # as before; .gcloudignore keeps deck/ in the upload
+```
+
 ## Two clusters
 
 One app shows both recipes behind a selector in the header (`?cluster=<id>` deep link; the choice is kept in
@@ -249,6 +267,7 @@ The JSON output contains the step log, labelled observations (`observe` steps) a
 
 | Method | Path | Body / notes |
 |---|---|---|
+| GET | `/deck/` | the walkthrough deck (static, read-only; see [Walkthrough deck](#walkthrough-deck-at-deck)) |
 | GET | `/api/clusters` | `{default, clusters: [{id, label, recipe, name, region, project, control, guard_available}]}` |
 | GET | `/api/state` | aggregated snapshot (adds `cluster_id`, `recipe`, `control`; native also `services.<svc>.backfill.waiting` and `services.<svc>.overflow.hpa`; substrate also `substrate` = `{installed, has_data, pools.<pool>.{desired, replicas, ready, pending, on_g4, on_n4d}, g4_pending, n4d_hpa, actors, notes, control_plane: {present, health, nodes[].pods[], components[], atelet, unscheduled}}` and `nodes[].atelet` on G4/N4D nodes): nodes + per-CPU owners, pods, vLLM/HPA, loadgen summary, services, controller, events, cost (incl. `cost.counterfactual`), `story` (hero numbers), `alerts` (classified backend errors), `demo` (accelerator state), `scenario` (incl. `wait` = current metric vs target + deadline) |
 | POST | `/api/gpu-rate` | `{"rate": 600}`: sends `POST /rate {"rate": 600}` to every Ready loadgen pod |
@@ -278,6 +297,7 @@ patches `deployments/scale`, and `/api/guard`, `/api/baseline` and scenario 4 re
 | `run_scenario.py` | headless CLI, writes the JSON observation log |
 | `static/` | `index.html`, `app.js`, `style.css` |
 | `tools/shot.py` | headless-Chrome (CDP) screenshot after N s, e.g. `python tools/shot.py http://localhost:8088/ /tmp/demo_mock.png 150` (needs `websockets`, included with `uvicorn[standard]`); add `WxH` (e.g. `1440x900`) to capture exactly that viewport and print the no-scroll check plus any clipped panel; `WxH@Z` emulates browser zoom (e.g. `1920x1080@1.35`) |
+| `tools/sync_deck.sh` | copies `../deck` into `./deck` for the container image (excludes `*.pptx`, `*.py`, `__pycache__`, dotfiles); run before building |
 | `tools/cutoff.py` | cut-off text audit: every visible element whose text does not fit (overflow hidden / ellipsis / line-clamp, text spilling past a clipping parent, SVG text outside its svg), e.g. `python tools/cutoff.py "http://localhost:8088/?cluster=substrate" 1366x768 [--open drawers|rail] [--shot out.png]`; exit 2 if anything is cut |
 
 ## How the data is read

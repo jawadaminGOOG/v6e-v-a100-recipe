@@ -2,3 +2,6 @@ cx_artifacts/
 g4_colo/results/**/*.requests.csv.gz
 g4_colo/.venv/
 __pycache__/
+
+# HTML deck copied into the demo image by g4_colo/demo/tools/sync_deck.sh
+g4_colo/demo/deck/

@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -31,9 +31,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("demo")
 
 # Demo release, shown in the page footer and in /api/state and /api/clusters.
-DEMO_VERSION = "0.7.2"
+DEMO_VERSION = "0.7.3"
 
 STATIC = Path(__file__).resolve().parent / "static"
+
+
+def _deck_dir() -> Path:
+    """The HTML deck served at /deck/: DEMO_DECK_DIR, else <demo>/deck (the copy tools/sync_deck.sh puts in the image),
+    else ../deck (local dev serves the live deck directory, no copy)."""
+    env = os.environ.get("DEMO_DECK_DIR")
+    if env:
+        return Path(env)
+    here = Path(__file__).resolve().parent
+    return here / "deck" if (here / "deck").is_dir() else here.parent / "deck"
+
+
+DECK_DIR = _deck_dir()
+# Build inputs and generated decks never leave the server: sources, the PPTX export, caches, dotfiles.
+DECK_EXCLUDE_SUFFIXES = {".pptx", ".py", ".pyc"}
 ERROR_LOG_INTERVAL_S = float(os.environ.get("DEMO_ERROR_LOG_INTERVAL_S", "30"))
 TIME_SCALE = float(os.environ.get("DEMO_SCENARIO_TIME_SCALE", "1"))
 
@@ -182,7 +197,7 @@ async def _revalidate_ui(request, call_next):
     # an unchanged file costs a 304 via its ETag.
     resp = await call_next(request)
     path = request.url.path
-    if path == "/" or path.startswith("/static/"):
+    if path == "/" or path.startswith("/static/") or path == "/deck" or path.startswith("/deck/"):
         resp.headers["Cache-Control"] = "no-cache"
     return resp
 
@@ -229,6 +244,31 @@ def _demo_info(ctx: ClusterCtx, st: dict) -> dict:
 @app.get("/")
 async def index():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/deck", include_in_schema=False)
+async def deck_root():
+    # Trailing slash, so the deck's relative asset paths (css/, js/, fonts/, charts/) resolve under /deck/.
+    return RedirectResponse("/deck/", status_code=307)
+
+
+@app.get("/deck/{path:path}", include_in_schema=False)
+async def deck(path: str = ""):
+    """The walkthrough deck (g4_colo/deck): index.html plus its css/js/fonts/charts/keyframes, read-only."""
+    root = DECK_DIR.resolve()
+    if not root.is_dir():
+        raise HTTPException(404, f"deck not available: {DECK_DIR} does not exist. For the container image run "
+                                 "tools/sync_deck.sh before building it, or set DEMO_DECK_DIR.")
+    target = (root / (path or "index.html")).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(404, "not found")
+    if target.is_dir():
+        target = target / "index.html"
+    rel = target.relative_to(root).parts
+    if (target.suffix.lower() in DECK_EXCLUDE_SUFFIXES or any(p == "__pycache__" or p.startswith(".") for p in rel)
+            or not target.is_file()):
+        raise HTTPException(404, "not found")
+    return FileResponse(target)
 
 
 @app.get("/api/clusters")

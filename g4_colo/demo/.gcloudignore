@@ -1,0 +1,7 @@
+# Upload set for `gcloud builds submit` from g4_colo/demo (replaces gcloud's default, which would read .gitignore).
+# deck/ is deliberately NOT ignored: tools/sync_deck.sh copies ../deck here for the image (it is git-ignored).
+.gcloudignore
+.git
+.gitignore
+__pycache__/
+.venv/

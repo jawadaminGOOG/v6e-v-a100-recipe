@@ -650,3 +650,5 @@ details.more { padding-top: 0.55rem; font-size: 0.82rem; }
 .sub-c.hero dd:not(.sm) { overflow: visible; line-height: 1.2; }
 .events li.empty, .scen-log li.empty { display: block; }
 .wp-v .al-sub { white-space: normal; overflow: visible; }
+.pill.deck-link { color: var(--ink); text-decoration: none; font-weight: 600; }
+.pill.deck-link:hover { border-color: var(--ink); }
