@@ -27,9 +27,9 @@ spec:
       stabilizationWindowSeconds: 45
       selectPolicy: Max
       policies: [{type: Percent, value: 100, periodSeconds: 15}, {type: Pods, value: 20, periodSeconds: 15}]
-    # Down: 300 s. Busy demand comes and goes in bursts, and a removed N4D worker that still hosts a RUNNING actor
-    # crashes that actor (T3/T4 findings), so N4D shrinks only after 5 min of lower demand.
+    # Down: 60 s (above the 45 s scrape window so brief dips do not flap, while letting N4D release
+    # quickly after a 2nd G4 node absorbs the Workers; actor-load -evacuate suspends actors synchronously).
     scaleDown:
       tolerance: 0
-      stabilizationWindowSeconds: 300
+      stabilizationWindowSeconds: 60
       policies: [{type: Percent, value: 100, periodSeconds: 15}]

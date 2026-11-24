@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("demo")
 
 # Demo release, shown in the page footer and in /api/state and /api/clusters.
-DEMO_VERSION = "0.7.3"
+DEMO_VERSION = "0.7.4"
 
 STATIC = Path(__file__).resolve().parent / "static"
 

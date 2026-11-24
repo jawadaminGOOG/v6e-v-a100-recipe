@@ -114,19 +114,25 @@ flowchart TB
 
 ### 3.4 Sizing: one number, two pools
 
-The user sets one number: **Total Workers** (the UI slider). The number is `maxReplicas` of the HPA `g4-workers`.
+The user sets one number: **Total Workers** (the UI slider). It is stored in annotation `colo.gke.io/total-workers`
+on `HPA substrate-exp/g4-workers` (`maxReplicas: 60`) as a minimum floor. Both HPAs use
+`needed = max(total_workers, ceil(busy Workers / 0.8))`, so busy headroom fills spare G4 cores first and only overflows
+to N4D when G4 is full.
 
 ```mermaid
 flowchart LR
-    T["Total Workers<br/>(slider)"] --> G["g4-workers HPA<br/>replicas = min(total, G4 share)"]
-    S["G4 share<br/>Workers that fit next to Ready vLLM"] --> G
-    G --> N["n4d-workers HPA<br/>replicas = max(total, busy / 0.8) - G4 Ready"]
+    T["Total Workers floor<br/>(HPA annotation)"] --> N["needed = max(floor, ceil(busy / 0.8))"]
+    B["Busy Workers<br/>(ate_workerpool_workers)"] --> N
+    N --> G["g4-workers HPA (max 60)<br/>replicas = min(G4 capacity, needed)"]
+    S["G4 capacity<br/>Workers that fit next to Ready vLLM"] --> G
+    N --> O["n4d-workers HPA<br/>replicas = max(0, needed - G4 Ready)"]
+    G --> O
 ```
 
 | Value | Formula | Source |
 |---|---|---|
-| G4 share | Sum, over G4 nodes with a Ready vLLM pod, of floor((allocatable CPU − CPU requests of pods that are not backfill and not Workers) / 2) | `manifests-option2/g4-share-metric.yaml` |
-| N4D Workers | max(total, ceil(busy Workers / 0.8)) − G4 Workers Ready | `manifests/autoscaling-metric.yaml` + `manifests-option2/overflow-metric-patch.json` |
+| G4 share | `min(G4 capacity next to Ready vLLM, max(total_workers, ceil(busy Workers / 0.8)))` | `manifests-option2/g4-share-metric.yaml` |
+| N4D Workers | `max(0, max(total_workers, ceil(busy Workers / 0.8)) − G4 Workers Ready)` | `manifests/autoscaling-metric.yaml` + `manifests-option2/overflow-metric-patch.json` |
 
 On this cluster the G4 share is 19 Workers for each G4 node.
 

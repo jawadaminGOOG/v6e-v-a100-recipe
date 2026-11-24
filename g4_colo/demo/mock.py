@@ -902,9 +902,11 @@ class SubstrateMockBackend(MockBackend):
             if w["node"] and w["node"] not in self.nodes:
                 w["node"], w["ready_at"] = None, None
         hosts = [self.nodes[v["node"]] for v in self.vllm if v["node"] in self.nodes and v["ready_at"] and now >= v["ready_at"]]
+        busy_need = math.ceil(self.actor_load["awake"] / 0.8) if self.actor_load["awake"] else 0
+        total_need = max(self.sub_total, busy_need)
         if self.g4_hpa_present:
-            # g4-workers HPA: G4 share = Workers that fit next to Ready vLLM, capped by Total Workers (maxReplicas).
-            self.sub_g4_desired = min(self.sub_total, self._g4_capacity(hosts))
+            # g4-workers HPA: G4 share = min(G4 spare capacity next to Ready vLLM, max(floor, ceil(busy / 0.8))).
+            self.sub_g4_desired = min(total_need, self._g4_capacity(hosts))
         else:
             self.sub_g4_desired = self.sub_total
         self._reconcile_pool("g4-workers", self.sub_g4_desired, hosts, now)
@@ -912,9 +914,8 @@ class SubstrateMockBackend(MockBackend):
         g4_cap = SUB_ACTOR_SLOTS * sum(1 for w in self.sub_workers if w["pool"] == "g4-workers" and w["node"])
         overflow = max(0, self.actor_load["awake"] - g4_cap)
         if self.g4_hpa_present:
-            # n4d-workers HPA (option 2): Total − G4 share, plus busy headroom for awake actors beyond Total.
-            rest = self.sub_total - self.sub_g4_desired
-            self.sub_n4d_desired = max(0, min(self.n4d_max, rest + max(0, self.actor_load["awake"] - self.sub_total)))
+            # n4d-workers HPA: max(floor, ceil(busy / 0.8)) - G4 share.
+            self.sub_n4d_desired = max(0, min(self.n4d_max, total_need - self.sub_g4_desired))
         else:
             # pre-option-2: Pending g4-workers + Workers needed for awake actors beyond G4 capacity (at least 1).
             self.sub_n4d_desired = max(1, min(SUB_N4D_MAX, pending_g4 + max(1, math.ceil(overflow / SUB_ACTOR_SLOTS))))
@@ -973,10 +974,11 @@ class SubstrateMockBackend(MockBackend):
                  "current": n4d_now, "desired": self.sub_n4d_desired,
                  "metric": str(sum(1 for w in self.sub_workers if w["pool"] == "g4-workers" and w["node"] is None))}]
         if self.g4_hpa_present:
-            hpas.append({"name": "g4-workers", "namespace": "substrate-exp", "target": "g4-workers", "min": 1,
-                         "max": self.sub_total, "desired": self.sub_g4_desired,
+            hpas.append({"name": "g4-workers", "namespace": "substrate-exp", "target": "g4-workers", "min": 0,
+                         "max": 60, "desired": self.sub_g4_desired,
                          "current": sum(1 for w in self.sub_workers if w["pool"] == "g4-workers"),
-                         "metric": str(self.sub_g4_desired)})
+                         "metric": str(self.sub_g4_desired),
+                         "annotations": {"colo.gke.io/total-workers": str(self.sub_total)}})
         # Awake actors land on Ready g4-workers first (one per Worker), the rest on Ready n4d-workers; what fits
         # nowhere stays suspended until a Worker frees up.
         by_node: dict[str, int] = {}
@@ -1061,16 +1063,14 @@ class SubstrateMockBackend(MockBackend):
 
     @property
     def n4d_max(self) -> int:
-        return max(SUB_N4D_MAX, self.sub_total)
+        return max(SUB_N4D_MAX, self.sub_total, math.ceil(self.actor_load["awake"] / 0.8) if self.actor_load["awake"] else 0)
 
     async def set_g4_workers(self, body: dict) -> dict:
         n = validate_worker_replicas(body)  # ValueError -> 400, as live
         if self.g4_hpa_present:
-            if n < 1:  # as live: an HPA cannot have maxReplicas below max(1, minReplicas)
-                raise ValueError(f"total must be at least 1 while HPA substrate-exp/g4-workers exists (its minReplicas); got {n}")
             self.sub_total = n
             self._step(time.time(), force=True)
-            return {"target": "hpa/substrate-exp/g4-workers", "mode": "hpa-max", "total": n}
+            return {"target": "hpa/substrate-exp/g4-workers", "mode": "hpa-annotation", "total": n}
         self.sub_total = n
         self._step(time.time(), force=True)
         return {"target": "workerpool/substrate-exp/g4-workers", "mode": "workerpool-replicas", "total": n}

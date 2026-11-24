@@ -1,4 +1,6 @@
-# exp-ksm, option 2: CPU requests and priority class of every pod (to size the G4 share), and the g4-workers HPA.
+# exp-ksm, option 2: CPU requests and priority class of every pod (to size the G4 share),
+# HPAs (including the colo.gke.io/total-workers floor annotation via custom-resource-state),
+# and CRDs (required by kube-state-metrics custom-resource-state discovery).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata: {name: substrate-exp-ksm-option2}
@@ -8,6 +10,9 @@ rules:
   verbs: [list, watch]
 - apiGroups: [autoscaling]
   resources: [horizontalpodautoscalers]
+  verbs: [list, watch]
+- apiGroups: [apiextensions.k8s.io]
+  resources: [customresourcedefinitions]
   verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -205,7 +205,7 @@ rules:
   resources: [workerpools/scale]
   resourceNames: [g4-workers]
   verbs: [get, patch, update]
-# Actor load controls: merge-patch of the actor-load generator's spec. Merge-patch of the actor-load generator's spec ConfigMap, by name.
+# Actor load controls: merge-patch of the actor-load generator's spec ConfigMap, by name.
 - apiGroups: [""]
   resources: [configmaps]
   resourceNames: [actor-load]

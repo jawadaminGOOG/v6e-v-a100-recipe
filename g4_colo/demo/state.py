@@ -558,14 +558,15 @@ def parse_actor_stats(raw: Any) -> tuple[dict | None, str | None]:
     return out, None
 
 
-# ---------------------------------------------------------------- actor-load spec (ConfigMap substrate-exp/actor-load)
+# ---------------------------------------------------------------- actor-load & worker-config specs (substrate-exp)
 ACTOR_LOAD_CM = "actor-load"
+TOTAL_WORKERS_ANNOTATION = "colo.gke.io/total-workers"
 ACTOR_LOAD_MAX_TOTAL = 200
 ACTOR_LOAD_HOLD_S = (1.0, 300.0)
 ACTOR_LOAD_DEFAULT_HOLD_S = 5.0
 
 
-G4_WORKERS_MAX = 60  # "Warm Worker pool" slider: WorkerPool substrate-exp/g4-workers replicas
+G4_WORKERS_MAX = 60  # "Total Workers" slider (0..60): floor across G4 + N4D
 
 
 def validate_worker_replicas(body: Any) -> int:
@@ -839,9 +840,10 @@ def build_substrate(raw_sub: Any, pods: list[dict], nodes_out: list[dict]) -> di
     def find_hpa(pool: str) -> dict | None:
         for h in hpas_raw if isinstance(hpas_raw, list) else []:
             if isinstance(h, dict) and pool in (h.get("target"), h.get("name")):
+                ann = h.get("annotations") if isinstance(h.get("annotations"), dict) else {}
                 return {"name": h.get("name"), "target": h.get("target"), "desired": h.get("desired"),
                         "current": h.get("current"), "min": h.get("min"), "max": h.get("max"),
-                        "metric": _num(h.get("metric"))}
+                        "metric": _num(h.get("metric")), "annotations": ann}
         return None
 
     hpas_raw = raw_sub.get("hpas")
@@ -871,6 +873,15 @@ def build_substrate(raw_sub: Any, pods: list[dict], nodes_out: list[dict]) -> di
                   "resume_p99_g4_ms": by_pool.get(SUBSTRATE_G4_POOL), "resume_p99_n4d_ms": by_pool.get(SUBSTRATE_N4D_POOL),
                   "age_s": _age_s(stats.get("updated"), time.time())}
     g4p = pools.get(SUBSTRATE_G4_POOL) or {}
+    ann_total = _int_or_none(((g4_hpa or {}).get("annotations") or {}).get(TOTAL_WORKERS_ANNOTATION))
+    if g4_hpa and ann_total is not None:
+        total_workers, total_src = ann_total, "annotation"
+    elif g4_hpa:
+        total_workers, total_src = g4_hpa.get("max"), "hpa"
+    elif pools.get(SUBSTRATE_G4_POOL):
+        total_workers, total_src = g4p.get("desired"), "workerpool"
+    else:
+        total_workers, total_src = None, None
     return {
         "installed": installed,
         "pools": pools,
@@ -879,9 +890,9 @@ def build_substrate(raw_sub: Any, pods: list[dict], nodes_out: list[dict]) -> di
         "workers_on_n4d": sum(p["on_n4d"] for p in pools.values()),
         "n4d_hpa": hpa,
         "g4_hpa": g4_hpa,
-        # Total Workers: the g4-workers HPA maxReplicas when it exists (option 2), else the WorkerPool replicas.
-        "total_workers": (g4_hpa or {}).get("max") if g4_hpa else (pools.get(SUBSTRATE_G4_POOL) or {}).get("desired"),
-        "total_workers_source": "hpa" if g4_hpa else ("workerpool" if pools.get(SUBSTRATE_G4_POOL) else None),
+        # Total Workers floor: HPA annotation colo.gke.io/total-workers when set, else g4-workers HPA maxReplicas, else WorkerPool replicas.
+        "total_workers": total_workers,
+        "total_workers_source": total_src,
         "actors": actors,
         "has_data": bool(pools or hpa or actors),
         "actor_load": parse_actor_load(raw_sub.get("actor_load")),

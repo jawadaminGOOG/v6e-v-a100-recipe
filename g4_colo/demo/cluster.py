@@ -16,8 +16,8 @@ from typing import Any
 
 from state import (ACTOR_LOAD_CM, ATE_SYSTEM_NS, CLUSTER, GUARD_NA_REASON, NAMESPACES, NATIVE_DEMAND_DEPLOYMENT, PODCERT_NS,
                    SUBSTRATE_G4_POOL, SUBSTRATE_GROUP, SUBSTRATE_NS, SUBSTRATE_STATS_CM, SUBSTRATE_STATS_NS,
-                   SUBSTRATE_VERSION, WATCH_REASONS, UnsupportedOnRecipe, actor_load_patch, build_state,
-                   parse_actor_load, parse_cpu, parse_mem_gib, validate_worker_replicas)
+                   SUBSTRATE_VERSION, TOTAL_WORKERS_ANNOTATION, WATCH_REASONS, UnsupportedOnRecipe, actor_load_patch,
+                   build_state, parse_actor_load, parse_cpu, parse_mem_gib, validate_worker_replicas)
 
 log = logging.getLogger("demo.cluster")
 
@@ -319,6 +319,7 @@ class LiveBackend:
                     "current": h.status.current_replicas,
                     "desired": h.status.desired_replicas,
                     "metric": str(metric) if metric is not None else None,
+                    "annotations": dict(getattr(h.metadata, "annotations", None) or {}),
                 }
             )
         return out
@@ -615,8 +616,10 @@ class SubstrateLiveBackend(LiveBackend):
         return {"spec": spec, "patch": patch}
 
     def _set_g4_workers_sync(self, total: int) -> dict:
-        """Option 2: patch HPA substrate-exp/g4-workers spec.maxReplicas = total (merge patch). Only when that HPA is
-        absent, fall back to the WorkerPool g4-workers scale subresource (the pre-option-2 behaviour)."""
+        """Total Workers floor: when HPA substrate-exp/g4-workers carries the colo.gke.io/total-workers annotation,
+        merge-patch that annotation (keeping spec.maxReplicas at its fixed ceiling of 60 so busy headroom can fill
+        spare G4 cores first). On older clusters without that annotation, fall back to patching HPA spec.maxReplicas,
+        then WorkerPool g4-workers scale when the HPA is absent."""
         try:
             h = self.autoscaling.read_namespaced_horizontal_pod_autoscaler(SUBSTRATE_G4_POOL, SUBSTRATE_NS,
                                                                            _request_timeout=LIST_TIMEOUT_S)
@@ -625,18 +628,24 @@ class SubstrateLiveBackend(LiveBackend):
                 raise
             h = None
         if h is not None:
-            floor = max(1, int(getattr(h.spec, "min_replicas", None) or 1))
-            if total < floor:  # an HPA cannot have maxReplicas below max(1, minReplicas)
-                raise ValueError(f"total must be at least {floor} while HPA {SUBSTRATE_NS}/{SUBSTRATE_G4_POOL} exists "
-                                 f"(its minReplicas); got {total}")
-            body = {"spec": {"maxReplicas": int(total)}}
+            ann = getattr(getattr(h, "metadata", None), "annotations", None) or {}
+            if TOTAL_WORKERS_ANNOTATION in ann:
+                body = {"metadata": {"annotations": {TOTAL_WORKERS_ANNOTATION: str(int(total))}}}
+                mode = "hpa-annotation"
+            else:
+                floor = max(1, int(getattr(h.spec, "min_replicas", None) or 1))
+                if total < floor:  # an HPA cannot have maxReplicas below max(1, minReplicas)
+                    raise ValueError(f"total must be at least {floor} while HPA {SUBSTRATE_NS}/{SUBSTRATE_G4_POOL} exists "
+                                     f"(its minReplicas); got {total}")
+                body = {"spec": {"maxReplicas": int(total)}}
+                mode = "hpa-max"
             try:
                 self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(
                     SUBSTRATE_G4_POOL, SUBSTRATE_NS, body, _content_type="application/merge-patch+json",
                     _request_timeout=LIST_TIMEOUT_S)
             except TypeError:  # older kubernetes clients without _content_type: their dict patch is equivalent here
                 self.autoscaling.patch_namespaced_horizontal_pod_autoscaler(SUBSTRATE_G4_POOL, SUBSTRATE_NS, body)
-            return {"target": f"hpa/{SUBSTRATE_NS}/{SUBSTRATE_G4_POOL}", "mode": "hpa-max", "total": int(total)}
+            return {"target": f"hpa/{SUBSTRATE_NS}/{SUBSTRATE_G4_POOL}", "mode": mode, "total": int(total)}
         try:
             self.custom.patch_namespaced_custom_object_scale(
                 SUBSTRATE_GROUP, SUBSTRATE_VERSION, SUBSTRATE_NS, "workerpools", SUBSTRATE_G4_POOL,

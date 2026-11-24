@@ -525,12 +525,12 @@ def test_mock_actor_load_one_awake_actor_per_worker_g4_first():
     asyncio.run(b.set_actor_load({"total": 10, "awake": 1}))
     s, a, pools = settle()
     assert (a["actors_running"], a["running_g4"], a["running_n4d"], a["actors_total"]) == (1, 1, 0, 10)  # G4 first
-    asyncio.run(b.set_actor_load({"total": 40, "awake": 16}))
+    asyncio.run(b.set_actor_load({"total": 40, "awake": 30}))
     s, a, pools = settle()
     g4_ready, n4d_ready = pools["g4-workers"]["pods_ready"], pools["n4d-workers"]["pods_ready"]
-    assert a["running_g4"] == min(16, g4_ready) and a["running_n4d"] == min(16 - a["running_g4"], n4d_ready)
-    assert a["actors_running"] == a["running_g4"] + a["running_n4d"] < 16  # the rest wait (UI: ▲)
-    assert a["actors_running"] <= g4_ready + n4d_ready and a["target_awake"] == 16
+    assert a["running_g4"] == min(30, g4_ready) and a["running_n4d"] == min(30 - a["running_g4"], n4d_ready)
+    assert a["actors_running"] == a["running_g4"] + a["running_n4d"] < 30  # the rest wait (UI: ▲)
+    assert a["actors_running"] <= g4_ready + n4d_ready and a["target_awake"] == 30
     assert s["n4d_hpa"]["desired"] > 2  # overflow beyond G4 asks for more n4d-workers
     asyncio.run(b.set_actor_load({"awake": 0}))  # suspended actors take no Worker
     s, a, pools = settle()
@@ -701,11 +701,27 @@ def test_validate_worker_total_ok():
     assert validate_worker_replicas({"replicas": 7}) == 7  # old spelling still accepted
 
 
-def _hpa_obj(min_replicas=1):
-    return types.SimpleNamespace(spec=types.SimpleNamespace(min_replicas=min_replicas))
+def _hpa_obj(min_replicas=1, annotations=None):
+    return types.SimpleNamespace(metadata=types.SimpleNamespace(annotations=annotations),
+                                 spec=types.SimpleNamespace(min_replicas=min_replicas))
 
 
-def test_live_total_workers_patches_hpa_max_when_hpa_exists():
+def test_live_total_workers_patches_hpa_annotation_when_present():
+    patched, scaled = [], []
+    lb = _bare_live()
+    lb.autoscaling.read_namespaced_horizontal_pod_autoscaler = lambda name, ns, **k: _hpa_obj(
+        0, {"colo.gke.io/total-workers": "15"})
+    lb.autoscaling.patch_namespaced_horizontal_pod_autoscaler = lambda name, ns, body, **k: patched.append(
+        (name, ns, body, k.get("_content_type")))
+    lb.custom.patch_namespaced_custom_object_scale = lambda *a, **k: scaled.append(a)
+    res = asyncio.run(lb.set_g4_workers({"total": 0}))
+    assert patched == [("g4-workers", "substrate-exp",
+                        {"metadata": {"annotations": {"colo.gke.io/total-workers": "0"}}},
+                        "application/merge-patch+json")]
+    assert scaled == [] and res == {"target": "hpa/substrate-exp/g4-workers", "mode": "hpa-annotation", "total": 0}
+
+
+def test_live_total_workers_patches_hpa_max_when_annotation_absent():
     patched, scaled = [], []
     lb = _bare_live()
     lb.autoscaling.read_namespaced_horizontal_pod_autoscaler = lambda name, ns, **k: _hpa_obj(1)
@@ -752,11 +768,18 @@ def test_live_total_workers_falls_back_to_workerpool_scale_without_hpa():
 
 
 def test_state_total_workers_and_shares():
-    sub = _sub_ok(hpas=[{"name": "g4-workers", "namespace": "substrate-exp", "target": "g4-workers", "min": 1, "max": 24,
-                         "current": 2, "desired": 2, "metric": "2"},
+    sub = _sub_ok(hpas=[{"name": "g4-workers", "namespace": "substrate-exp", "target": "g4-workers", "min": 0, "max": 60,
+                         "current": 19, "desired": 19, "metric": "19",
+                         "annotations": {"colo.gke.io/total-workers": "15"}},
                         {"name": "n4d-workers", "namespace": "substrate-exp", "target": "n4d-workers", "min": 0, "max": 24,
-                         "current": 1, "desired": 22, "metric": "0"}])
+                         "current": 21, "desired": 21, "metric": "21"}])
     s = build_state(_raw(sub), recipe="substrate")["substrate"]
+    assert s["total_workers"] == 15 and s["total_workers_source"] == "annotation" and s["g4_hpa"]["max"] == 60
+    sub_hpa = _sub_ok(hpas=[{"name": "g4-workers", "namespace": "substrate-exp", "target": "g4-workers", "min": 1, "max": 24,
+                             "current": 2, "desired": 2, "metric": "2"},
+                            {"name": "n4d-workers", "namespace": "substrate-exp", "target": "n4d-workers", "min": 0, "max": 24,
+                             "current": 1, "desired": 22, "metric": "0"}])
+    s = build_state(_raw(sub_hpa), recipe="substrate")["substrate"]
     assert s["total_workers"] == 24 and s["total_workers_source"] == "hpa" and s["g4_hpa"]["max"] == 24
     assert s["n4d_hpa"]["desired"] == 22  # the n4d HPA is still found next to the g4 one
     s = build_state(_raw(_sub_ok()), recipe="substrate")["substrate"]  # no g4-workers HPA: WorkerPool replicas
@@ -793,14 +816,16 @@ def test_mock_option2_g4_share_then_n4d(cls):
     b = cls()
 
     def settle():
-        for w in b.sub_workers:
-            if w["ready_at"]:
-                w["ready_at"] = 0
-        return asyncio.run(b.state())["substrate"]
+        for _ in range(2):
+            for w in b.sub_workers:
+                if w["ready_at"]:
+                    w["ready_at"] = 0
+            s = asyncio.run(b.state())["substrate"]
+        return s
 
-    assert asyncio.run(b.set_g4_workers({"total": 4}))["mode"] == "hpa-max"
+    assert asyncio.run(b.set_g4_workers({"total": 4}))["mode"] == "hpa-annotation"
     s = settle()
-    assert s["total_workers"] == 4 and s["g4_hpa"]["max"] == 4
+    assert s["total_workers"] == 4 and s["total_workers_source"] == "annotation" and s["g4_hpa"]["max"] == 60
     assert s["pools"]["g4-workers"]["desired"] == 4 and s["pools"]["g4-workers"]["on_g4"] == 4  # outrank backfill
     assert s["pools"]["n4d-workers"]["desired"] == 0
     asyncio.run(b.set_g4_workers({"total": 20}))
@@ -809,8 +834,42 @@ def test_mock_option2_g4_share_then_n4d(cls):
     assert 0 < g4_share < 20 and s["pools"]["g4-workers"]["pending"] == 0  # G4 share = what fits next to vLLM
     assert s["pools"]["n4d-workers"]["desired"] == 20 - g4_share  # the rest on N4D (no awake overflow at 2 awake)
     assert s["cpu_budget"]["max_replicas"]["sandbox"] < 20  # Workers squeeze the CPU-backfill sliders
-    with pytest.raises(ValueError, match="at least 1"):
-        asyncio.run(b.set_g4_workers({"total": 0}))
+    assert asyncio.run(b.set_g4_workers({"total": 0}))["total"] == 0
+
+
+@pytest.mark.parametrize("cls", [mock.SubstrateMockBackend, mock.SubstrateNativeMockBackend])
+def test_mock_busy_headroom_claims_second_g4_node_above_floor(cls):
+    """Regression: Total Workers floor=15 with awake=32 must expand g4-workers onto a 2nd G4 node and shrink N4D."""
+    b = cls()
+
+    def settle():
+        t = b.t
+        for _ in range(8):
+            t += 30
+            for n in b.nodes.values():
+                n["ready_at"] = min(n["ready_at"], t - 1)
+            for v in b.vllm:
+                if v["ready_at"] is not None:
+                    v["ready_at"] = min(v["ready_at"], t - 1)
+            for w in b.sub_workers:
+                if w["ready_at"] is not None:
+                    w["ready_at"] = 0
+            b._step(t, force=True)
+        return asyncio.run(b.state())["substrate"]
+
+    asyncio.run(b.set_g4_workers({"total": 15}))
+    asyncio.run(b.set_actor_load({"total": 100, "awake": 32}))
+    s1 = settle()
+    g4_one = s1["pools"]["g4-workers"]["desired"]
+    assert g4_one > 15  # busy headroom fills all spare cores on G4 #1 even when floor=15
+    assert s1["pools"]["n4d-workers"]["desired"] == 40 - g4_one
+    # Scale up vLLM -> 2nd G4 node arrives: g4-workers must grow onto G4 #2 and n4d-workers must shrink.
+    asyncio.run(b.set_gpu_rate(1200))
+    s2 = settle()
+    g4_two = s2["pools"]["g4-workers"]["desired"]
+    assert g4_two >= g4_one * 2 and g4_two > 30
+    assert s2["pools"]["n4d-workers"]["desired"] == max(0, 40 - g4_two)
+    assert s2["actors"]["running_g4"] == 32 and s2["actors"]["running_n4d"] == 0
 
 
 def test_mock_without_g4_hpa_falls_back_to_workerpool(monkeypatch):
@@ -827,11 +886,11 @@ def test_mock_without_g4_hpa_falls_back_to_workerpool(monkeypatch):
 
 def test_api_substrate_workers(sub_client):
     r = sub_client.post("/api/substrate/workers?cluster=substrate", json={"total": 5})
-    assert r.status_code == 200 and r.json()["total"] == 5 and r.json()["mode"] == "hpa-max"
+    assert r.status_code == 200 and r.json()["total"] == 5 and r.json()["mode"] == "hpa-annotation"
     st = sub_client.get("/api/state?cluster=substrate").json()["substrate"]
-    assert st["total_workers"] == 5 and st["g4_hpa"]["max"] == 5
+    assert st["total_workers"] == 5 and st["total_workers_source"] == "annotation" and st["g4_hpa"]["max"] == 60
     assert sub_client.post("/api/substrate/workers?cluster=substrate", json={"total": 61}).status_code == 400
-    assert sub_client.post("/api/substrate/workers?cluster=substrate", json={"total": 0}).status_code == 400
+    assert sub_client.post("/api/substrate/workers?cluster=substrate", json={"total": 0}).status_code == 200
     assert sub_client.post("/api/substrate/workers?cluster=controller", json={"total": 1}).status_code == 409
 
 

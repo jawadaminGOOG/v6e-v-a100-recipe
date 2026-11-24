@@ -648,16 +648,20 @@ const sendWorkers = debounce(() => { const n = +$("wp-n").value; act("/api/subst
 $("wp-n").addEventListener("input", (e) => { touched.workers = Date.now(); $("wp-n-out").textContent = e.target.value; sendWorkers(); });
 function renderWorkerPool(sub) {
   const pools = sub.pools || {}, g4 = pools["g4-workers"], n4 = pools["n4d-workers"], hpa = sub.g4_hpa;
-  const on = sub.total_workers_source != null;
+  const srcKind = sub.total_workers_source;
+  const on = srcKind != null;
   $("wp-n").disabled = !on;
-  $("wp-n").min = String(hpa ? Math.max(1, hpa.min ?? 1) : 0);  // an HPA cannot have maxReplicas below max(1, min)
+  $("wp-n").min = String(srcKind === "hpa" && hpa ? Math.max(1, hpa.min ?? 1) : 0);
   if (on && !fresh("workers")) { $("wp-n").value = sub.total_workers ?? 0; $("wp-n-out").textContent = sub.total_workers ?? 0; }
-  if (!on) { $("wp-v").innerHTML = '<span class="nd" title="Neither HPA nor WorkerPool substrate-exp/g4-workers found">Not connected: no g4-workers HPA or WorkerPool.</span>'; return; }
+  if (!on) { $("wp-v").innerHTML = '<span class="nd" title="Neither worker-config, HPA nor WorkerPool substrate-exp/g4-workers found">Not connected: no g4-workers config, HPA or WorkerPool.</span>'; return; }
   const gs = g4 ? g4.desired ?? 0 : 0, ns = n4 ? n4.desired ?? 0 : 0, k = (g4 ? g4.pending ?? 0 : 0) + (n4 ? n4.pending ?? 0 : 0);
-  const src = hpa ? `HPA ${hpa.name} maxReplicas (G4 share = Workers that fit next to Ready vLLM)` : "WorkerPool g4-workers replicas (no g4-workers HPA)";
+  const src = srcKind === "annotation"
+    ? `HPA ${hpa.name} annotation colo.gke.io/total-workers (minimum floor; busy headroom fills spare G4 cores first, then N4D)`
+    : hpa ? `HPA ${hpa.name} maxReplicas (G4 share = Workers that fit next to Ready vLLM)`
+    : "WorkerPool g4-workers replicas (no g4-workers HPA)";
   // Two short lines that never ellipsize at 1366 px: the shares, then pending + the headroom note (detail in tooltips).
   $("wp-v").innerHTML = `<span class="wp-line" title="${esc(`Total Workers = ${src}. G4 share = WorkerPool g4-workers spec.replicas; N4D share = n4d-workers spec.replicas.`)}">Share: G4 <b>${num(gs)}</b> · N4D <b>${num(ns)}</b></span>` +
-    `<span class="al-sub" title="Pending = Workers with no node yet. The n4d-workers HPA adds N4D Workers above Total Workers when awake actors need them (busy headroom)."><b class="${k ? "warn" : ""}">${num(k)}</b> pending · N4D adds more if busy</span>`;
+    `<span class="al-sub" title="Pending = Workers with no node yet. When awake actors exceed the floor, spare G4 cores fill first and only the excess overflows to N4D."><b class="${k ? "warn" : ""}">${num(k)}</b> pending · G4 first, N4D overflow</span>`;
 }
 
 function renderActorLoad(sub) {
